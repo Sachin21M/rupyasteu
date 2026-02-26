@@ -33,48 +33,16 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Start App"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start Backend"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start Frontend"
+args = "Start application"
 
 [[workflows.workflow]]
-name = "Start App"
+name = "Start application"
 author = "agent"
-mode = "parallel"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "echo 'App starting...' && sleep infinity"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow]]
-name = "Start Backend"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm run server:dev"
-waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
 
-[[workflows.workflow]]
-name = "Start Frontend"
-author = "agent"
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run expo:dev"
-waitForPort = 8081
-
-[workflows.workflow.metadata]
-outputType = "console"
+args = "npm run server:dev & npm run expo:dev </dev/null & wait"
+waitForPort = 5000

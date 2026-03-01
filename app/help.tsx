@@ -64,22 +64,13 @@ export default function HelpScreen() {
         <View style={styles.contactCard}>
           <Text style={styles.contactTitle}>Need help?</Text>
           <Text style={styles.contactSub}>Reach out to us anytime</Text>
-          <View style={styles.contactActions}>
-            <Pressable
-              style={styles.contactBtn}
-              onPress={() => Linking.openURL("mailto:support@rupyasetu.com")}
-            >
-              <Ionicons name="mail-outline" size={20} color="#fff" />
-              <Text style={styles.contactBtnText}>Email Us</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.contactBtn, styles.contactBtnSecondary]}
-              onPress={() => Linking.openURL("tel:+919999999999")}
-            >
-              <Ionicons name="call-outline" size={20} color={Colors.primary} />
-              <Text style={[styles.contactBtnText, { color: Colors.primary }]}>Call Us</Text>
-            </Pressable>
-          </View>
+          <Pressable
+            style={styles.contactBtn}
+            onPress={() => Linking.openURL("mailto:support@rupyasetu.com")}
+          >
+            <Ionicons name="mail-outline" size={20} color="#fff" />
+            <Text style={styles.contactBtnText}>Email Us</Text>
+          </Pressable>
         </View>
 
         <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
@@ -149,10 +140,6 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.8)",
     marginBottom: 12,
   },
-  contactActions: {
-    flexDirection: "row",
-    gap: 12,
-  },
   contactBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -161,9 +148,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 12,
-  },
-  contactBtnSecondary: {
-    backgroundColor: "#fff",
+    marginTop: 6,
   },
   contactBtnText: {
     fontSize: 14,

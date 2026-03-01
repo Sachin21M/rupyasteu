@@ -1,5 +1,10 @@
 import type { User, OtpRecord, Transaction, Operator, Plan } from "../shared/schema";
 import { randomUUID } from "crypto";
+import pg from "pg";
+
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -73,44 +78,102 @@ const PLANS: Plan[] = [
   { id: "airteldth-2", operatorId: "airteldth", amount: 410, validity: "1 Month", description: "Premium HD", category: "Popular" },
 ];
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User> = new Map();
-  private otps: Map<string, OtpRecord> = new Map();
-  private transactions: Map<string, Transaction> = new Map();
+function rowToUser(row: any): User {
+  return {
+    id: row.id,
+    phone: row.phone,
+    name: row.name || undefined,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+  };
+}
 
+function rowToTransaction(row: any): Transaction {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    operatorId: row.operator_id,
+    operatorName: row.operator_name,
+    subscriberNumber: row.subscriber_number,
+    amount: parseFloat(row.amount),
+    planId: row.plan_id || undefined,
+    planDescription: row.plan_description || undefined,
+    paymentStatus: row.payment_status,
+    rechargeStatus: row.recharge_status,
+    utr: row.utr || undefined,
+    paysprintRefId: row.paysprint_ref_id || undefined,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  };
+}
+
+export class PgStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const result = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+    return result.rows[0] ? rowToUser(result.rows[0]) : undefined;
   }
 
   async getUserByPhone(phone: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find((u) => u.phone === phone);
+    const result = await pool.query("SELECT * FROM users WHERE phone = $1", [phone]);
+    return result.rows[0] ? rowToUser(result.rows[0]) : undefined;
   }
 
   async createUser(phone: string): Promise<User> {
     const id = randomUUID();
-    const user: User = { id, phone, createdAt: new Date().toISOString() };
-    this.users.set(id, user);
-    return user;
+    const result = await pool.query(
+      "INSERT INTO users (id, phone) VALUES ($1, $2) RETURNING *",
+      [id, phone]
+    );
+    return rowToUser(result.rows[0]);
   }
 
   async updateUser(id: string, data: Partial<User>): Promise<User | undefined> {
-    const user = this.users.get(id);
-    if (!user) return undefined;
-    const updated = { ...user, ...data };
-    this.users.set(id, updated);
-    return updated;
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (data.name !== undefined) {
+      fields.push(`name = $${idx++}`);
+      values.push(data.name);
+    }
+    if (data.phone !== undefined) {
+      fields.push(`phone = $${idx++}`);
+      values.push(data.phone);
+    }
+
+    if (fields.length === 0) return this.getUser(id);
+
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE users SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToUser(result.rows[0]) : undefined;
   }
 
   async saveOtp(record: OtpRecord): Promise<void> {
-    this.otps.set(record.phone, record);
+    await pool.query(
+      `INSERT INTO otp_records (phone, otp, expires_at, attempts)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (phone) DO UPDATE SET otp = $2, expires_at = $3, attempts = $4`,
+      [record.phone, record.otp, record.expiresAt, record.attempts]
+    );
   }
 
   async getOtp(phone: string): Promise<OtpRecord | undefined> {
-    return this.otps.get(phone);
+    const result = await pool.query("SELECT * FROM otp_records WHERE phone = $1", [phone]);
+    if (!result.rows[0]) return undefined;
+    const row = result.rows[0];
+    return {
+      phone: row.phone,
+      otp: row.otp,
+      expiresAt: parseInt(row.expires_at),
+      attempts: row.attempts,
+    };
   }
 
   async deleteOtp(phone: string): Promise<void> {
-    this.otps.delete(phone);
+    await pool.query("DELETE FROM otp_records WHERE phone = $1", [phone]);
   }
 
   async getOperators(type?: string): Promise<Operator[]> {
@@ -130,38 +193,57 @@ export class MemStorage implements IStorage {
 
   async createTransaction(data: Omit<Transaction, "id" | "createdAt" | "updatedAt">): Promise<Transaction> {
     const id = randomUUID();
-    const now = new Date().toISOString();
-    const tx: Transaction = { ...data, id, createdAt: now, updatedAt: now };
-    this.transactions.set(id, tx);
-    return tx;
+    const result = await pool.query(
+      `INSERT INTO transactions (id, user_id, type, operator_id, operator_name, subscriber_number, amount, plan_id, plan_description, payment_status, recharge_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING *`,
+      [id, data.userId, data.type, data.operatorId, data.operatorName, data.subscriberNumber, data.amount, data.planId || null, data.planDescription || null, data.paymentStatus, data.rechargeStatus]
+    );
+    return rowToTransaction(result.rows[0]);
   }
 
   async getTransaction(id: string): Promise<Transaction | undefined> {
-    return this.transactions.get(id);
+    const result = await pool.query("SELECT * FROM transactions WHERE id = $1", [id]);
+    return result.rows[0] ? rowToTransaction(result.rows[0]) : undefined;
   }
 
   async updateTransaction(id: string, data: Partial<Transaction>): Promise<Transaction | undefined> {
-    const tx = this.transactions.get(id);
-    if (!tx) return undefined;
-    const updated = { ...tx, ...data, updatedAt: new Date().toISOString() };
-    this.transactions.set(id, updated);
-    return updated;
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (data.paymentStatus !== undefined) { fields.push(`payment_status = $${idx++}`); values.push(data.paymentStatus); }
+    if (data.rechargeStatus !== undefined) { fields.push(`recharge_status = $${idx++}`); values.push(data.rechargeStatus); }
+    if (data.utr !== undefined) { fields.push(`utr = $${idx++}`); values.push(data.utr); }
+    if (data.paysprintRefId !== undefined) { fields.push(`paysprint_ref_id = $${idx++}`); values.push(data.paysprintRefId); }
+
+    if (fields.length === 0) return this.getTransaction(id);
+
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE transactions SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToTransaction(result.rows[0]) : undefined;
   }
 
   async getUserTransactions(userId: string): Promise<Transaction[]> {
-    return Array.from(this.transactions.values())
-      .filter((t) => t.userId === userId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const result = await pool.query(
+      "SELECT * FROM transactions WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    return result.rows.map(rowToTransaction);
   }
 
   async getAllTransactions(): Promise<Transaction[]> {
-    return Array.from(this.transactions.values())
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const result = await pool.query("SELECT * FROM transactions ORDER BY created_at DESC");
+    return result.rows.map(rowToTransaction);
   }
 
   async findTransactionByUtr(utr: string): Promise<Transaction | undefined> {
-    return Array.from(this.transactions.values()).find((t) => t.utr === utr);
+    const result = await pool.query("SELECT * FROM transactions WHERE utr = $1", [utr]);
+    return result.rows[0] ? rowToTransaction(result.rows[0]) : undefined;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new PgStorage();

@@ -6,7 +6,7 @@ RupyaSetu is a fintech mobile recharge application built with Expo (React Native
 ## Tech Stack
 - **Frontend**: React Native (Expo Router) + TypeScript
 - **Backend**: Node.js + Express
-- **Storage**: In-memory (MemStorage) - ready to migrate to MongoDB
+- **Storage**: PostgreSQL (via pg pool) — persistent across restarts/deployments
 - **Auth**: OTP-based login with JWT tokens (SMS Alert API for OTP delivery)
 - **SMS Gateway**: SMS Alert (smsalert.co.in) — env vars: SMSALERT_API_KEY, SMSALERT_SENDER, SMSALERT_TEMPLATE
 - **Font**: Inter (Google Fonts)
@@ -44,7 +44,7 @@ lib/
 server/
   index.ts              # Express server
   routes.ts             # API routes (auth, recharge, transactions)
-  storage.ts            # In-memory data storage
+  storage.ts            # PostgreSQL data storage
   controllers/          # (reserved for future)
   services/
     paysprint.ts        # Paysprint API integration (UAT simulation)

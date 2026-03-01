@@ -10,6 +10,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByPhone(phone: string): Promise<User | undefined>;
   createUser(phone: string): Promise<User>;
+  createUserWithId(id: string, phone: string): Promise<User>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
 
   saveOtp(record: OtpRecord): Promise<void>;
@@ -125,6 +126,16 @@ export class PgStorage implements IStorage {
       [id, phone]
     );
     return rowToUser(result.rows[0]);
+  }
+
+  async createUserWithId(id: string, phone: string): Promise<User> {
+    const result = await pool.query(
+      "INSERT INTO users (id, phone) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING RETURNING *",
+      [id, phone]
+    );
+    if (result.rows[0]) return rowToUser(result.rows[0]);
+    const existing = await this.getUser(id);
+    return existing!;
   }
 
   async updateUser(id: string, data: Partial<User>): Promise<User | undefined> {

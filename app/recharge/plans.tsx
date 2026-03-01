@@ -7,6 +7,7 @@ import {
   FlatList,
   Platform,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -128,6 +129,7 @@ export default function PlansScreen() {
       }
     } catch (error) {
       console.error("Failed to initiate recharge:", error);
+      Alert.alert("Error", "Failed to initiate recharge. Please try again.");
     } finally {
       setInitiating(false);
     }

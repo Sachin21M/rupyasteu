@@ -175,6 +175,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: amountValidation.error });
       }
 
+      let user = await storage.getUser((req as any).userId);
+      if (!user) {
+        user = await storage.createUserWithId((req as any).userId, (req as any).phone);
+      }
+
       const operator = await storage.getOperator(operatorId);
       if (!operator) {
         return res.status(400).json({ error: "Invalid operator" });

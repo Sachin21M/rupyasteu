@@ -8,7 +8,6 @@ import {
   FlatList,
   Dimensions,
   Animated,
-  Image,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -141,11 +140,7 @@ export default function OnboardingScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.topBar, { paddingTop: topPadding + 12 }]}>
-        <Image
-          source={require("@/assets/images/rupyasetu-login-logo.png")}
-          style={styles.topLogo}
-          resizeMode="contain"
-        />
+        <View />
         <Pressable onPress={goToLogin} hitSlop={12}>
           <Text style={styles.skipText}>Skip</Text>
         </Pressable>
@@ -213,10 +208,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 24,
     paddingBottom: 8,
-  },
-  topLogo: {
-    width: 100,
-    height: 36,
   },
   skipText: {
     fontSize: 15,

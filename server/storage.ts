@@ -4,7 +4,12 @@ import pg from "pg";
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
 });
+
+pool.query("SELECT 1")
+  .then(() => console.log("Connected to PostgreSQL successfully"))
+  .catch((err) => console.error("PostgreSQL connection error:", err.message));
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;

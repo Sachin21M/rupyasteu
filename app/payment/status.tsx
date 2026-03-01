@@ -193,7 +193,7 @@ export default function StatusScreen() {
 const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20,
+    paddingBottom: 60,
   },
   container: {
     flex: 1,

@@ -69,8 +69,19 @@ export default function OtpScreen() {
     try {
       const result = await verifyOtp(phone!, code);
       if (result.success) {
-        await login(result.token, result.user);
-        router.replace("/(tabs)");
+        if (!result.user.name) {
+          router.replace({
+            pathname: "/name",
+            params: {
+              token: result.token,
+              userId: result.user.id,
+              phone: result.user.phone,
+            },
+          });
+        } else {
+          await login(result.token, result.user);
+          router.replace("/(tabs)");
+        }
       } else {
         setError(result.error || "Invalid OTP");
         setOtp(["", "", "", "", "", ""]);

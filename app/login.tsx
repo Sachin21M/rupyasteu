@@ -9,12 +9,12 @@ import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  ScrollView,
   Animated,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import Colors from "@/constants/colors";
 import { sendOtp } from "@/lib/api";
 
 export default function LoginScreen() {
@@ -26,36 +26,20 @@ export default function LoginScreen() {
   const inputRef = useRef<TextInput>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-  const sheetAnim = useRef(new Animated.Value(50)).current;
-  const sheetOpacity = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
 
   useEffect(() => {
-    Animated.sequence([
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.parallel([
-        Animated.timing(sheetOpacity, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-        Animated.timing(sheetAnim, {
-          toValue: 0,
-          duration: 400,
-          useNativeDriver: true,
-        }),
-      ]),
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, []);
 
@@ -88,103 +72,106 @@ export default function LoginScreen() {
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <View style={[styles.topSection, { paddingTop: topPadding + 48 }]}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: topPadding, paddingBottom: bottomPadding || 20 },
+          ]}
+          bounces={false}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <Animated.View
             style={[
-              styles.logoContainer,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }],
-              },
+              styles.content,
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
             ]}
           >
-            <Image
-              source={require("@/assets/images/rupyasetu-logo.jpeg")}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-            <Text style={styles.tagline}>Recharge. Relax. Done.</Text>
-          </Animated.View>
-        </View>
-
-        <Animated.View
-          style={[
-            styles.bottomSheet,
-            {
-              paddingBottom: bottomPadding > 0 ? bottomPadding : 24,
-              opacity: sheetOpacity,
-              transform: [{ translateY: sheetAnim }],
-            },
-          ]}
-        >
-          <Text style={styles.heading}>Welcome to RupyaSetu</Text>
-          <Text style={styles.subtext}>
-            Enter your mobile number to continue
-          </Text>
-
-          <View
-            style={[
-              styles.inputContainer,
-              focused && styles.inputContainerFocused,
-              error ? styles.inputContainerError : null,
-            ]}
-          >
-            <View style={styles.countryCode}>
-              <Text style={styles.countryCodeText}>+91</Text>
+            <View style={styles.logoArea}>
+              <Image
+                source={require("@/assets/images/rupyasetu-logo.jpeg")}
+                style={styles.logo}
+                resizeMode="contain"
+              />
             </View>
-            <View style={styles.inputDivider} />
-            <TextInput
-              ref={inputRef}
-              style={styles.phoneInput}
-              placeholder="Enter mobile number"
-              placeholderTextColor="#9CA3AF"
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={phone}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              onChangeText={(text) => {
-                setPhone(text.replace(/[^0-9]/g, ""));
-                setError("");
-              }}
-              testID="phone-input"
-            />
-            {phone.length > 0 && (
-              <Pressable
-                onPress={() => setPhone("")}
-                style={styles.clearButton}
-                hitSlop={8}
+
+            <View style={styles.formArea}>
+              <Text style={styles.heading}>Get started</Text>
+              <Text style={styles.subtext}>
+                Enter your mobile number to continue
+              </Text>
+
+              <Text style={styles.inputLabel}>Mobile Number</Text>
+              <View
+                style={[
+                  styles.inputRow,
+                  focused && styles.inputRowFocused,
+                  !!error && styles.inputRowError,
+                ]}
               >
-                <Ionicons name="close-circle" size={18} color="#9CA3AF" />
+                <Text style={styles.prefix}>+91</Text>
+                <View style={styles.divider} />
+                <TextInput
+                  ref={inputRef}
+                  style={styles.input}
+                  placeholder="10-digit mobile number"
+                  placeholderTextColor="#B0B7C3"
+                  keyboardType="phone-pad"
+                  maxLength={10}
+                  value={phone}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  onChangeText={(text) => {
+                    setPhone(text.replace(/[^0-9]/g, ""));
+                    setError("");
+                  }}
+                  testID="phone-input"
+                />
+                {phone.length > 0 && (
+                  <Pressable
+                    onPress={() => setPhone("")}
+                    hitSlop={10}
+                    style={styles.clearBtn}
+                  >
+                    <Ionicons name="close-circle" size={18} color="#B0B7C3" />
+                  </Pressable>
+                )}
+              </View>
+
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.cta,
+                  !isValidPhone && styles.ctaDisabled,
+                  pressed &&
+                    isValidPhone && {
+                      opacity: 0.88,
+                      transform: [{ scale: 0.988 }],
+                    },
+                ]}
+                onPress={handleSendOtp}
+                disabled={!isValidPhone || loading}
+                testID="send-otp-button"
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.ctaText}>Continue</Text>
+                )}
               </Pressable>
-            )}
-          </View>
+            </View>
 
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.primaryButton,
-              !isValidPhone && styles.primaryButtonDisabled,
-              pressed && isValidPhone && { opacity: 0.85, transform: [{ scale: 0.985 }] },
-            ]}
-            onPress={handleSendOtp}
-            disabled={!isValidPhone || loading}
-            testID="send-otp-button"
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Get OTP</Text>
-            )}
-          </Pressable>
-
-          <Text style={styles.legalText}>
-            By continuing, you agree to our{" "}
-            <Text style={styles.legalLink}>Terms</Text> &{" "}
-            <Text style={styles.legalLink}>Privacy Policy</Text>
-          </Text>
-        </Animated.View>
+            <View style={styles.footer}>
+              <Ionicons name="lock-closed" size={13} color="#9CA3AF" />
+              <Text style={styles.legalText}>
+                By continuing, you agree to our{" "}
+                <Text style={styles.legalLink}>Terms</Text> &{" "}
+                <Text style={styles.legalLink}>Privacy Policy</Text>
+              </Text>
+            </View>
+          </Animated.View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -196,95 +183,89 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
-    backgroundColor: "#F0F0F0",
-  },
-  topSection: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingBottom: 32,
-  },
-  logoContainer: {
-    alignItems: "center",
-  },
-  logoImage: {
-    width: 200,
-    height: 200,
-    marginBottom: 12,
-    borderRadius: 8,
-  },
-  tagline: {
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-    color: "#4A4A4A",
-    letterSpacing: 0.3,
-  },
-  bottomSheet: {
     backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 8,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 28,
+    justifyContent: "space-between",
+  },
+  logoArea: {
+    alignItems: "center",
+    paddingTop: 48,
+    paddingBottom: 16,
+  },
+  logo: {
+    width: 160,
+    height: 160,
+  },
+  formArea: {
+    paddingTop: 8,
   },
   heading: {
-    fontSize: 24,
-    fontFamily: "Inter_600SemiBold",
+    fontSize: 28,
+    fontFamily: "Inter_700Bold",
     color: "#1A1D26",
-    marginBottom: 6,
+    marginBottom: 8,
   },
   subtext: {
-    fontSize: 14,
+    fontSize: 15,
     fontFamily: "Inter_400Regular",
     color: "#6B7280",
-    marginBottom: 28,
+    marginBottom: 32,
+    lineHeight: 22,
   },
-  inputContainer: {
+  inputLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#6B7280",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  inputRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
+    height: 56,
+    borderWidth: 1.5,
     borderColor: "#E5E7EB",
-    borderRadius: 14,
-    backgroundColor: "#FAFAFA",
-    marginBottom: 20,
-    height: 54,
+    borderRadius: 12,
+    backgroundColor: "#F9FAFB",
+    marginBottom: 24,
   },
-  inputContainerFocused: {
+  inputRowFocused: {
     borderColor: "#2E9E5B",
     backgroundColor: "#FFFFFF",
   },
-  inputContainerError: {
+  inputRowError: {
     borderColor: "#EF4444",
   },
-  countryCode: {
-    paddingHorizontal: 16,
-    justifyContent: "center",
-    height: "100%",
-  },
-  countryCodeText: {
+  prefix: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
     color: "#1A1D26",
+    paddingLeft: 16,
+    paddingRight: 12,
   },
-  inputDivider: {
+  divider: {
     width: 1,
     height: 24,
     backgroundColor: "#E5E7EB",
+    marginRight: 12,
   },
-  phoneInput: {
+  input: {
     flex: 1,
-    paddingHorizontal: 14,
-    fontSize: 16,
+    fontSize: 17,
     fontFamily: "Inter_500Medium",
     color: "#1A1D26",
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     height: "100%",
+    paddingRight: 8,
   },
-  clearButton: {
+  clearBtn: {
     paddingHorizontal: 14,
     justifyContent: "center",
     height: "100%",
@@ -293,32 +274,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     color: "#EF4444",
-    marginTop: -12,
-    marginBottom: 12,
+    marginTop: -16,
+    marginBottom: 16,
   },
-  primaryButton: {
-    height: 54,
+  cta: {
+    height: 56,
     backgroundColor: "#2E9E5B",
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 20,
-    shadowColor: "#2E9E5B",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
   },
-  primaryButtonDisabled: {
+  ctaDisabled: {
     opacity: 0.4,
-    shadowOpacity: 0,
-    elevation: 0,
   },
-  primaryButtonText: {
-    fontSize: 16,
+  ctaText: {
+    fontSize: 17,
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
+  },
+  footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingTop: 32,
+    paddingBottom: 8,
   },
   legalText: {
     fontSize: 12,
@@ -326,7 +307,6 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
     textAlign: "center",
     lineHeight: 18,
-    paddingBottom: 4,
   },
   legalLink: {
     color: "#2E9E5B",

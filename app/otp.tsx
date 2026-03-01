@@ -19,7 +19,7 @@ export default function OtpScreen() {
   const insets = useSafeAreaInsets();
   const { phone } = useLocalSearchParams<{ phone: string }>();
   const { login } = useAuth();
-  const [otp, setOtp] = useState(["", "", "", ""]);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendTimer, setResendTimer] = useState(30);
@@ -42,7 +42,7 @@ export default function OtpScreen() {
     setOtp(newOtp);
     setError("");
 
-    if (text && index < 3) {
+    if (text && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
 
@@ -62,7 +62,7 @@ export default function OtpScreen() {
 
   async function handleVerify(otpCode?: string) {
     const code = otpCode || otp.join("");
-    if (code.length !== 4) return;
+    if (code.length !== 6) return;
 
     setLoading(true);
     setError("");
@@ -73,7 +73,7 @@ export default function OtpScreen() {
         router.replace("/(tabs)");
       } else {
         setError(result.error || "Invalid OTP");
-        setOtp(["", "", "", ""]);
+        setOtp(["", "", "", "", "", ""]);
         inputRefs.current[0]?.focus();
       }
     } catch (err) {
@@ -88,7 +88,7 @@ export default function OtpScreen() {
     try {
       await sendOtp(phone!);
       setResendTimer(30);
-      setOtp(["", "", "", ""]);
+      setOtp(["", "", "", "", "", ""]);
       inputRefs.current[0]?.focus();
     } catch {
       setError("Failed to resend OTP");
@@ -112,7 +112,7 @@ export default function OtpScreen() {
 
         <Text style={styles.title}>Verify OTP</Text>
         <Text style={styles.subtitle}>
-          Enter the 4-digit code sent to{"\n"}
+          Enter the 6-digit code sent to{"\n"}
           <Text style={styles.phoneText}>+91 {phone}</Text>
         </Text>
 
@@ -145,10 +145,6 @@ export default function OtpScreen() {
             <Text style={styles.loadingText}>Verifying...</Text>
           </View>
         )}
-
-        <Text style={styles.hintText}>
-          Use OTP: 1234 (UAT Mode)
-        </Text>
 
         <Pressable
           onPress={handleResend}
@@ -220,13 +216,13 @@ const styles = StyleSheet.create({
   },
   otpContainer: {
     flexDirection: "row",
-    gap: 16,
+    gap: 10,
     marginBottom: 16,
   },
   otpInput: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
+    width: 46,
+    height: 52,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: Colors.border,
     textAlign: "center",
@@ -259,18 +255,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_500Medium",
     color: Colors.textSecondary,
-  },
-  hintText: {
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    color: Colors.primary,
-    backgroundColor: Colors.primaryLighter,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginTop: 8,
-    marginBottom: 16,
-    overflow: "hidden",
   },
   resendButton: {
     paddingVertical: 12,

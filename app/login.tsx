@@ -89,7 +89,7 @@ export default function LoginScreen() {
           >
             <View style={styles.logoArea}>
               <Image
-                source={require("@/assets/images/rupyasetu-logo.jpeg")}
+                source={require("@/assets/images/rupyasetu-login-logo.png")}
                 style={styles.logo}
                 resizeMode="contain"
               />
@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   logo: {
-    width: 160,
+    width: 200,
     height: 160,
   },
   formArea: {

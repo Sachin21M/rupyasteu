@@ -204,7 +204,7 @@ export default function LoginScreen() {
                 By continuing, you agree to our{" "}
                 <Text style={styles.legalLink}>Terms of Service</Text>
                 {"  "}
-                <Text style={styles.legalLink}>Privacy Policy</Text>
+                <Text style={styles.legalLink}>Privacy Policy</Text>.
               </Text>
             </View>
           </Animated.View>

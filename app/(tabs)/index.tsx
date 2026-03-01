@@ -150,7 +150,7 @@ export default function HomeScreen() {
           icon={<Ionicons name="help-circle" size={24} color="#8B5CF6" />}
           label="Support"
           color="#8B5CF6"
-          onPress={() => {}}
+          onPress={() => router.push("/help")}
         />
       </View>
 

@@ -46,3 +46,10 @@ outputType = "webview"
 task = "shell.exec"
 args = "npm run server:dev & CI=1 npm run expo:dev & wait"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+SMSALERT_API_KEY = "69a061673e4ae"
+SMSALERT_SENDER = "ESTORE"
+SMSALERT_TEMPLATE = "Your verification code for mobile verification is #{OTP}"

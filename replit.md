@@ -7,7 +7,8 @@ RupyaSetu is a fintech mobile recharge application built with Expo (React Native
 - **Frontend**: React Native (Expo Router) + TypeScript
 - **Backend**: Node.js + Express
 - **Storage**: In-memory (MemStorage) - ready to migrate to MongoDB
-- **Auth**: OTP-based login with JWT tokens
+- **Auth**: OTP-based login with JWT tokens (SMS Alert API for OTP delivery)
+- **SMS Gateway**: SMS Alert (smsalert.co.in) — env vars: SMSALERT_API_KEY, SMSALERT_SENDER, SMSALERT_TEMPLATE
 - **Font**: Inter (Google Fonts)
 - **Primary Color**: #2E9E5B
 - **Logo**: `assets/images/rupyasetu-logo.jpeg` (unmodified user-provided JPEG, light grey background)

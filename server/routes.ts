@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
 import { generateJwtToken, verifyJwtToken } from "./utils/encryption";
 import { validateUtr, validatePhone, validateAmount } from "./utils/validators";
+import { generateOtp, sendSmsAlert } from "./utils/smsalert";
 import { initiateRecharge, checkRechargeStatus } from "./services/paysprint";
 import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema } from "../shared/schema";
 
@@ -34,7 +35,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { phone } = parsed.data;
-      const otp = "1234";
+      const otp = generateOtp();
+
+      const smsResult = await sendSmsAlert(phone, otp);
+      if (!smsResult.success) {
+        return res.status(500).json({ error: smsResult.error || "Failed to send OTP" });
+      }
 
       await storage.saveOtp({
         phone,
@@ -43,7 +49,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         attempts: 0,
       });
 
-      console.log(`[OTP] Sent OTP ${otp} to ${phone} (UAT mode - always 1234)`);
+      console.log(`[OTP] OTP sent to ${phone} via SMS Alert`);
 
       res.json({ success: true, message: "OTP sent successfully" });
     } catch (error) {

@@ -14,7 +14,8 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { sendOtp } from "@/lib/api";
 
 export default function LoginScreen() {
@@ -26,7 +27,7 @@ export default function LoginScreen() {
   const inputRef = useRef<TextInput>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -73,98 +74,134 @@ export default function LoginScreen() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingTop: topPadding, paddingBottom: bottomPadding || 16 },
-          ]}
+          contentContainerStyle={styles.scrollContent}
           bounces={false}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <LinearGradient
+            colors={["#2E9E5B", "#25844C", "#1E6F44"]}
+            style={[styles.heroBanner, { paddingTop: topPadding + 16 }]}
+          >
+            <View style={styles.heroContent}>
+              <Image
+                source={require("@/assets/images/rupyasetu-login-logo.png")}
+                style={styles.heroLogo}
+                resizeMode="contain"
+              />
+
+              <View style={styles.heroIcons}>
+                <View style={styles.heroIconBubble}>
+                  <Ionicons name="phone-portrait-outline" size={28} color="#FFFFFF" />
+                </View>
+                <View style={[styles.heroIconBubble, styles.heroIconLarge]}>
+                  <Ionicons name="flash" size={36} color="#FFFFFF" />
+                </View>
+                <View style={styles.heroIconBubble}>
+                  <MaterialCommunityIcons name="television" size={28} color="#FFFFFF" />
+                </View>
+              </View>
+
+              <View style={styles.heroBadges}>
+                <View style={styles.heroBadge}>
+                  <Ionicons name="checkmark-circle" size={14} color="#FFFFFF" />
+                  <Text style={styles.heroBadgeText}>Instant</Text>
+                </View>
+                <View style={styles.heroBadge}>
+                  <Ionicons name="shield-checkmark" size={14} color="#FFFFFF" />
+                  <Text style={styles.heroBadgeText}>Secure</Text>
+                </View>
+                <View style={styles.heroBadge}>
+                  <Ionicons name="wallet-outline" size={14} color="#FFFFFF" />
+                  <Text style={styles.heroBadgeText}>Best Plans</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.heroCurve} />
+          </LinearGradient>
+
           <Animated.View
             style={[
-              styles.content,
+              styles.formSection,
               { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
             ]}
           >
-            <View style={styles.logoArea}>
-              <Image
-                source={require("@/assets/images/rupyasetu-login-logo.png")}
-                style={styles.logo}
-                resizeMode="contain"
+            <Text style={styles.headline}>
+              India's Fastest Recharge{"\n"}Platform
+            </Text>
+
+            <Text style={styles.subLabel}>Log in or sign up</Text>
+
+            <View
+              style={[
+                styles.inputRow,
+                focused && styles.inputRowFocused,
+                !!error && styles.inputRowError,
+              ]}
+            >
+              <Text style={styles.flag}>🇮🇳</Text>
+              <Text style={styles.prefix}>+91</Text>
+              <TextInput
+                ref={inputRef}
+                style={styles.input}
+                placeholder="Enter Phone Number"
+                placeholderTextColor="#B0B7C3"
+                keyboardType="phone-pad"
+                maxLength={10}
+                value={phone}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                onChangeText={(text) => {
+                  setPhone(text.replace(/[^0-9]/g, ""));
+                  setError("");
+                }}
+                testID="phone-input"
               />
+              {phone.length > 0 && (
+                <Pressable
+                  onPress={() => setPhone("")}
+                  hitSlop={10}
+                  style={styles.clearBtn}
+                >
+                  <Ionicons name="close-circle" size={18} color="#B0B7C3" />
+                </Pressable>
+              )}
             </View>
 
-            <View style={styles.formArea}>
-              <Text style={styles.heading}>Get started</Text>
-              <Text style={styles.subtext}>
-                Enter your mobile number to continue
-              </Text>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-              <View
-                style={[
-                  styles.inputRow,
-                  focused && styles.inputRowFocused,
-                  !!error && styles.inputRowError,
-                ]}
-              >
-                <Text style={styles.prefix}>+91</Text>
-                <View style={styles.divider} />
-                <TextInput
-                  ref={inputRef}
-                  style={styles.input}
-                  placeholder="10-digit mobile number"
-                  placeholderTextColor="#B0B7C3"
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                  value={phone}
-                  onFocus={() => setFocused(true)}
-                  onBlur={() => setFocused(false)}
-                  onChangeText={(text) => {
-                    setPhone(text.replace(/[^0-9]/g, ""));
-                    setError("");
-                  }}
-                  testID="phone-input"
-                />
-                {phone.length > 0 && (
-                  <Pressable
-                    onPress={() => setPhone("")}
-                    hitSlop={10}
-                    style={styles.clearBtn}
-                  >
-                    <Ionicons name="close-circle" size={18} color="#B0B7C3" />
-                  </Pressable>
-                )}
-              </View>
+            <Pressable
+              style={({ pressed }) => [
+                styles.cta,
+                !isValidPhone && styles.ctaDisabled,
+                pressed &&
+                  isValidPhone && {
+                    opacity: 0.88,
+                    transform: [{ scale: 0.988 }],
+                  },
+              ]}
+              onPress={handleSendOtp}
+              disabled={!isValidPhone || loading}
+              testID="send-otp-button"
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.ctaText}>Continue</Text>
+              )}
+            </Pressable>
 
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.cta,
-                  !isValidPhone && styles.ctaDisabled,
-                  pressed &&
-                    isValidPhone && {
-                      opacity: 0.88,
-                      transform: [{ scale: 0.988 }],
-                    },
-                ]}
-                onPress={handleSendOtp}
-                disabled={!isValidPhone || loading}
-                testID="send-otp-button"
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.ctaText}>Continue</Text>
-                )}
-              </Pressable>
-            </View>
-
-            <View style={styles.footer}>
+            <View
+              style={[
+                styles.footer,
+                { paddingBottom: bottomPadding || 16 },
+              ]}
+            >
               <Text style={styles.legalText}>
                 By continuing, you agree to our{" "}
-                <Text style={styles.legalLink}>Terms</Text> &{" "}
+                <Text style={styles.legalLink}>Terms of Service</Text>
+                {"  "}
                 <Text style={styles.legalLink}>Privacy Policy</Text>
               </Text>
             </View>
@@ -186,32 +223,81 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
+  heroBanner: {
+    paddingBottom: 0,
+    position: "relative",
+    overflow: "hidden",
   },
-  logoArea: {
+  heroContent: {
     alignItems: "center",
-    paddingTop: 32,
-    paddingBottom: 28,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+    gap: 20,
   },
-  logo: {
-    width: 180,
-    height: 144,
+  heroLogo: {
+    width: 120,
+    height: 48,
+    tintColor: "#FFFFFF",
   },
-  formArea: {},
-  heading: {
-    fontSize: 28,
+  heroIcons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    marginTop: 4,
+  },
+  heroIconBubble: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroIconLarge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(255,255,255,0.25)",
+  },
+  heroBadges: {
+    flexDirection: "row",
+    gap: 16,
+  },
+  heroBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  heroBadgeText: {
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    color: "rgba(255,255,255,0.9)",
+  },
+  heroCurve: {
+    height: 28,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: -1,
+  },
+  formSection: {
+    paddingHorizontal: 24,
+    backgroundColor: "#FFFFFF",
+  },
+  headline: {
+    fontSize: 26,
     fontFamily: "Inter_700Bold",
     color: "#1A1D26",
-    marginBottom: 6,
-  },
-  subtext: {
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 34,
     marginBottom: 24,
-    lineHeight: 22,
+  },
+  subLabel: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+    color: "#6B7280",
+    textAlign: "center",
+    marginBottom: 16,
   },
   inputRow: {
     flexDirection: "row",
@@ -222,6 +308,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#F9FAFB",
     marginBottom: 16,
+    paddingHorizontal: 14,
   },
   inputRowFocused: {
     borderColor: "#2E9E5B",
@@ -230,30 +317,26 @@ const styles = StyleSheet.create({
   inputRowError: {
     borderColor: "#EF4444",
   },
+  flag: {
+    fontSize: 20,
+    marginRight: 8,
+  },
   prefix: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
     color: "#1A1D26",
-    paddingLeft: 16,
-    paddingRight: 12,
-  },
-  divider: {
-    width: 1,
-    height: 24,
-    backgroundColor: "#E5E7EB",
-    marginRight: 12,
+    marginRight: 10,
   },
   input: {
     flex: 1,
     fontSize: 16,
     fontFamily: "Inter_500Medium",
     color: "#1A1D26",
-    letterSpacing: 1,
+    letterSpacing: 0.5,
     height: "100%",
-    paddingRight: 8,
   },
   clearBtn: {
-    paddingHorizontal: 14,
+    paddingLeft: 10,
     justifyContent: "center",
     height: "100%",
   },
@@ -270,6 +353,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: 20,
   },
   ctaDisabled: {
     opacity: 0.4,
@@ -281,10 +365,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   footer: {
-    marginTop: "auto",
-    paddingTop: 20,
-    paddingBottom: 8,
     alignItems: "center",
+    paddingTop: 4,
   },
   legalText: {
     fontSize: 11,

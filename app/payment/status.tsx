@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   statusLabel: {
-    fontSize: 22,
+    fontSize: 20,
     fontFamily: "Inter_700Bold",
   },
   statusSublabel: {

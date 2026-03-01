@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
-  Image,
   KeyboardAvoidingView,
   ScrollView,
   Animated,
@@ -81,40 +80,35 @@ export default function LoginScreen() {
         >
           <LinearGradient
             colors={["#2E9E5B", "#25844C", "#1E6F44"]}
-            style={[styles.heroBanner, { paddingTop: topPadding + 16 }]}
+            style={[styles.heroBanner, { paddingTop: topPadding + 24 }]}
           >
-            <View style={styles.heroContent}>
-              <Image
-                source={require("@/assets/images/rupyasetu-login-logo.png")}
-                style={styles.heroLogo}
-                resizeMode="contain"
-              />
+            <Text style={styles.heroTitle}>RupyaSetu</Text>
+            <Text style={styles.heroSubtitle}>Recharge. Relax. Done.</Text>
 
-              <View style={styles.heroIcons}>
-                <View style={styles.heroIconBubble}>
-                  <Ionicons name="phone-portrait-outline" size={28} color="#FFFFFF" />
+            <View style={styles.serviceCards}>
+              <View style={styles.serviceCard}>
+                <View style={styles.serviceIconWrap}>
+                  <Ionicons name="phone-portrait" size={22} color="#2E9E5B" />
                 </View>
-                <View style={[styles.heroIconBubble, styles.heroIconLarge]}>
-                  <Ionicons name="flash" size={36} color="#FFFFFF" />
-                </View>
-                <View style={styles.heroIconBubble}>
-                  <MaterialCommunityIcons name="television" size={28} color="#FFFFFF" />
-                </View>
+                <Text style={styles.serviceLabel}>Mobile</Text>
               </View>
-
-              <View style={styles.heroBadges}>
-                <View style={styles.heroBadge}>
-                  <Ionicons name="checkmark-circle" size={14} color="#FFFFFF" />
-                  <Text style={styles.heroBadgeText}>Instant</Text>
+              <View style={styles.serviceCard}>
+                <View style={styles.serviceIconWrap}>
+                  <MaterialCommunityIcons name="television" size={22} color="#2E9E5B" />
                 </View>
-                <View style={styles.heroBadge}>
-                  <Ionicons name="shield-checkmark" size={14} color="#FFFFFF" />
-                  <Text style={styles.heroBadgeText}>Secure</Text>
+                <Text style={styles.serviceLabel}>DTH</Text>
+              </View>
+              <View style={styles.serviceCard}>
+                <View style={styles.serviceIconWrap}>
+                  <Ionicons name="flash" size={22} color="#2E9E5B" />
                 </View>
-                <View style={styles.heroBadge}>
-                  <Ionicons name="wallet-outline" size={14} color="#FFFFFF" />
-                  <Text style={styles.heroBadgeText}>Best Plans</Text>
+                <Text style={styles.serviceLabel}>Instant</Text>
+              </View>
+              <View style={styles.serviceCard}>
+                <View style={styles.serviceIconWrap}>
+                  <Ionicons name="shield-checkmark" size={22} color="#2E9E5B" />
                 </View>
+                <Text style={styles.serviceLabel}>Secure</Text>
               </View>
             </View>
 
@@ -228,48 +222,42 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
-  heroContent: {
-    alignItems: "center",
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-    gap: 20,
+  heroTitle: {
+    fontSize: 28,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    textAlign: "center",
+    marginBottom: 4,
   },
-  heroLogo: {
-    width: 120,
-    height: 48,
-    tintColor: "#FFFFFF",
+  heroSubtitle: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.8)",
+    textAlign: "center",
+    marginBottom: 28,
   },
-  heroIcons: {
+  serviceCards: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-    marginTop: 4,
+    justifyContent: "center",
+    gap: 12,
+    paddingHorizontal: 20,
+    marginBottom: 36,
   },
-  heroIconBubble: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(255,255,255,0.18)",
+  serviceCard: {
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  serviceIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
-  heroIconLarge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "rgba(255,255,255,0.25)",
-  },
-  heroBadges: {
-    flexDirection: "row",
-    gap: 16,
-  },
-  heroBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  heroBadgeText: {
-    fontSize: 12,
+  serviceLabel: {
+    fontSize: 11,
     fontFamily: "Inter_500Medium",
     color: "rgba(255,255,255,0.9)",
   },

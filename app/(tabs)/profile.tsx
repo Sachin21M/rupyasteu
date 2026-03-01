@@ -120,17 +120,17 @@ export default function ProfileScreen() {
         <MenuItem
           icon="shield-checkmark-outline"
           label="Privacy & Security"
-          onPress={() => {}}
+          onPress={() => router.push("/privacy")}
         />
         <MenuItem
           icon="help-circle-outline"
           label="Help & Support"
-          onPress={() => {}}
+          onPress={() => router.push("/help")}
         />
         <MenuItem
           icon="information-circle-outline"
           label="About RupyaSetu"
-          onPress={() => {}}
+          onPress={() => router.push("/about")}
         />
       </View>
 

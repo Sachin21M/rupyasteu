@@ -9,6 +9,8 @@ import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema }
 
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "MANUAL";
 const PAYEE_UPI_ID = process.env.PAYEE_UPI_ID || "rupyasetu@upi";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "rupyasetu@2026";
 
 function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
@@ -250,31 +252,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.updateTransaction(transactionId, {
         utr,
         paymentStatus: "PAYMENT_UNVERIFIED",
-        rechargeStatus: "RECHARGE_PROCESSING",
+        rechargeStatus: "RECHARGE_PENDING",
       });
-
-      const rechargeResult = await initiateRecharge({
-        operator: transaction.operatorId,
-        canumber: transaction.subscriberNumber,
-        amount: transaction.amount,
-        recharge_type: transaction.type === "MOBILE" ? "prepaid" : "dth",
-      });
-
-      if (rechargeResult.status) {
-        await storage.updateTransaction(transactionId, {
-          paysprintRefId: rechargeResult.data?.ackno as string,
-          rechargeStatus: "RECHARGE_SUCCESS",
-        });
-      } else {
-        await storage.updateTransaction(transactionId, {
-          rechargeStatus: "RECHARGE_FAILED",
-        });
-      }
 
       const updatedTx = await storage.getTransaction(transactionId);
 
       res.json({
         success: true,
+        message: "Payment reference submitted. Your recharge will be confirmed within 24 hours.",
         transaction: updatedTx,
       });
     } catch (error) {
@@ -308,6 +293,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
       paymentMode: PAYMENT_MODE,
       payeeUpiId: PAYEE_UPI_ID,
     });
+  });
+
+  function adminAuthMiddleware(req: Request, res: Response, next: NextFunction) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Admin authentication required" });
+    }
+    const token = authHeader.slice(7);
+    const payload = verifyJwtToken(token);
+    if (!payload || !(payload as any).isAdmin) {
+      return res.status(401).json({ error: "Invalid admin token" });
+    }
+    next();
+  }
+
+  app.post("/api/admin/login", (req: Request, res: Response) => {
+    const { username, password } = req.body;
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+      const token = generateJwtToken({ userId: "admin", phone: "admin", isAdmin: true } as any);
+      return res.json({ success: true, token });
+    }
+    return res.status(401).json({ error: "Invalid admin credentials" });
+  });
+
+  app.get("/api/admin/transactions", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const allTransactions = await storage.getAllTransactions();
+      const enriched = await Promise.all(
+        allTransactions.map(async (tx) => {
+          const user = await storage.getUser(tx.userId);
+          return { ...tx, userPhone: user?.phone || "Unknown" };
+        })
+      );
+      res.json({ transactions: enriched });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch transactions" });
+    }
+  });
+
+  app.post("/api/admin/transactions/:id/approve", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const transaction = await storage.getTransaction(req.params.id);
+      if (!transaction) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+
+      if (transaction.paymentStatus !== "PAYMENT_UNVERIFIED" || transaction.rechargeStatus !== "RECHARGE_PENDING") {
+        return res.status(400).json({ error: "Transaction is not in a pending approval state" });
+      }
+
+      await storage.updateTransaction(req.params.id, {
+        paymentStatus: "PAYMENT_VERIFIED",
+        rechargeStatus: "RECHARGE_PROCESSING",
+      });
+
+      const rechargeResult = await initiateRecharge({
+        operator: transaction.operatorId,
+        canumber: transaction.subscriberNumber,
+        amount: transaction.amount,
+        recharge_type: transaction.type === "MOBILE" ? "prepaid" : "dth",
+      });
+
+      if (rechargeResult.status) {
+        await storage.updateTransaction(req.params.id, {
+          paysprintRefId: rechargeResult.data?.ackno as string,
+          rechargeStatus: "RECHARGE_SUCCESS",
+        });
+      } else {
+        await storage.updateTransaction(req.params.id, {
+          rechargeStatus: "RECHARGE_FAILED",
+        });
+      }
+
+      const updatedTx = await storage.getTransaction(req.params.id);
+      res.json({ success: true, transaction: updatedTx });
+    } catch (error) {
+      console.error("Admin approve error:", error);
+      res.status(500).json({ error: "Failed to approve transaction" });
+    }
+  });
+
+  app.post("/api/admin/transactions/:id/reject", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const transaction = await storage.getTransaction(req.params.id);
+      if (!transaction) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+
+      if (transaction.paymentStatus !== "PAYMENT_UNVERIFIED" || transaction.rechargeStatus !== "RECHARGE_PENDING") {
+        return res.status(400).json({ error: "Transaction is not in a pending approval state" });
+      }
+
+      await storage.updateTransaction(req.params.id, {
+        paymentStatus: "PAYMENT_FAILED",
+        rechargeStatus: "RECHARGE_FAILED",
+      });
+
+      const updatedTx = await storage.getTransaction(req.params.id);
+      res.json({ success: true, transaction: updatedTx });
+    } catch (error) {
+      console.error("Admin reject error:", error);
+      res.status(500).json({ error: "Failed to reject transaction" });
+    }
   });
 
   const httpServer = createServer(app);

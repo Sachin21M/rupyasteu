@@ -19,6 +19,7 @@ export interface IStorage {
   getTransaction(id: string): Promise<Transaction | undefined>;
   updateTransaction(id: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
   getUserTransactions(userId: string): Promise<Transaction[]>;
+  getAllTransactions(): Promise<Transaction[]>;
   findTransactionByUtr(utr: string): Promise<Transaction | undefined>;
 }
 
@@ -150,6 +151,11 @@ export class MemStorage implements IStorage {
   async getUserTransactions(userId: string): Promise<Transaction[]> {
     return Array.from(this.transactions.values())
       .filter((t) => t.userId === userId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getAllTransactions(): Promise<Transaction[]> {
+    return Array.from(this.transactions.values())
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 

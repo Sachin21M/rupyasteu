@@ -40,7 +40,7 @@ function setupCors(app: express.Application) {
         "Access-Control-Allow-Methods",
         "GET, POST, PUT, DELETE, OPTIONS",
       );
-      res.header("Access-Control-Allow-Headers", "Content-Type");
+      res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
       res.header("Access-Control-Allow-Credentials", "true");
     }
 
@@ -175,6 +175,14 @@ function configureExpoAndLanding(app: express.Application) {
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith("/api")) {
       return next();
+    }
+
+    if (req.path === "/admin") {
+      const adminPath = path.resolve(process.cwd(), "server", "templates", "admin-panel.html");
+      if (fs.existsSync(adminPath)) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.status(200).send(fs.readFileSync(adminPath, "utf-8"));
+      }
     }
 
     if (req.path !== "/" && req.path !== "/manifest") {

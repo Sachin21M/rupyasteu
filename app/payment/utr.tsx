@@ -174,7 +174,7 @@ export default function UtrScreen() {
           ) : (
             <>
               <Ionicons name="checkmark-circle" size={20} color="#fff" />
-              <Text style={styles.submitBtnText}>Verify & Recharge</Text>
+              <Text style={styles.submitBtnText}>Submit & Verify</Text>
             </>
           )}
         </Pressable>

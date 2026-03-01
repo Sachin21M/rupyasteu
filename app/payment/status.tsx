@@ -58,13 +58,16 @@ export default function StatusScreen() {
 
   const isSuccess = transaction.rechargeStatus === "RECHARGE_SUCCESS";
   const isFailed = transaction.rechargeStatus === "RECHARGE_FAILED";
-  const isPending = !isSuccess && !isFailed;
+  const isAwaitingApproval = transaction.paymentStatus === "PAYMENT_UNVERIFIED" && transaction.rechargeStatus === "RECHARGE_PENDING";
+  const isProcessing = transaction.rechargeStatus === "RECHARGE_PROCESSING";
 
   const statusConfig = isSuccess
     ? { icon: "checkmark-circle" as const, color: Colors.success, bg: Colors.successLight, label: "Recharge Successful", sublabel: "Your recharge has been processed successfully" }
     : isFailed
     ? { icon: "close-circle" as const, color: Colors.error, bg: Colors.errorLight, label: "Recharge Failed", sublabel: "Something went wrong. Please try again or contact support" }
-    : { icon: "time" as const, color: Colors.warning, bg: Colors.warningLight, label: "Processing", sublabel: "Your recharge is being processed. This may take a few moments" };
+    : isAwaitingApproval
+    ? { icon: "time" as const, color: "#f59e0b", bg: "#fef3c7", label: "Payment Under Processing", sublabel: "Your payment is being verified. It will be confirmed within 24 hours." }
+    : { icon: "sync" as const, color: Colors.warning, bg: Colors.warningLight, label: "Processing", sublabel: "Your recharge is being processed. This may take a few moments" };
 
   const date = new Date(transaction.createdAt);
   const formattedDate = `${date.getDate()} ${date.toLocaleDateString("en-IN", { month: "short" })} ${date.getFullYear()}, ${date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;

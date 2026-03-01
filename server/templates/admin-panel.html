@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RupyaSetu Admin Panel</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    
+    .login-container {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #2E9E5B 0%, #1E6F44 100%);
+    }
+    .login-card {
+      background: #fff; border-radius: 16px; padding: 40px; width: 100%; max-width: 400px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    }
+    .login-card h1 { font-size: 24px; font-weight: 700; text-align: center; margin-bottom: 8px; color: #1a1a1a; }
+    .login-card p { font-size: 14px; color: #666; text-align: center; margin-bottom: 28px; }
+    .login-card .logo-text { color: #2E9E5B; font-weight: 700; font-size: 20px; text-align: center; margin-bottom: 4px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; }
+    .form-group input {
+      width: 100%; padding: 12px 16px; border: 1.5px solid #e0e0e0; border-radius: 10px;
+      font-size: 15px; outline: none; transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: #2E9E5B; }
+    .login-btn {
+      width: 100%; padding: 14px; background: #2E9E5B; color: #fff; border: none;
+      border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px;
+      transition: background 0.2s;
+    }
+    .login-btn:hover { background: #258A4E; }
+    .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .login-error { color: #e53935; font-size: 13px; text-align: center; margin-top: 12px; }
+
+    .admin-container { display: none; }
+    .topbar {
+      background: #fff; border-bottom: 1px solid #e8e8e8; padding: 16px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 10;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .topbar-left h1 { font-size: 18px; font-weight: 700; color: #2E9E5B; }
+    .topbar-left span { font-size: 13px; color: #888; font-weight: 400; }
+    .topbar-right { display: flex; align-items: center; gap: 16px; }
+    .refresh-btn {
+      padding: 8px 16px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 8px;
+      font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+    }
+    .refresh-btn:hover { background: #e8e8e8; }
+    .logout-btn {
+      padding: 8px 16px; background: #fff; border: 1px solid #e53935; border-radius: 8px;
+      font-size: 13px; color: #e53935; cursor: pointer;
+    }
+    .logout-btn:hover { background: #fef2f2; }
+
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px; padding: 24px 32px;
+    }
+    .stat-card {
+      background: #fff; border-radius: 14px; padding: 20px 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .stat-card .stat-label { font-size: 13px; color: #888; font-weight: 500; }
+    .stat-card .stat-value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .stat-card.total .stat-value { color: #1a1a1a; }
+    .stat-card.pending .stat-value { color: #f59e0b; }
+    .stat-card.approved .stat-value { color: #2E9E5B; }
+    .stat-card.rejected .stat-value { color: #e53935; }
+
+    .table-section { padding: 0 32px 32px; }
+    .table-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .table-header h2 { font-size: 18px; font-weight: 600; }
+    .filter-tabs { display: flex; gap: 8px; }
+    .filter-tab {
+      padding: 8px 18px; border-radius: 8px; border: 1px solid #ddd; background: #fff;
+      font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+    }
+    .filter-tab:hover { background: #f0f0f0; }
+    .filter-tab.active { background: #2E9E5B; color: #fff; border-color: #2E9E5B; }
+
+    .table-wrap {
+      background: #fff; border-radius: 14px; overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left; padding: 14px 16px; font-size: 12px; font-weight: 600;
+      color: #888; text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid #f0f0f0; background: #fafafa;
+    }
+    tbody td {
+      padding: 14px 16px; font-size: 14px; border-bottom: 1px solid #f5f5f5;
+      vertical-align: middle;
+    }
+    tbody tr:hover { background: #fafffe; }
+    .pill {
+      display: inline-block; padding: 4px 10px; border-radius: 6px;
+      font-size: 11px; font-weight: 600;
+    }
+    .pill.pending { background: #fef3c7; color: #d97706; }
+    .pill.success { background: #d1fae5; color: #059669; }
+    .pill.failed { background: #fee2e2; color: #dc2626; }
+    .pill.processing { background: #dbeafe; color: #2563eb; }
+    .pill.unverified { background: #fef3c7; color: #d97706; }
+    .pill.verified { background: #d1fae5; color: #059669; }
+
+    .action-btn {
+      padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: none; transition: opacity 0.2s;
+    }
+    .action-btn:hover { opacity: 0.85; }
+    .action-btn.approve { background: #2E9E5B; color: #fff; }
+    .action-btn.reject { background: #e53935; color: #fff; margin-left: 6px; }
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .no-action { font-size: 12px; color: #aaa; }
+
+    .empty-state {
+      text-align: center; padding: 60px 20px; color: #aaa;
+    }
+    .empty-state svg { width: 48px; height: 48px; margin-bottom: 12px; fill: #ccc; }
+    .empty-state p { font-size: 15px; }
+
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.4); z-index: 100; align-items: center; justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: #fff; border-radius: 16px; padding: 32px; max-width: 420px; width: 90%;
+      text-align: center;
+    }
+    .modal h3 { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+    .modal p { font-size: 14px; color: #666; margin-bottom: 24px; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 12px; justify-content: center; }
+    .modal-actions button {
+      padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600;
+      cursor: pointer; border: none;
+    }
+    .modal-actions .cancel { background: #f0f0f0; color: #444; }
+    .modal-actions .confirm-approve { background: #2E9E5B; color: #fff; }
+    .modal-actions .confirm-reject { background: #e53935; color: #fff; }
+
+    .auto-refresh-indicator {
+      font-size: 11px; color: #aaa; display: flex; align-items: center; gap: 4px;
+    }
+    .pulse { width: 6px; height: 6px; border-radius: 50%; background: #2E9E5B; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    @media (max-width: 768px) {
+      .topbar { padding: 12px 16px; }
+      .stats-grid { padding: 16px; grid-template-columns: repeat(2, 1fr); }
+      .table-section { padding: 0 16px 16px; }
+      .table-header { flex-direction: column; gap: 12px; align-items: flex-start; }
+      .table-wrap { overflow-x: auto; }
+      table { min-width: 800px; }
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+<div class="login-container" id="loginView">
+  <div class="login-card">
+    <div class="logo-text">RupyaSetu</div>
+    <h1>Admin Panel</h1>
+    <p>Sign in to manage transactions</p>
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" id="username" placeholder="Enter username" autocomplete="username" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="Enter password" autocomplete="current-password" />
+    </div>
+    <button class="login-btn" id="loginBtn" onclick="handleLogin()">Sign In</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<div class="admin-container" id="adminView">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>RupyaSetu Admin</h1>
+      <span>Transaction Management</span>
+    </div>
+    <div class="topbar-right">
+      <div class="auto-refresh-indicator">
+        <div class="pulse"></div>
+        Auto-refresh: <span id="countdown">30</span>s
+      </div>
+      <button class="refresh-btn" onclick="loadTransactions()">
+        &#x21bb; Refresh
+      </button>
+      <button class="logout-btn" onclick="handleLogout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card total">
+      <div class="stat-label">Total Transactions</div>
+      <div class="stat-value" id="statTotal">0</div>
+    </div>
+    <div class="stat-card pending">
+      <div class="stat-label">Pending Approval</div>
+      <div class="stat-value" id="statPending">0</div>
+    </div>
+    <div class="stat-card approved">
+      <div class="stat-label">Approved</div>
+      <div class="stat-value" id="statApproved">0</div>
+    </div>
+    <div class="stat-card rejected">
+      <div class="stat-label">Rejected / Failed</div>
+      <div class="stat-value" id="statRejected">0</div>
+    </div>
+  </div>
+
+  <div class="table-section">
+    <div class="table-header">
+      <h2>Transactions</h2>
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">All</button>
+        <button class="filter-tab" data-filter="pending" onclick="setFilter('pending', this)">Pending</button>
+        <button class="filter-tab" data-filter="approved" onclick="setFilter('approved', this)">Approved</button>
+        <button class="filter-tab" data-filter="rejected" onclick="setFilter('rejected', this)">Rejected</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>User Phone</th>
+            <th>Type</th>
+            <th>Operator</th>
+            <th>Number</th>
+            <th>Amount</th>
+            <th>UTR</th>
+            <th>Payment</th>
+            <th>Recharge</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="txTableBody">
+        </tbody>
+      </table>
+      <div class="empty-state" id="emptyState" style="display:none;">
+        <p>No transactions found</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3 id="modalTitle">Confirm Action</h3>
+    <p id="modalMessage">Are you sure?</p>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal()">Cancel</button>
+      <button id="modalConfirmBtn" onclick="confirmAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+let adminToken = localStorage.getItem('rupyasetu_admin_token') || '';
+let allTransactions = [];
+let currentFilter = 'all';
+let pendingAction = null;
+let refreshInterval = null;
+let countdownInterval = null;
+let countdownValue = 30;
+
+if (adminToken) {
+  showAdmin();
+}
+
+async function handleLogin() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const errorEl = document.getElementById('loginError');
+  const btn = document.getElementById('loginBtn');
+
+  if (!username || !password) {
+    errorEl.textContent = 'Please enter both username and password';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+  errorEl.textContent = '';
+
+  try {
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+
+    if (data.success && data.token) {
+      adminToken = data.token;
+      localStorage.setItem('rupyasetu_admin_token', adminToken);
+      showAdmin();
+    } else {
+      errorEl.textContent = data.error || 'Login failed';
+    }
+  } catch {
+    errorEl.textContent = 'Network error. Please try again.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+}
+
+document.getElementById('password').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleLogin();
+});
+
+function showAdmin() {
+  document.getElementById('loginView').style.display = 'none';
+  document.getElementById('adminView').style.display = 'block';
+  loadTransactions();
+  startAutoRefresh();
+}
+
+function handleLogout() {
+  adminToken = '';
+  localStorage.removeItem('rupyasetu_admin_token');
+  document.getElementById('loginView').style.display = 'flex';
+  document.getElementById('adminView').style.display = 'none';
+  stopAutoRefresh();
+}
+
+async function loadTransactions() {
+  try {
+    const res = await fetch('/api/admin/transactions', {
+      headers: { 'Authorization': 'Bearer ' + adminToken },
+    });
+
+    if (res.status === 401) {
+      handleLogout();
+      return;
+    }
+
+    const data = await res.json();
+    allTransactions = data.transactions || [];
+    updateStats();
+    renderTable();
+    resetCountdown();
+  } catch (err) {
+    console.error('Failed to load transactions:', err);
+  }
+}
+
+function updateStats() {
+  const total = allTransactions.length;
+  const pending = allTransactions.filter(t => t.paymentStatus === 'PAYMENT_UNVERIFIED' && t.rechargeStatus === 'RECHARGE_PENDING').length;
+  const approved = allTransactions.filter(t => t.rechargeStatus === 'RECHARGE_SUCCESS').length;
+  const rejected = allTransactions.filter(t => t.rechargeStatus === 'RECHARGE_FAILED').length;
+
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statPending').textContent = pending;
+  document.getElementById('statApproved').textContent = approved;
+  document.getElementById('statRejected').textContent = rejected;
+}
+
+function getFilteredTransactions() {
+  if (currentFilter === 'all') return allTransactions;
+  if (currentFilter === 'pending') return allTransactions.filter(t => t.paymentStatus === 'PAYMENT_UNVERIFIED' && t.rechargeStatus === 'RECHARGE_PENDING');
+  if (currentFilter === 'approved') return allTransactions.filter(t => t.rechargeStatus === 'RECHARGE_SUCCESS');
+  if (currentFilter === 'rejected') return allTransactions.filter(t => t.rechargeStatus === 'RECHARGE_FAILED');
+  return allTransactions;
+}
+
+function setFilter(filter, el) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderTable();
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function getPaymentPill(status) {
+  const label = status.replace('PAYMENT_', '');
+  let cls = 'pending';
+  if (status === 'PAYMENT_VERIFIED') cls = 'verified';
+  if (status === 'PAYMENT_FAILED') cls = 'failed';
+  if (status === 'PAYMENT_UNVERIFIED') cls = 'unverified';
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+function getRechargePill(status) {
+  const label = status.replace('RECHARGE_', '');
+  let cls = 'pending';
+  if (status === 'RECHARGE_SUCCESS') cls = 'success';
+  if (status === 'RECHARGE_FAILED') cls = 'failed';
+  if (status === 'RECHARGE_PROCESSING') cls = 'processing';
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+function renderTable() {
+  const filtered = getFilteredTransactions();
+  const tbody = document.getElementById('txTableBody');
+  const empty = document.getElementById('emptyState');
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+  tbody.innerHTML = filtered.map(tx => {
+    const isPending = tx.paymentStatus === 'PAYMENT_UNVERIFIED' && tx.rechargeStatus === 'RECHARGE_PENDING';
+    const safeId = esc(tx.id);
+    const safePhone = esc(tx.userPhone || '—');
+    const safeAmount = esc(String(tx.amount));
+    const actions = isPending
+      ? `<button class="action-btn approve" onclick="showModal('approve','${safeId}','${safePhone}',${safeAmount})">Approve</button>
+         <button class="action-btn reject" onclick="showModal('reject','${safeId}','${safePhone}',${safeAmount})">Reject</button>`
+      : `<span class="no-action">—</span>`;
+
+    return `<tr>
+      <td>${esc(formatDate(tx.createdAt))}</td>
+      <td>${safePhone}</td>
+      <td>${esc(tx.type)}</td>
+      <td>${esc(tx.operatorName)}</td>
+      <td>${esc(tx.subscriberNumber)}</td>
+      <td><strong>₹${safeAmount}</strong></td>
+      <td style="font-size:12px;letter-spacing:0.3px">${esc(tx.utr || '—')}</td>
+      <td>${getPaymentPill(tx.paymentStatus)}</td>
+      <td>${getRechargePill(tx.rechargeStatus)}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+function showModal(action, txId, phone, amount) {
+  pendingAction = { action, txId };
+  const overlay = document.getElementById('modalOverlay');
+  const title = document.getElementById('modalTitle');
+  const message = document.getElementById('modalMessage');
+  const confirmBtn = document.getElementById('modalConfirmBtn');
+
+  const safePhone = esc(String(phone));
+  const safeAmt = esc(String(amount));
+  if (action === 'approve') {
+    title.textContent = 'Approve Transaction';
+    message.innerHTML = `Approve payment of <strong>₹${safeAmt}</strong> from <strong>${safePhone}</strong>?<br>This will trigger the recharge via Paysprint.`;
+    confirmBtn.className = 'confirm-approve';
+    confirmBtn.textContent = 'Approve';
+  } else {
+    title.textContent = 'Reject Transaction';
+    message.innerHTML = `Reject payment of <strong>₹${safeAmt}</strong> from <strong>${safePhone}</strong>?<br>This action cannot be undone.`;
+    confirmBtn.className = 'confirm-reject';
+    confirmBtn.textContent = 'Reject';
+  }
+
+  overlay.classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('active');
+  pendingAction = null;
+}
+
+async function confirmAction() {
+  if (!pendingAction) return;
+
+  const { action, txId } = pendingAction;
+  const confirmBtn = document.getElementById('modalConfirmBtn');
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = action === 'approve' ? 'Approving...' : 'Rejecting...';
+
+  try {
+    const res = await fetch(`/api/admin/transactions/${txId}/${action}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + adminToken,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (res.status === 401) {
+      handleLogout();
+      return;
+    }
+
+    const data = await res.json();
+    if (data.success) {
+      closeModal();
+      loadTransactions();
+    } else {
+      alert(data.error || 'Action failed');
+    }
+  } catch {
+    alert('Network error. Please try again.');
+  } finally {
+    confirmBtn.disabled = false;
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  countdownValue = 30;
+  countdownInterval = setInterval(() => {
+    countdownValue--;
+    document.getElementById('countdown').textContent = countdownValue;
+    if (countdownValue <= 0) {
+      loadTransactions();
+    }
+  }, 1000);
+}
+
+function stopAutoRefresh() {
+  if (countdownInterval) clearInterval(countdownInterval);
+}
+
+function resetCountdown() {
+  countdownValue = 30;
+  document.getElementById('countdown').textContent = countdownValue;
+}
+</script>
+</body>
+</html>

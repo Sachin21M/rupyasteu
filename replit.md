@@ -56,12 +56,15 @@ shared/
 ```
 
 ## Key Features
-1. OTP-based login (UAT: use OTP 1234)
+1. OTP-based login (real SMS via SMS Alert API, 6-digit OTP)
 2. Mobile prepaid recharge with operator/plan selection
 3. DTH recharge with provider selection
 4. Manual UTR payment capture (PAYMENT_MODE=MANUAL)
-5. Transaction history with status tracking
-6. Paysprint API integration (UAT simulation mode)
+5. Admin approval flow — UTR submitted → admin approves/rejects → Paysprint recharge triggered on approval
+6. Web-based Admin Panel at `/admin` for transaction management
+7. Transaction history with status tracking
+8. Paysprint API integration (UAT simulation mode)
+9. Privacy, Help & Support, About screens
 
 ## Environment Variables
 - `PAYMENT_MODE` - MANUAL or GATEWAY (default: MANUAL)
@@ -72,19 +75,32 @@ shared/
 - `PAYSPRINT_AES_IV` - AES IV
 - `PAYSPRINT_ENV` - UAT or PRODUCTION
 - `SESSION_SECRET` - JWT signing secret
+- `SMSALERT_API_KEY` - SMS Alert API key
+- `SMSALERT_SENDER` - SMS Alert sender ID
+- `SMSALERT_TEMPLATE` - SMS Alert message template
+- `ADMIN_USERNAME` - Admin panel login username (default: admin)
+- `ADMIN_PASSWORD` - Admin panel login password (default: rupyasetu@2026)
 
 ## Ports
 - Frontend (Expo): 8081
 - Backend (Express): 5000
 
-## Payment Flow (Manual Mode - Temporary)
+## Payment Flow (Manual Mode with Admin Approval)
 1. User selects plan and clicks "Pay Now"
 2. App opens UPI intent (on mobile) or shows UPI details
 3. User completes payment externally
-4. User enters UTR reference number
-5. Backend validates UTR format and uniqueness
-6. Recharge API is triggered
-7. Transaction status updated
+4. User enters UTR reference number and submits
+5. Backend validates UTR format and uniqueness, saves as PAYMENT_UNVERIFIED / RECHARGE_PENDING
+6. User sees "Payment Under Processing — will be confirmed within 24 hours"
+7. Admin reviews transaction at `/admin`, approves or rejects
+8. On approval: Paysprint recharge API is triggered, status updated to SUCCESS or FAILED
+9. On rejection: Status updated to PAYMENT_FAILED / RECHARGE_FAILED
+
+## Admin Panel
+- URL: `/admin` (served from `server/templates/admin-panel.html`)
+- Login: username/password (env vars ADMIN_USERNAME / ADMIN_PASSWORD)
+- Features: dashboard stats, transaction table with filters (All/Pending/Approved/Rejected), approve/reject buttons, auto-refresh every 30s
+- Admin API: POST `/api/admin/login`, GET `/api/admin/transactions`, POST `/api/admin/transactions/:id/approve`, POST `/api/admin/transactions/:id/reject`
 
 ## Notes
 - Payment mode is configurable via PAYMENT_MODE env var

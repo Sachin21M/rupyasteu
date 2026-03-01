@@ -60,3 +60,6 @@ SMSALERT_TEMPLATE = "Your verification code for mobile verification is #{OTP}"
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "rupyasetu@2026"
 PAYEE_UPI_ID = "charua821@okaxis"
+
+[userenv.production]
+EXPO_PUBLIC_DOMAIN = "rupyasetuadmin.site"

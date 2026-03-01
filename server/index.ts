@@ -27,6 +27,8 @@ function setupCors(app: express.Application) {
       });
     }
 
+    origins.add("https://rupyasetuadmin.site");
+
     const origin = req.header("origin");
 
     // Allow localhost origins for Expo web development (any port)

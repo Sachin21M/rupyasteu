@@ -10,6 +10,9 @@ RupyaSetu is a fintech mobile recharge application built with Expo (React Native
 - **Auth**: OTP-based login with JWT tokens
 - **Font**: Inter (Google Fonts)
 - **Primary Color**: #2E9E5B
+- **Logo**: `assets/images/rupyasetu-logo.jpeg` (unmodified user-provided JPEG, light grey background)
+- **App Icon**: Same logo used for icon.png, splash-icon.png, favicon.png, adaptive icons
+- **Background**: #F0F0F0 (matches logo's light grey) with #E8E8E8 for splash/adaptive icon bg
 
 ## Project Structure
 ```

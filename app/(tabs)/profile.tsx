@@ -75,7 +75,7 @@ export default function ProfileScreen() {
 
       <View style={styles.profileCard}>
         <Image
-          source={require("@/assets/images/rupyasetu-logo.png")}
+          source={require("@/assets/images/rupyasetu-logo.jpeg")}
           style={styles.profileLogo}
           resizeMode="contain"
         />

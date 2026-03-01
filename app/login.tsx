@@ -13,7 +13,6 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { sendOtp } from "@/lib/api";
@@ -27,8 +26,8 @@ export default function LoginScreen() {
   const inputRef = useRef<TextInput>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(40)).current;
-  const sheetAnim = useRef(new Animated.Value(60)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const sheetAnim = useRef(new Animated.Value(50)).current;
   const sheetOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -84,15 +83,12 @@ export default function LoginScreen() {
   const bottomPadding = Platform.OS === "web" ? 34 : insets.bottom;
 
   return (
-    <LinearGradient
-      colors={["#2E9E5B", "#1E6F44"]}
-      style={styles.gradient}
-    >
+    <View style={styles.screen}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <View style={[styles.topSection, { paddingTop: topPadding + 60 }]}>
+        <View style={[styles.topSection, { paddingTop: topPadding + 48 }]}>
           <Animated.View
             style={[
               styles.logoContainer,
@@ -103,7 +99,7 @@ export default function LoginScreen() {
             ]}
           >
             <Image
-              source={require("@/assets/images/rupyasetu-logo-white.png")}
+              source={require("@/assets/images/rupyasetu-logo.jpeg")}
               style={styles.logoImage}
               resizeMode="contain"
             />
@@ -190,7 +186,7 @@ export default function LoginScreen() {
           </Text>
         </Animated.View>
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -198,27 +194,29 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  gradient: {
+  screen: {
     flex: 1,
+    backgroundColor: "#F0F0F0",
   },
   topSection: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingBottom: 40,
+    paddingBottom: 32,
   },
   logoContainer: {
     alignItems: "center",
   },
   logoImage: {
-    width: 140,
-    height: 112,
-    marginBottom: 16,
+    width: 200,
+    height: 200,
+    marginBottom: 12,
+    borderRadius: 8,
   },
   tagline: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: "Inter_500Medium",
-    color: "rgba(255,255,255,0.85)",
+    color: "#4A4A4A",
     letterSpacing: 0.3,
   },
   bottomSheet: {

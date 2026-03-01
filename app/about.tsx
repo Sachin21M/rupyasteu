@@ -83,7 +83,7 @@ export default function AboutScreen() {
         <View style={styles.linksCard}>
           <Pressable
             style={styles.linkItem}
-            onPress={() => Linking.openURL("https://rupyasetu.com/terms")}
+            onPress={() => Linking.openURL("https://rupyasetu.com/terms-conditions")}
           >
             <Ionicons name="document-text-outline" size={18} color={Colors.primary} />
             <Text style={styles.linkText}>Terms of Service</Text>

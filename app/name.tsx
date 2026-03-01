@@ -38,14 +38,10 @@ export default function NameScreen() {
     setLoading(true);
     setError("");
     try {
-      const activeToken = authToken || paramToken;
-
-      if (!authToken && paramToken) {
-        await login(paramToken, { id: userId!, phone: phone!, name: trimmed });
-      }
-
+      const activeToken = paramToken || authToken;
       const baseUrl = getApiUrl();
-      const res = await fetch(`${baseUrl}api/user/profile`, {
+      const url = new URL("api/user/profile", baseUrl).toString();
+      const res = await fetch(url, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -55,7 +51,7 @@ export default function NameScreen() {
       });
 
       if (res.ok) {
-        updateUser({ name: trimmed });
+        await login(activeToken!, { id: userId!, phone: phone!, name: trimmed });
         router.replace("/(tabs)");
       } else {
         setError("Failed to save name. Please try again.");

@@ -91,7 +91,7 @@ export default function AboutScreen() {
           </Pressable>
           <Pressable
             style={styles.linkItem}
-            onPress={() => Linking.openURL("https://rupyasetu.com/privacy")}
+            onPress={() => Linking.openURL("https://rupyasetu.com/privacy-policy")}
           >
             <Ionicons name="shield-outline" size={18} color={Colors.primary} />
             <Text style={styles.linkText}>Privacy Policy</Text>

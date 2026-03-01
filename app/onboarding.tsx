@@ -28,7 +28,7 @@ const slides = [
   {
     id: "2",
     icon: "shield-checkmark" as const,
-    headline: "100% Secure Transactions",
+    headline: "100% Secure",
     subtext: "Your payments and data are protected with advanced security.",
   },
 ];

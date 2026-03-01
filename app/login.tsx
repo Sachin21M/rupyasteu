@@ -75,7 +75,7 @@ export default function LoginScreen() {
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: topPadding, paddingBottom: bottomPadding || 20 },
+            { paddingTop: topPadding, paddingBottom: bottomPadding || 16 },
           ]}
           bounces={false}
           keyboardShouldPersistTaps="handled"
@@ -101,7 +101,6 @@ export default function LoginScreen() {
                 Enter your mobile number to continue
               </Text>
 
-              <Text style={styles.inputLabel}>Mobile Number</Text>
               <View
                 style={[
                   styles.inputRow,
@@ -163,7 +162,6 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.footer}>
-              <Ionicons name="lock-closed" size={13} color="#9CA3AF" />
               <Text style={styles.legalText}>
                 By continuing, you agree to our{" "}
                 <Text style={styles.legalLink}>Terms</Text> &{" "}
@@ -190,51 +188,40 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 28,
-    justifyContent: "space-between",
+    paddingHorizontal: 24,
   },
   logoArea: {
     alignItems: "center",
-    paddingTop: 48,
-    paddingBottom: 16,
+    paddingTop: 32,
+    paddingBottom: 28,
   },
   logo: {
-    width: 200,
-    height: 160,
+    width: 180,
+    height: 144,
   },
-  formArea: {
-    paddingTop: 8,
-  },
+  formArea: {},
   heading: {
     fontSize: 28,
     fontFamily: "Inter_700Bold",
     color: "#1A1D26",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   subtext: {
     fontSize: 15,
     fontFamily: "Inter_400Regular",
     color: "#6B7280",
-    marginBottom: 32,
+    marginBottom: 24,
     lineHeight: 22,
-  },
-  inputLabel: {
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-    color: "#6B7280",
-    marginBottom: 8,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
   },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
-    height: 56,
+    height: 54,
     borderWidth: 1.5,
     borderColor: "#E5E7EB",
     borderRadius: 12,
     backgroundColor: "#F9FAFB",
-    marginBottom: 24,
+    marginBottom: 16,
   },
   inputRowFocused: {
     borderColor: "#2E9E5B",
@@ -258,10 +245,10 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: "Inter_500Medium",
     color: "#1A1D26",
-    letterSpacing: 1.2,
+    letterSpacing: 1,
     height: "100%",
     paddingRight: 8,
   },
@@ -274,11 +261,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     color: "#EF4444",
-    marginTop: -16,
-    marginBottom: 16,
+    marginTop: -8,
+    marginBottom: 12,
   },
   cta: {
-    height: 56,
+    height: 54,
     backgroundColor: "#2E9E5B",
     borderRadius: 14,
     alignItems: "center",
@@ -294,19 +281,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   footer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingTop: 32,
+    marginTop: "auto",
+    paddingTop: 20,
     paddingBottom: 8,
+    alignItems: "center",
   },
   legalText: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: "Inter_400Regular",
     color: "#9CA3AF",
     textAlign: "center",
-    lineHeight: 18,
   },
   legalLink: {
     color: "#2E9E5B",

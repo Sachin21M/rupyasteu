@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  ScrollView,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -75,7 +76,11 @@ export default function StatusScreen() {
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
   return (
-    <View style={[styles.container, { paddingTop: topPadding + 20 }]}>
+    <ScrollView
+      style={[styles.container, { paddingTop: topPadding + 20 }]}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.statusSection}>
         <Animated.View
           entering={BounceIn.delay(200)}
@@ -178,14 +183,18 @@ export default function StatusScreen() {
           onPress={() => router.replace("/(tabs)")}
         >
           <Ionicons name="home" size={20} color={Colors.primary} />
-          <Text style={styles.homeBtnText}>Go Home</Text>
+          <Text style={styles.homeBtnText}>Back to Home</Text>
         </Pressable>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: "space-between",
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,

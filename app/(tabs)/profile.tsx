@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   View,
   Text,
@@ -6,8 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   Platform,
-  TextInput,
-  Alert,
   Image,
 } from "react-native";
 import { router } from "expo-router";
@@ -15,7 +12,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-import { updateUserProfile } from "@/lib/api";
 
 function MenuItem({ icon, label, onPress, danger }: {
   icon: string;
@@ -41,20 +37,7 @@ function MenuItem({ icon, label, onPress, danger }: {
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { user, logout, updateUser } = useAuth();
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(user?.name || "");
-
-  async function handleSaveName() {
-    if (!name.trim()) return;
-    try {
-      await updateUserProfile(name.trim());
-      updateUser({ name: name.trim() });
-      setEditing(false);
-    } catch {
-      Alert.alert("Error", "Failed to update name");
-    }
-  }
+  const { user, logout } = useAuth();
 
   async function handleLogout() {
     await logout();
@@ -79,30 +62,7 @@ export default function ProfileScreen() {
           style={styles.profileLogo}
           resizeMode="contain"
         />
-        {editing ? (
-          <View style={styles.editNameContainer}>
-            <TextInput
-              style={styles.nameInput}
-              value={name}
-              onChangeText={setName}
-              placeholder="Enter your name"
-              placeholderTextColor={Colors.textTertiary}
-              autoFocus
-            />
-            <View style={styles.editActions}>
-              <Pressable onPress={() => setEditing(false)} style={styles.editActionBtn}>
-                <Ionicons name="close" size={20} color={Colors.textSecondary} />
-              </Pressable>
-              <Pressable onPress={handleSaveName} style={[styles.editActionBtn, styles.saveBtn]}>
-                <Ionicons name="checkmark" size={20} color="#fff" />
-              </Pressable>
-            </View>
-          </View>
-        ) : (
-          <Pressable onPress={() => setEditing(true)}>
-            <Text style={styles.profileName}>{user?.name || "Set your name"}</Text>
-          </Pressable>
-        )}
+        <Text style={styles.profileName}>{user?.name || "Set your name"}</Text>
         <Text style={styles.profilePhone}>+91 {user?.phone}</Text>
       </View>
 
@@ -110,7 +70,7 @@ export default function ProfileScreen() {
         <MenuItem
           icon="person-outline"
           label="Edit Profile"
-          onPress={() => setEditing(true)}
+          onPress={() => router.push("/edit-profile")}
         />
         <MenuItem
           icon="receipt-outline"
@@ -190,37 +150,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
-  },
-  editNameContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  nameInput: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 16,
-    fontFamily: "Inter_500Medium",
-    color: Colors.text,
-    minWidth: 180,
-  },
-  editActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  editActionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.surfaceSecondary,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  saveBtn: {
-    backgroundColor: Colors.primary,
   },
   menuSection: {
     marginHorizontal: 20,

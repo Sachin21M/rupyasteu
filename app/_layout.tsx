@@ -37,6 +37,7 @@ function RootLayoutNav() {
       <Stack.Screen name="login" />
       <Stack.Screen name="otp" />
       <Stack.Screen name="name" options={{ animation: "slide_from_right" }} />
+      <Stack.Screen name="edit-profile" options={{ headerShown: false, animation: "slide_from_right" }} />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen
         name="recharge/mobile"

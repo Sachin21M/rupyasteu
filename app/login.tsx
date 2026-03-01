@@ -52,10 +52,11 @@ export default function LoginScreen() {
         style={[styles.topSection, { paddingTop: topPadding + 40 }]}
       >
         <View style={styles.logoContainer}>
-          <View style={styles.logoCircle}>
-            <Ionicons name="wallet" size={32} color={Colors.primary} />
-          </View>
-          <Text style={styles.appName}>RupyaSetu</Text>
+          <Image
+            source={require("@/assets/images/rupyasetu-logo.png")}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
           <Text style={styles.tagline}>Fast & Secure Recharge</Text>
         </View>
       </LinearGradient>
@@ -133,19 +134,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  logoCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  appName: {
-    fontSize: 28,
-    fontFamily: "Inter_700Bold",
-    color: "#fff",
+  logoImage: {
+    width: 180,
+    height: 144,
+    marginBottom: 4,
   },
   tagline: {
     fontSize: 14,

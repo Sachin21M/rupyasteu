@@ -8,6 +8,7 @@ import {
   Platform,
   TextInput,
   Alert,
+  Image,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -73,9 +74,11 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.profileCard}>
-        <View style={styles.avatarLarge}>
-          <Ionicons name="person" size={36} color={Colors.primary} />
-        </View>
+        <Image
+          source={require("@/assets/images/rupyasetu-logo.png")}
+          style={styles.profileLogo}
+          resizeMode="contain"
+        />
         {editing ? (
           <View style={styles.editNameContainer}>
             <TextInput
@@ -173,13 +176,9 @@ const styles = StyleSheet.create({
     elevation: 2,
     gap: 8,
   },
-  avatarLarge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: Colors.primaryLight,
-    justifyContent: "center",
-    alignItems: "center",
+  profileLogo: {
+    width: 100,
+    height: 80,
     marginBottom: 8,
   },
   profileName: {

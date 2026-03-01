@@ -37,21 +37,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { phone } = parsed.data;
-      const otp = generateOtp();
+      const DEMO_PHONE = "7067018549";
+      const DEMO_OTP = "123456";
 
-      const smsResult = await sendSmsAlert(phone, otp);
-      if (!smsResult.success) {
-        return res.status(500).json({ error: smsResult.error || "Failed to send OTP" });
+      if (phone === DEMO_PHONE) {
+        await storage.saveOtp({
+          phone,
+          otp: DEMO_OTP,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          attempts: 0,
+        });
+        console.log(`[OTP] Demo OTP set for ${phone}`);
+      } else {
+        const otp = generateOtp();
+        const smsResult = await sendSmsAlert(phone, otp);
+        if (!smsResult.success) {
+          return res.status(500).json({ error: smsResult.error || "Failed to send OTP" });
+        }
+        await storage.saveOtp({
+          phone,
+          otp,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          attempts: 0,
+        });
+        console.log(`[OTP] OTP sent to ${phone} via SMS Alert`);
       }
-
-      await storage.saveOtp({
-        phone,
-        otp,
-        expiresAt: Date.now() + 5 * 60 * 1000,
-        attempts: 0,
-      });
-
-      console.log(`[OTP] OTP sent to ${phone} via SMS Alert`);
 
       res.json({ success: true, message: "OTP sent successfully" });
     } catch (error) {

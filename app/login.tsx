@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   ScrollView,
   Animated,
@@ -82,7 +83,13 @@ export default function LoginScreen() {
             colors={["#2E9E5B", "#25844C", "#1E6F44"]}
             style={[styles.heroBanner, { paddingTop: topPadding + 24 }]}
           >
-            <Text style={styles.heroTitle}>RupyaSetu</Text>
+            <View style={styles.logoCircleWrap}>
+              <Image
+                source={require("@/assets/images/rupyasetu-icon-circle.png")}
+                style={styles.logoCircle}
+                resizeMode="cover"
+              />
+            </View>
             <Text style={styles.heroSubtitle}>Recharge. Relax. Done.</Text>
 
             <View style={styles.serviceCards}>
@@ -222,12 +229,16 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
-  heroTitle: {
-    fontSize: 28,
-    fontFamily: "Inter_700Bold",
-    color: "#FFFFFF",
-    textAlign: "center",
-    marginBottom: 4,
+  logoCircleWrap: {
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  logoCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.3)",
   },
   heroSubtitle: {
     fontSize: 14,

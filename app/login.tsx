@@ -90,6 +90,7 @@ export default function LoginScreen() {
                 resizeMode="cover"
               />
             </View>
+            <Text style={styles.heroAppName}>RupyaSetu</Text>
             <Text style={styles.heroSubtitle}>Recharge. Relax. Done.</Text>
 
             <View style={styles.serviceCards}>
@@ -239,6 +240,13 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     borderWidth: 3,
     borderColor: "rgba(255,255,255,0.3)",
+  },
+  heroAppName: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    textAlign: "center",
+    marginTop: 2,
   },
   heroSubtitle: {
     fontSize: 14,

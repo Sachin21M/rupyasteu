@@ -1,3 +1,4 @@
+import "@/lib/web-font-patch";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -10,22 +11,6 @@ import { queryClient } from "@/lib/query-client";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { useFonts as useNativeFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { StatusBar } from "expo-status-bar";
-
-if (Platform.OS === "web" && typeof window !== "undefined") {
-  const link = document.createElement("link");
-  link.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
-  link.rel = "stylesheet";
-  document.head.appendChild(link);
-
-  const style = document.createElement("style");
-  style.textContent = `
-    @font-face { font-family: 'Inter_400Regular'; src: local('Inter'), local('Inter-Regular'); font-weight: 400; }
-    @font-face { font-family: 'Inter_500Medium'; src: local('Inter'), local('Inter-Medium'); font-weight: 500; }
-    @font-face { font-family: 'Inter_600SemiBold'; src: local('Inter'), local('Inter-SemiBold'); font-weight: 600; }
-    @font-face { font-family: 'Inter_700Bold'; src: local('Inter'), local('Inter-Bold'); font-weight: 700; }
-  `;
-  document.head.appendChild(style);
-}
 
 SplashScreen.preventAutoHideAsync();
 

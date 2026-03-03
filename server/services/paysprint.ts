@@ -1,9 +1,23 @@
+import jwt from "jsonwebtoken";
 import { encryptPayload } from "../utils/encryption";
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://sit.paysprint.in/service-api/api/v1";
-const PAYSPRINT_JWT = process.env.PAYSPRINT_JWT_TOKEN || "";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "UAT";
+
+function generatePaysprintJWT(): string {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: "PAYSPRINT",
+    timestamp: timestamp,
+    partnerId: PAYSPRINT_PARTNER_ID,
+    product: "RECHARGE",
+    reqid: timestamp,
+  };
+  const decodedAuthKey = Buffer.from(PAYSPRINT_AUTH_KEY, "base64").toString("utf-8");
+  return jwt.sign(payload, decodedAuthKey, { algorithm: "HS256" });
+}
 
 interface PaysprintResponse {
   status: boolean;
@@ -16,7 +30,7 @@ async function makePaysprintRequest(
   endpoint: string,
   payload: Record<string, unknown>
 ): Promise<PaysprintResponse> {
-  if (!PAYSPRINT_JWT || !PAYSPRINT_AUTH_KEY) {
+  if (!PAYSPRINT_AUTH_KEY || !PAYSPRINT_PARTNER_ID) {
     console.log("[Paysprint SIMULATION] No credentials configured. Simulating:", endpoint, payload);
     return simulateResponse(endpoint, payload);
   }
@@ -36,12 +50,14 @@ async function makePaysprintRequest(
     console.log("[PAYSPRINT] Plain Payload:", JSON.stringify(payload));
     console.log("[PAYSPRINT] Encrypted Request Body:", requestBody);
 
+    const jwtToken = generatePaysprintJWT();
+
     const response = await fetch(fullUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorisedkey": PAYSPRINT_AUTH_KEY,
-        "Token": PAYSPRINT_JWT,
+        "Token": jwtToken,
       },
       body: requestBody,
     });

@@ -66,6 +66,7 @@ PAYSPRINT_AES_KEY = "eda232007d8abd69"
 PAYSPRINT_AES_IV = "ba13a2557c6f7d7d"
 PAYSPRINT_ENV = "UAT"
 PAYSPRINT_BASE_URL = "https://sit.paysprint.in/service-api/api/v1"
+PAYSPRINT_PARTNER_ID = "PS0022043e3eb33636af1535d85668b687ebbd5b"
 
 [userenv.production]
 EXPO_PUBLIC_DOMAIN = "rupyasetuadmin.site"

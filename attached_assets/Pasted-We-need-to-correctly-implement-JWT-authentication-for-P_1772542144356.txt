@@ -1,0 +1,84 @@
+We need to correctly implement JWT authentication for Paysprint Recharge API (SIT environment).
+
+Follow these steps carefully:
+
+1. Install dependency:
+   npm install jsonwebtoken
+
+2. Create a new utility file:
+   /backend/utils/paysprintJwt.ts
+
+3. Add a function to generate a valid HS256 JWT token.
+
+Use this exact structure:
+
+--------------------------------------------------
+import jwt from "jsonwebtoken";
+
+export function generatePaysprintJWT() {
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  const payload = {
+    iss: "PAYSPRINT",
+    timestamp: timestamp,
+    partnerId: process.env.PAYSPRINT_PARTNER_ID,
+    product: "RECHARGE",
+    reqid: timestamp
+  };
+
+  const secret = process.env.PAYSPRINT_AUTHORISED_KEY;
+
+  const token = jwt.sign(payload, secret, {
+    algorithm: "HS256"
+  });
+
+  return token;
+}
+--------------------------------------------------
+
+4. Update the Paysprint service file where API calls are made.
+
+Before sending request, generate token:
+
+--------------------------------------------------
+const jwtToken = generatePaysprintJWT();
+--------------------------------------------------
+
+5. Update headers to:
+
+--------------------------------------------------
+headers: {
+  "Content-Type": "application/json",
+  "Authorisedkey": process.env.PAYSPRINT_AUTHORISED_KEY,
+  "Token": jwtToken
+}
+--------------------------------------------------
+
+6. Ensure base URL is:
+   https://sit.paysprint.in/service-api/api/v1
+
+7. Do NOT send base64 token anymore.
+   Only send the generated 3-segment JWT.
+
+8. Restart server.
+
+9. Execute:
+   - Browse Plan (HLR)
+   - Do Recharge (with referenceid)
+   - Status Enquiry
+
+10. Capture fresh logs showing:
+   - Generated JWT (masked in document)
+   - HTTP status code
+   - Raw JSON response from SIT
+
+11. Update UAT document:
+   - Remove JWT format issue section
+   - Add confirmation that HS256 JWT is generated dynamically
+   - Include new successful JSON response if available
+   - Keep sensitive values masked
+
+Important:
+Do not fabricate responses.
+Only include real runtime responses from SIT.
+Mask JWT token in documentation.

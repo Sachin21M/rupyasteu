@@ -1,6 +1,6 @@
 import { encryptPayload } from "../utils/encryption";
 
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://sit.paysprint.in/service-api/api/v1";
 const PAYSPRINT_JWT = process.env.PAYSPRINT_JWT_TOKEN || "";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "UAT";

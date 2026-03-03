@@ -65,7 +65,7 @@ PAYSPRINT_AUTHORIZED_KEY = "MDBiMDE1MDI3MGI1YTk0MDJlNWM2OWFiYjA0MGFkY2U="
 PAYSPRINT_AES_KEY = "eda232007d8abd69"
 PAYSPRINT_AES_IV = "ba13a2557c6f7d7d"
 PAYSPRINT_ENV = "UAT"
-PAYSPRINT_BASE_URL = "https://api.paysprint.in/api/v1"
+PAYSPRINT_BASE_URL = "https://sit.paysprint.in/service-api/api/v1"
 
 [userenv.production]
 EXPO_PUBLIC_DOMAIN = "rupyasetuadmin.site"

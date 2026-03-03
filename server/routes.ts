@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { generateJwtToken, verifyJwtToken } from "./utils/encryption";
 import { validateUtr, validatePhone, validateAmount } from "./utils/validators";
 import { generateOtp, sendSmsAlert } from "./utils/smsalert";
-import { initiateRecharge, checkRechargeStatus } from "./services/paysprint";
+import { initiateRecharge, checkRechargeStatus, getOperatorInfo } from "./services/paysprint";
 import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema } from "../shared/schema";
 
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "MANUAL";
@@ -410,6 +410,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Admin reject error:", error);
       res.status(500).json({ error: "Failed to reject transaction" });
+    }
+  });
+
+  app.post("/api/admin/paysprint-test", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { action, operator, canumber, amount, recharge_type, number, type, referenceid } = req.body;
+
+      console.log("\n========================================");
+      console.log("[PAYSPRINT TEST] Action:", action);
+      console.log("[PAYSPRINT TEST] Timestamp:", new Date().toISOString());
+      console.log("========================================\n");
+
+      let result;
+      if (action === "browseplan") {
+        result = await getOperatorInfo({ number: number || "7067018549", type: type || "MOBILE" });
+      } else if (action === "dorecharge") {
+        result = await initiateRecharge({
+          operator: operator || "jio",
+          canumber: canumber || "7067018549",
+          amount: amount || 10,
+          recharge_type: recharge_type || "prepaid",
+        });
+      } else if (action === "status") {
+        result = await checkRechargeStatus(referenceid || "TEST123");
+      } else {
+        return res.status(400).json({ error: "Invalid action. Use: browseplan, dorecharge, status" });
+      }
+
+      res.json({ action, result });
+    } catch (error) {
+      console.error("[PAYSPRINT TEST] Error:", error);
+      res.status(500).json({ error: "Paysprint test failed" });
     }
   });
 

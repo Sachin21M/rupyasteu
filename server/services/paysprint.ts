@@ -1,6 +1,6 @@
 import { encryptPayload } from "../utils/encryption";
 
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://paysprint.in/service-api/api/v1";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_JWT = process.env.PAYSPRINT_JWT_TOKEN || "";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "UAT";
@@ -16,28 +16,53 @@ async function makePaysprintRequest(
   endpoint: string,
   payload: Record<string, unknown>
 ): Promise<PaysprintResponse> {
-  if (PAYSPRINT_ENV === "UAT" && (!PAYSPRINT_JWT || !PAYSPRINT_AUTH_KEY)) {
-    console.log("[Paysprint UAT] Simulating API call:", endpoint, payload);
+  if (!PAYSPRINT_JWT || !PAYSPRINT_AUTH_KEY) {
+    console.log("[Paysprint SIMULATION] No credentials configured. Simulating:", endpoint, payload);
     return simulateResponse(endpoint, payload);
   }
 
+  const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
+
   try {
     const encryptedPayload = encryptPayload(payload);
+    const requestBody = JSON.stringify({ encrypted_data: encryptedPayload });
 
-    const response = await fetch(`${PAYSPRINT_BASE_URL}${endpoint}`, {
+    console.log("=== [PAYSPRINT RAW API LOG] ===");
+    console.log("[PAYSPRINT] Mode: LIVE API CALL");
+    console.log("[PAYSPRINT] Timestamp:", new Date().toISOString());
+    console.log("[PAYSPRINT] Request URL:", fullUrl);
+    console.log("[PAYSPRINT] Request Method: POST");
+    console.log("[PAYSPRINT] Request Headers: { Content-Type: application/json, Authorisedkey: [MASKED], Token: [MASKED] }");
+    console.log("[PAYSPRINT] Plain Payload:", JSON.stringify(payload));
+    console.log("[PAYSPRINT] Encrypted Request Body:", requestBody);
+
+    const response = await fetch(fullUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorisedkey": PAYSPRINT_AUTH_KEY,
         "Token": PAYSPRINT_JWT,
       },
-      body: JSON.stringify({ encrypted_data: encryptedPayload }),
+      body: requestBody,
     });
 
-    const data = await response.json();
-    return data as PaysprintResponse;
+    const rawText = await response.text();
+
+    console.log("[PAYSPRINT] HTTP Status:", response.status);
+    console.log("[PAYSPRINT] Raw Response Body:", rawText);
+    console.log("=== [END PAYSPRINT RAW API LOG] ===");
+
+    let data: PaysprintResponse;
+    try {
+      data = JSON.parse(rawText) as PaysprintResponse;
+    } catch {
+      console.error("[PAYSPRINT] Failed to parse response as JSON. Raw text:", rawText);
+      return { status: false, response_code: 500, message: "Invalid JSON response from Paysprint" };
+    }
+
+    return data;
   } catch (error) {
-    console.error("[Paysprint] API Error:", error);
+    console.error("[PAYSPRINT] Network/Connection Error:", error);
     return {
       status: false,
       response_code: 500,

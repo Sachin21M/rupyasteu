@@ -368,6 +368,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         canumber: transaction.subscriberNumber,
         amount: transaction.amount,
         recharge_type: transaction.type === "MOBILE" ? "prepaid" : "dth",
+        referenceid: req.params.id,
       });
 
       if (rechargeResult.status) {
@@ -426,11 +427,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (action === "browseplan") {
         result = await getOperatorInfo({ number: number || "7067018549", type: type || "MOBILE" });
       } else if (action === "dorecharge") {
+        const testRefId = referenceid || `RSTEST${Date.now()}`;
         result = await initiateRecharge({
           operator: operator || "jio",
           canumber: canumber || "7067018549",
           amount: amount || 10,
           recharge_type: recharge_type || "prepaid",
+          referenceid: testRefId,
         });
       } else if (action === "status") {
         result = await checkRechargeStatus(referenceid || "TEST123");

@@ -113,12 +113,14 @@ export async function initiateRecharge(params: {
   canumber: string;
   amount: number;
   recharge_type: string;
+  referenceid: string;
 }): Promise<PaysprintResponse> {
   return makePaysprintRequest("/service/recharge/recharge/dorecharge", {
     operator: params.operator,
     canumber: params.canumber,
     amount: params.amount,
     recharge_type: params.recharge_type,
+    referenceid: params.referenceid,
   });
 }
 

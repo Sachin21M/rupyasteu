@@ -15,8 +15,9 @@ function generatePaysprintJWT(): string {
     product: "RECHARGE",
     reqid: timestamp,
   };
-  const decodedAuthKey = Buffer.from(PAYSPRINT_AUTH_KEY, "base64").toString("utf-8");
-  return jwt.sign(payload, decodedAuthKey, { algorithm: "HS256" });
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  const secret = Buffer.from(jwtTokenEnv, "base64").toString("utf-8");
+  return jwt.sign(payload, secret, { algorithm: "HS256" });
 }
 
 interface PaysprintResponse {
@@ -51,6 +52,7 @@ async function makePaysprintRequest(
     console.log("[PAYSPRINT] Encrypted Request Body:", requestBody);
 
     const jwtToken = generatePaysprintJWT();
+    console.log("[PAYSPRINT] JWT Token (masked):", jwtToken.substring(0, 20) + "...[MASKED]");
 
     const response = await fetch(fullUrl, {
       method: "POST",

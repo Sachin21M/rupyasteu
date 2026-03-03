@@ -1,0 +1,79 @@
+We need to update the existing Paysprint UAT Sign-Off document (Version 7.0).
+
+DO NOT regenerate the entire document.
+Only apply the following controlled corrections and increment version to 7.1.
+
+---------------------------------------
+1) AUTHENTICATION SECTION CORRECTION
+---------------------------------------
+
+In Section 2, REMOVE this sentence:
+
+"The Token header value is generated as an HS256 JWT as per Paysprint API documentation."
+
+Replace it with:
+
+"Token header included as per Paysprint API documentation. JWT token is generated using the credentials provided in the credential panel."
+
+Do NOT mention HS256.
+Do NOT mention signing secret assumptions.
+Keep it neutral and professional.
+
+---------------------------------------
+2) ENCRYPTION SECTION CORRECTION
+---------------------------------------
+
+In Section 3, MODIFY this line:
+
+Key : ******** (16-byte key, MD5 hashed before use)
+
+Replace it with:
+
+Key : ******** (as provided in credential panel)
+
+Do NOT mention MD5.
+Do NOT expose internal implementation logic.
+
+---------------------------------------
+3) SIGN-OFF SECTION SOFTENING
+---------------------------------------
+
+In Section 12 (Sign-Off box), REPLACE the final paragraph block:
+
+REMOVE:
+
+"Integration code is implemented. AES encryption, request structure, and endpoint connectivity are confirmed on the SIT environment. Do Recharge and Status Enquiry endpoints return structured JSON responses. Awaiting confirmation from Paysprint on IP whitelisting and signature verification for the SIT environment."
+
+REPLACE WITH:
+
+"Integration implementation completed as per provided API documentation. AES encryption, request structure, and endpoint connectivity have been implemented on the SIT environment. Awaiting confirmation from Paysprint regarding signature validation and IP configuration for the SIT environment."
+
+---------------------------------------
+4) VERSION UPDATE
+---------------------------------------
+
+Change:
+
+Document Ver: 7.0
+
+To:
+
+Document Ver: 7.1
+
+---------------------------------------
+5) DO NOT CHANGE:
+---------------------------------------
+
+- API logs
+- Response codes
+- Timestamps
+- Endpoints
+- Action items
+- Credential summary
+- Base URL
+- Authentication model
+- Any payload structure
+
+Only apply the above corrections.
+
+Generate updated clean markdown file ready for email attachment.

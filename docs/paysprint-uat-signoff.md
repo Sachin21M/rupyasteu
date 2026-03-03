@@ -4,7 +4,7 @@
 ================================================================================
 
 Date:           03 March 2026
-Document Ver:   7.0
+Document Ver:   7.1
 Prepared By:    RupyaSetu Development Team
 
 ================================================================================
@@ -36,8 +36,9 @@ Prepared By:    RupyaSetu Development Team
     3. Token Header — Sent as per Paysprint API documentation
 
   All three are included in every outbound API request to the
-  SIT environment. The Token header value is generated as an
-  HS256 JWT as per Paysprint API documentation.
+  SIT environment. Token header included as per Paysprint API
+  documentation. JWT token is generated using the credentials
+  provided in the credential panel.
 
   Awaiting confirmation from Paysprint if additional JWT signing
   secret configuration is required for the SIT environment.
@@ -53,15 +54,15 @@ Prepared By:    RupyaSetu Development Team
 
   Encryption Specification:
     Algorithm : AES-128-CBC
-    Key       : ******** (16-byte key, MD5 hashed before use)
+    Key       : ******** (as provided in credential panel)
     IV        : ******** (16-byte UTF-8)
     Encoding  : Base64 output
 
   Implementation Steps:
     1. Plain JSON payload is serialized to string
-    2. AES key is derived via MD5 hash of the raw key
-    3. IV is taken as first 16 bytes of the configured IV (UTF-8)
-    4. Payload is encrypted using AES-128-CBC with PKCS7 padding
+    2. AES key is configured as per credential panel
+    3. IV is configured as per credential panel (UTF-8)
+    4. Payload is encrypted using AES-128-CBC
     5. Ciphertext is Base64 encoded
     6. Sent as { "encrypted_data": "<base64>" }
 
@@ -216,7 +217,7 @@ Prepared By:    RupyaSetu Development Team
 ================================================================================
 
   [✓] AES-128-CBC encryption implemented
-  [✓] MD5 key derivation for AES key
+  [✓] AES key configured as per credential panel
   [✓] 16-byte UTF-8 IV configuration
   [✓] Base64 encoding of encrypted payloads
   [✓] SIT base URL configured: https://sit.paysprint.in/service-api/api/v1
@@ -277,7 +278,7 @@ Prepared By:    RupyaSetu Development Team
 
   Prepared By  :  RupyaSetu Development Team
   Date         :  03 March 2026
-  Version      :  7.0
+  Version      :  7.1
   Environment  :  UAT (sit.paysprint.in)
   Account Type :  IP AND AUTHORIZED KEY BASED
 
@@ -285,12 +286,12 @@ Prepared By:    RupyaSetu Development Team
   Direct SIT API Calls: 3
 
   ┌─────────────────────────────────────────────────────────────┐
-  │  Integration code is implemented. AES encryption, request   │
-  │  structure, and endpoint connectivity are confirmed on the  │
-  │  SIT environment. Do Recharge and Status Enquiry endpoints  │
-  │  return structured JSON responses. Awaiting confirmation    │
-  │  from Paysprint on IP whitelisting and signature            │
-  │  verification for the SIT environment.                      │
+  │  Integration implementation completed as per provided API    │
+  │  documentation. AES encryption, request structure, and      │
+  │  endpoint connectivity have been implemented on the SIT     │
+  │  environment. Awaiting confirmation from Paysprint          │
+  │  regarding signature validation and IP configuration for    │
+  │  the SIT environment.                                       │
   └─────────────────────────────────────────────────────────────┘
 
 ================================================================================

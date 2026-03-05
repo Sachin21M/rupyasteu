@@ -448,6 +448,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/admin/paysprint-test-raw", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { action, operator, canumber, amount, recharge_type, referenceid } = req.body;
+      const jwt = await import("jsonwebtoken");
+
+      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://sit.paysprint.in/service-api/api/v1";
+      const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+      const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
+      const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+
+      const timestamp = Date.now();
+      const reqid = timestamp.toString() + Math.floor(Math.random() * 10000).toString();
+      const jwtPayload = { timestamp, partnerId: PAYSPRINT_PARTNER_ID, reqid };
+      const jwtToken = jwt.default.sign(jwtPayload, jwtTokenEnv, { algorithm: "HS256" });
+
+      let endpoint = "/service/recharge/recharge/dorecharge";
+      let requestBody: Record<string, unknown> = {};
+
+      if (action === "status") {
+        endpoint = "/service/recharge/recharge/status";
+        requestBody = { referenceid: referenceid || "TEST123" };
+      } else {
+        const OPERATOR_MAP: Record<string, number> = { jio: 14, airtel: 4, vi: 33, vodafone: 33, idea: 34, bsnl: 8, mtnl: 10 };
+        const opCode = OPERATOR_MAP[(operator || "jio").toLowerCase()] || parseInt(operator) || 14;
+        requestBody = {
+          operator: opCode,
+          canumber: canumber || "7067018549",
+          amount: amount || 10,
+          referenceid: referenceid || `RSUAT${timestamp}`,
+        };
+      }
+
+      const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
+      const bodyStr = JSON.stringify(requestBody);
+
+      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorisedkey: ${PAYSPRINT_AUTH_KEY}" \\\n  --header "Token: ${jwtToken}" \\\n  --data-raw '${bodyStr}'`;
+
+      const response = await fetch(fullUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorisedkey": PAYSPRINT_AUTH_KEY,
+          "Token": jwtToken,
+        },
+        body: bodyStr,
+      });
+
+      const rawText = await response.text();
+      let parsedResponse;
+      try {
+        const jsonMatch = rawText.match(/\{[^<]*\}$/);
+        parsedResponse = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
+      } catch {
+        parsedResponse = { raw: rawText };
+      }
+
+      res.json({
+        timestamp: new Date().toISOString(),
+        request_url: fullUrl,
+        request_headers: {
+          "Content-Type": "application/json",
+          "Authorisedkey": PAYSPRINT_AUTH_KEY,
+          "Token": jwtToken,
+        },
+        request_body: requestBody,
+        jwt_payload: jwtPayload,
+        http_status: response.status,
+        response: parsedResponse,
+        curl_command: curlCommand,
+      });
+    } catch (error) {
+      console.error("[PAYSPRINT RAW TEST] Error:", error);
+      res.status(500).json({ error: "Paysprint raw test failed", details: String(error) });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

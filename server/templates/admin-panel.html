@@ -153,6 +153,38 @@
     .pulse { width: 6px; height: 6px; border-radius: 50%; background: #2E9E5B; animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+    .paysprint-section {
+      padding: 0 32px 24px;
+    }
+    .paysprint-card {
+      background: #fff; border-radius: 12px; border: 1px solid #e0e0e0; padding: 24px;
+    }
+    .paysprint-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: #1a1a1a; }
+    .paysprint-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; }
+    .paysprint-form .field { display: flex; flex-direction: column; gap: 4px; }
+    .paysprint-form .field label { font-size: 12px; font-weight: 600; color: #666; }
+    .paysprint-form .field input, .paysprint-form .field select {
+      padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; min-width: 120px;
+    }
+    .test-btn {
+      padding: 8px 20px; background: #2E9E5B; color: #fff; border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .test-btn:hover { background: #258A4E; }
+    .test-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .raw-log {
+      background: #1a1a2e; color: #00ff88; border-radius: 8px; padding: 16px;
+      font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6;
+      max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+      display: none;
+    }
+    .raw-log.visible { display: block; }
+    .copy-log-btn {
+      padding: 6px 14px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 6px;
+      font-size: 12px; cursor: pointer; margin-bottom: 8px; display: none;
+    }
+    .copy-log-btn.visible { display: inline-block; }
+
     @media (max-width: 768px) {
       .topbar { padding: 12px 16px; }
       .stats-grid { padding: 16px; grid-template-columns: repeat(2, 1fr); }
@@ -160,6 +192,8 @@
       .table-header { flex-direction: column; gap: 12px; align-items: flex-start; }
       .table-wrap { overflow-x: auto; }
       table { min-width: 800px; }
+      .paysprint-section { padding: 0 16px 16px; }
+      .paysprint-form { flex-direction: column; }
     }
   </style>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -257,6 +291,35 @@
     </div>
   </div>
 </div>
+
+  <div class="paysprint-section">
+    <div class="paysprint-card">
+      <h2>Paysprint API Test</h2>
+      <div class="paysprint-form">
+        <div class="field">
+          <label>Operator</label>
+          <select id="psOperator">
+            <option value="jio">Jio (14)</option>
+            <option value="airtel">Airtel (4)</option>
+            <option value="vi">VI (33)</option>
+            <option value="bsnl">BSNL (8)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Mobile Number</label>
+          <input type="text" id="psNumber" value="7067018549" />
+        </div>
+        <div class="field">
+          <label>Amount</label>
+          <input type="number" id="psAmount" value="10" />
+        </div>
+        <button class="test-btn" id="psTestBtn" onclick="testPaysprint('dorecharge')">Test Recharge</button>
+        <button class="test-btn" style="background:#2563eb" onclick="testPaysprint('status')">Test Status</button>
+      </div>
+      <button class="copy-log-btn" id="copyLogBtn" onclick="copyRawLog()">Copy Raw Log</button>
+      <div class="raw-log" id="rawLog"></div>
+    </div>
+  </div>
 
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal">
@@ -517,6 +580,71 @@ async function confirmAction() {
   } finally {
     confirmBtn.disabled = false;
   }
+}
+
+async function testPaysprint(action) {
+  const btn = document.getElementById('psTestBtn');
+  const logEl = document.getElementById('rawLog');
+  const copyBtn = document.getElementById('copyLogBtn');
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  logEl.className = 'raw-log visible';
+  logEl.textContent = 'Sending request to Paysprint SIT API...\n';
+
+  try {
+    const operator = document.getElementById('psOperator').value;
+    const canumber = document.getElementById('psNumber').value;
+    const amount = parseInt(document.getElementById('psAmount').value) || 10;
+    const referenceid = 'RSUAT' + Date.now();
+
+    const body = action === 'status'
+      ? { action: 'status', referenceid }
+      : { action: 'dorecharge', operator, canumber, amount, recharge_type: 'prepaid', referenceid };
+
+    const res = await fetch('/api/admin/paysprint-test-raw', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (res.status === 401) { handleLogout(); return; }
+    const data = await res.json();
+
+    let log = '=== PAYSPRINT RAW API LOG ===\n';
+    log += 'Timestamp: ' + (data.timestamp || new Date().toISOString()) + '\n\n';
+    log += '--- REQUEST ---\n';
+    log += 'URL: ' + (data.request_url || '') + '\n';
+    log += 'Method: POST\n';
+    log += 'Headers:\n';
+    if (data.request_headers) {
+      Object.entries(data.request_headers).forEach(([k, v]) => { log += '  ' + k + ': ' + v + '\n'; });
+    }
+    log += '\nBody:\n' + JSON.stringify(data.request_body || body, null, 2) + '\n';
+    log += '\nJWT Payload (decoded):\n' + JSON.stringify(data.jwt_payload || {}, null, 2) + '\n';
+    log += '\n--- RESPONSE ---\n';
+    log += 'HTTP Status: ' + (data.http_status || '') + '\n';
+    log += 'Raw Response:\n' + JSON.stringify(data.response || data.result || {}, null, 2) + '\n';
+    log += '\n--- CURL COMMAND ---\n';
+    log += (data.curl_command || '') + '\n';
+    log += '\n=== END LOG ===';
+
+    logEl.textContent = log;
+    copyBtn.className = 'copy-log-btn visible';
+  } catch (e) {
+    logEl.textContent = 'ERROR: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Recharge';
+  }
+}
+
+function copyRawLog() {
+  const logEl = document.getElementById('rawLog');
+  navigator.clipboard.writeText(logEl.textContent).then(() => {
+    const btn = document.getElementById('copyLogBtn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy Raw Log'; }, 2000);
+  });
 }
 
 function startAutoRefresh() {

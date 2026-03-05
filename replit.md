@@ -103,11 +103,14 @@ shared/
 - Admin API: POST `/api/admin/login`, GET `/api/admin/transactions`, POST `/api/admin/transactions/:id/approve`, POST `/api/admin/transactions/:id/reject`
 
 ## Paysprint Integration Notes
+- Official docs: https://pay-sprint.readme.io/reference/authentication-1
+- JWT payload: `{ timestamp (ms), partnerId, reqid }` — NO iss/product fields
 - JWT signing: Use raw base64 JWT Token string as HS256 secret (NOT decoded)
-- Payload format: Plain JSON (no AES encryption needed for SIT)
-- Operator codes: Numeric IDs (14=Jio, 4=Airtel, 33=VI, 8=BSNL, etc.)
+- Payload format: Plain JSON (SIT accepts plain JSON; AES encryption for production)
+- Operator codes: Numeric IDs (14=Jio, 4=Airtel, 33=VI, 8=BSNL, 10=MTNL, 34=Idea)
 - IP 34.41.220.14 whitelisted in credential panel
 - Current status: Authentication PASSED, wallet needs funding for successful recharge
+- Fund request: UAT portal > Fund request > Exceptional fund > Amount > Upload JPG
 - Paysprint runs in simulation mode when API keys not configured
 
 ## Notes

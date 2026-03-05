@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-import { encryptPayload } from "../utils/encryption";
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://sit.paysprint.in/service-api/api/v1";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
@@ -37,8 +36,7 @@ async function makePaysprintRequest(
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
 
   try {
-    const encryptedPayload = encryptPayload(payload);
-    const requestBody = JSON.stringify({ encrypted_data: encryptedPayload });
+    const requestBody = JSON.stringify(payload);
 
     console.log("=== [PAYSPRINT RAW API LOG] ===");
     console.log("[PAYSPRINT] Mode: LIVE API CALL");
@@ -46,8 +44,7 @@ async function makePaysprintRequest(
     console.log("[PAYSPRINT] Request URL:", fullUrl);
     console.log("[PAYSPRINT] Request Method: POST");
     console.log("[PAYSPRINT] Request Headers: { Content-Type: application/json, Authorisedkey: [MASKED], Token: [MASKED] }");
-    console.log("[PAYSPRINT] Plain Payload:", JSON.stringify(payload));
-    console.log("[PAYSPRINT] Encrypted Request Body:", requestBody);
+    console.log("[PAYSPRINT] Request Body:", requestBody);
 
     const jwtToken = generatePaysprintJWT();
     console.log("[PAYSPRINT] JWT Token (masked):", jwtToken.substring(0, 20) + "...[MASKED]");

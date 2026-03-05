@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-import { encryptPayload } from "../utils/encryption";
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://sit.paysprint.in/service-api/api/v1";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
@@ -16,8 +15,7 @@ function generatePaysprintJWT(): string {
     reqid: timestamp,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  const secret = Buffer.from(jwtTokenEnv, "base64").toString("utf-8");
-  return jwt.sign(payload, secret, { algorithm: "HS256" });
+  return jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
 }
 
 interface PaysprintResponse {
@@ -39,8 +37,7 @@ async function makePaysprintRequest(
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
 
   try {
-    const encryptedPayload = encryptPayload(payload);
-    const requestBody = JSON.stringify({ encrypted_data: encryptedPayload });
+    const requestBody = JSON.stringify(payload);
 
     console.log("=== [PAYSPRINT RAW API LOG] ===");
     console.log("[PAYSPRINT] Mode: LIVE API CALL");
@@ -48,8 +45,7 @@ async function makePaysprintRequest(
     console.log("[PAYSPRINT] Request URL:", fullUrl);
     console.log("[PAYSPRINT] Request Method: POST");
     console.log("[PAYSPRINT] Request Headers: { Content-Type: application/json, Authorisedkey: [MASKED], Token: [MASKED] }");
-    console.log("[PAYSPRINT] Plain Payload:", JSON.stringify(payload));
-    console.log("[PAYSPRINT] Encrypted Request Body:", requestBody);
+    console.log("[PAYSPRINT] Request Body:", requestBody);
 
     const jwtToken = generatePaysprintJWT();
     console.log("[PAYSPRINT] JWT Token (masked):", jwtToken.substring(0, 20) + "...[MASKED]");
@@ -70,9 +66,15 @@ async function makePaysprintRequest(
     console.log("[PAYSPRINT] Raw Response Body:", rawText);
     console.log("=== [END PAYSPRINT RAW API LOG] ===");
 
+    let jsonText = rawText;
+    const jsonMatch = rawText.match(/\{[^<]*\}$/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[0];
+    }
+
     let data: PaysprintResponse;
     try {
-      data = JSON.parse(rawText) as PaysprintResponse;
+      data = JSON.parse(jsonText) as PaysprintResponse;
     } catch {
       console.error("[PAYSPRINT] Failed to parse response as JSON. Raw text:", rawText);
       return { status: false, response_code: 500, message: "Invalid JSON response from Paysprint" };
@@ -126,6 +128,16 @@ function simulateResponse(
   };
 }
 
+const OPERATOR_MAP: Record<string, number> = {
+  "jio": 14,
+  "airtel": 4,
+  "vi": 33,
+  "vodafone": 33,
+  "idea": 34,
+  "bsnl": 8,
+  "mtnl": 10,
+};
+
 export async function initiateRecharge(params: {
   operator: string;
   canumber: string;
@@ -133,11 +145,11 @@ export async function initiateRecharge(params: {
   recharge_type: string;
   referenceid: string;
 }): Promise<PaysprintResponse> {
+  const operatorCode = OPERATOR_MAP[params.operator.toLowerCase()] || parseInt(params.operator) || 14;
   return makePaysprintRequest("/service/recharge/recharge/dorecharge", {
-    operator: params.operator,
+    operator: operatorCode,
     canumber: params.canumber,
     amount: params.amount,
-    recharge_type: params.recharge_type,
     referenceid: params.referenceid,
   });
 }

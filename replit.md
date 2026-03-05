@@ -47,7 +47,7 @@ server/
   storage.ts            # PostgreSQL data storage
   controllers/          # (reserved for future)
   services/
-    paysprint.ts        # Paysprint API integration (UAT simulation)
+    paysprint.ts        # Paysprint API integration (SIT — authenticated, wallet funding needed)
   utils/
     encryption.ts       # AES encryption, JWT helpers
     validators.ts       # Input validation (UTR, phone, amount)
@@ -63,7 +63,7 @@ shared/
 5. Admin approval flow — UTR submitted → admin approves/rejects → Paysprint recharge triggered on approval
 6. Web-based Admin Panel at `/admin` for transaction management
 7. Transaction history with status tracking
-8. Paysprint API integration (UAT simulation mode)
+8. Paysprint API integration (SIT environment — authenticated, wallet funding needed)
 9. Privacy, Help & Support, About screens
 
 ## Environment Variables
@@ -102,7 +102,14 @@ shared/
 - Features: dashboard stats, transaction table with filters (All/Pending/Approved/Rejected), approve/reject buttons, auto-refresh every 30s
 - Admin API: POST `/api/admin/login`, GET `/api/admin/transactions`, POST `/api/admin/transactions/:id/approve`, POST `/api/admin/transactions/:id/reject`
 
+## Paysprint Integration Notes
+- JWT signing: Use raw base64 JWT Token string as HS256 secret (NOT decoded)
+- Payload format: Plain JSON (no AES encryption needed for SIT)
+- Operator codes: Numeric IDs (14=Jio, 4=Airtel, 33=VI, 8=BSNL, etc.)
+- IP 34.41.220.14 whitelisted in credential panel
+- Current status: Authentication PASSED, wallet needs funding for successful recharge
+- Paysprint runs in simulation mode when API keys not configured
+
 ## Notes
 - Payment mode is configurable via PAYMENT_MODE env var
 - Code structured for easy gateway integration later
-- Paysprint runs in UAT simulation when API keys not configured

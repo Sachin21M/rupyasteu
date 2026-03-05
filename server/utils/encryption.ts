@@ -5,10 +5,7 @@ const AES_IV = process.env.PAYSPRINT_AES_IV || "default_iv_for_uat";
 
 export function encryptPayload(data: Record<string, unknown>): string {
   const text = JSON.stringify(data);
-  const key = crypto
-    .createHash("md5")
-    .update(AES_KEY)
-    .digest();
+  const key = Buffer.from(AES_KEY.slice(0, 16), "utf-8");
   const iv = Buffer.from(AES_IV.slice(0, 16), "utf-8");
   const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
   let encrypted = cipher.update(text, "utf8", "base64");
@@ -17,10 +14,7 @@ export function encryptPayload(data: Record<string, unknown>): string {
 }
 
 export function decryptPayload(encrypted: string): Record<string, unknown> {
-  const key = crypto
-    .createHash("md5")
-    .update(AES_KEY)
-    .digest();
+  const key = Buffer.from(AES_KEY.slice(0, 16), "utf-8");
   const iv = Buffer.from(AES_IV.slice(0, 16), "utf-8");
   const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
   let decrypted = decipher.update(encrypted, "base64", "utf8");

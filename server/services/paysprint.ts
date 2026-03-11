@@ -1,9 +1,7 @@
 import jwt from "jsonwebtoken";
 import { encryptPayload } from "../utils/encryption";
 
-// LIVE URL: https://api.paysprint.in/api/v1 (per Paysprint instructions: replace "sit" with "api" AND remove "service-api/" from SIT URL)
-// SIT URL was: https://sit.paysprint.in/service-api/api/v1
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
 const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
@@ -16,8 +14,10 @@ function generatePaysprintJWT(): string {
   const timestamp = Date.now();
   const reqid = timestamp.toString() + Math.floor(Math.random() * 10000).toString();
   const payload = {
+    iss: "PAYSPRINT",
     timestamp: timestamp,
     partnerId: PAYSPRINT_PARTNER_ID,
+    product: "WALLET",
     reqid: reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";

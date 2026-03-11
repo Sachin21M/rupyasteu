@@ -61,7 +61,7 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "rupyasetu@2026"
 PAYEE_UPI_ID = "charua821@okaxis"
 PAYSPRINT_ENV = "PRODUCTION"
-PAYSPRINT_BASE_URL = "https://api.paysprint.in/api/v1"
+PAYSPRINT_BASE_URL = "https://api.paysprint.in/service-api/api/v1"
 
 [userenv.production]
 EXPO_PUBLIC_DOMAIN = "rupyasetuadmin.site"

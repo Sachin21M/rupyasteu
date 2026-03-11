@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   Linking,
+  Alert,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -38,12 +39,13 @@ export default function UtrScreen() {
   async function handleOpenUpi() {
     const upiUrl = `upi://pay?pa=${upiVpa}&pn=RupyaSetu&am=${amount}&tn=${encodeURIComponent(upiNote || "Recharge")}&cu=INR`;
     try {
-      const canOpen = await Linking.canOpenURL(upiUrl);
-      if (canOpen) {
-        await Linking.openURL(upiUrl);
-      }
+      await Linking.openURL(upiUrl);
     } catch {
-      // UPI apps not available (web/simulator)
+      Alert.alert(
+        "No UPI App Found",
+        "Could not open a UPI app. Please make sure you have Google Pay, PhonePe, Paytm, or another UPI app installed.",
+        [{ text: "OK" }]
+      );
     }
   }
 

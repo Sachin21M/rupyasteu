@@ -98,6 +98,9 @@ async function makePaysprintRequest(
       data = JSON.parse(jsonText) as PaysprintResponse;
     } catch {
       console.error("[PAYSPRINT] Failed to parse response as JSON. Raw text:", rawText);
+      if (rawText.includes("not available in your region")) {
+        return { status: false, response_code: 403, message: "Paysprint API blocked: geographic restriction. Server IP not whitelisted for LIVE access." };
+      }
       return { status: false, response_code: 500, message: "Invalid JSON response from Paysprint" };
     }
 

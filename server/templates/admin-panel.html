@@ -494,13 +494,21 @@ function renderTable() {
   empty.style.display = 'none';
   tbody.innerHTML = filtered.map(tx => {
     const isPending = tx.paymentStatus === 'PAYMENT_UNVERIFIED' && tx.rechargeStatus === 'RECHARGE_PENDING';
+    const isRetryable = tx.paymentStatus === 'PAYMENT_VERIFIED' && 
+      (tx.rechargeStatus === 'RECHARGE_PENDING' || tx.rechargeStatus === 'RECHARGE_FAILED');
     const safeId = esc(tx.id);
     const safePhone = esc(tx.userPhone || '—');
     const safeAmount = esc(String(tx.amount));
-    const actions = isPending
-      ? `<button class="action-btn approve" onclick="showModal('approve','${safeId}','${safePhone}',${safeAmount})">Approve</button>
-         <button class="action-btn reject" onclick="showModal('reject','${safeId}','${safePhone}',${safeAmount})">Reject</button>`
-      : `<span class="no-action">—</span>`;
+    let actions;
+    if (isPending) {
+      actions = `<button class="action-btn approve" onclick="showModal('approve','${safeId}','${safePhone}',${safeAmount})">Approve</button>
+         <button class="action-btn reject" onclick="showModal('reject','${safeId}','${safePhone}',${safeAmount})">Reject</button>`;
+    } else if (isRetryable) {
+      actions = `<button class="action-btn approve" onclick="retryRecharge('${safeId}')">Retry</button>
+         <button class="action-btn" style="background:#2563eb;color:#fff;margin-left:6px" onclick="markSuccess('${safeId}')">Mark Done</button>`;
+    } else {
+      actions = `<span class="no-action">—</span>`;
+    }
 
     return `<tr>
       <td>${esc(formatDate(tx.createdAt))}</td>
@@ -571,6 +579,9 @@ async function confirmAction() {
     const data = await res.json();
     if (data.success) {
       closeModal();
+      if (data.rechargeMessage && data.rechargeMessage.includes('geographic')) {
+        alert('Payment approved, but Paysprint API is blocked by geographic restriction. The recharge is kept as pending — use "Retry" or "Mark Done" in the Actions column.');
+      }
       loadTransactions();
     } else {
       alert(data.error || 'Action failed');
@@ -579,6 +590,53 @@ async function confirmAction() {
     alert('Network error. Please try again.');
   } finally {
     confirmBtn.disabled = false;
+  }
+}
+
+async function retryRecharge(txId) {
+  if (!confirm('Retry the Paysprint recharge for this transaction?')) return;
+  try {
+    const res = await fetch(`/api/admin/transactions/${txId}/retry`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + adminToken,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (res.status === 401) { handleLogout(); return; }
+    const data = await res.json();
+    if (data.success) {
+      if (data.rechargeMessage && data.rechargeMessage.includes('geographic')) {
+        alert('Paysprint API is still blocked by geographic restriction. Transaction kept as pending. You can use "Mark Done" if you completed the recharge manually.');
+      }
+      loadTransactions();
+    } else {
+      alert(data.error || 'Retry failed');
+    }
+  } catch {
+    alert('Network error. Please try again.');
+  }
+}
+
+async function markSuccess(txId) {
+  if (!confirm('Mark this recharge as completed? Only do this if you have completed the recharge manually outside the app.')) return;
+  try {
+    const res = await fetch(`/api/admin/transactions/${txId}/mark-success`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + adminToken,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (res.status === 401) { handleLogout(); return; }
+    const data = await res.json();
+    if (data.success) {
+      loadTransactions();
+    } else {
+      alert(data.error || 'Failed to mark as success');
+    }
+  } catch {
+    alert('Network error. Please try again.');
   }
 }
 

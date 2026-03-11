@@ -376,6 +376,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           paysprintRefId: rechargeResult.data?.ackno as string,
           rechargeStatus: "RECHARGE_SUCCESS",
         });
+      } else if (rechargeResult.response_code === 403) {
+        await storage.updateTransaction(req.params.id, {
+          rechargeStatus: "RECHARGE_PENDING",
+        });
       } else {
         await storage.updateTransaction(req.params.id, {
           rechargeStatus: "RECHARGE_FAILED",
@@ -383,10 +387,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const updatedTx = await storage.getTransaction(req.params.id);
-      res.json({ success: true, transaction: updatedTx });
+      res.json({ success: true, transaction: updatedTx, rechargeMessage: rechargeResult.message });
     } catch (error) {
       console.error("Admin approve error:", error);
       res.status(500).json({ error: "Failed to approve transaction" });
+    }
+  });
+
+  app.post("/api/admin/transactions/:id/retry", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const transaction = await storage.getTransaction(req.params.id);
+      if (!transaction) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+
+      if (transaction.paymentStatus !== "PAYMENT_VERIFIED" || 
+          (transaction.rechargeStatus !== "RECHARGE_PENDING" && transaction.rechargeStatus !== "RECHARGE_FAILED")) {
+        return res.status(400).json({ error: "Transaction is not in a retryable state" });
+      }
+
+      await storage.updateTransaction(req.params.id, {
+        rechargeStatus: "RECHARGE_PROCESSING",
+      });
+
+      const rechargeResult = await initiateRecharge({
+        operator: transaction.operatorId,
+        canumber: transaction.subscriberNumber,
+        amount: transaction.amount,
+        recharge_type: transaction.type === "MOBILE" ? "prepaid" : "dth",
+        referenceid: req.params.id,
+      });
+
+      if (rechargeResult.status) {
+        await storage.updateTransaction(req.params.id, {
+          paysprintRefId: rechargeResult.data?.ackno as string,
+          rechargeStatus: "RECHARGE_SUCCESS",
+        });
+      } else if (rechargeResult.response_code === 403) {
+        await storage.updateTransaction(req.params.id, {
+          rechargeStatus: "RECHARGE_PENDING",
+        });
+      } else {
+        await storage.updateTransaction(req.params.id, {
+          rechargeStatus: "RECHARGE_FAILED",
+        });
+      }
+
+      const updatedTx = await storage.getTransaction(req.params.id);
+      res.json({ success: true, transaction: updatedTx, rechargeMessage: rechargeResult.message });
+    } catch (error) {
+      console.error("Admin retry error:", error);
+      res.status(500).json({ error: "Failed to retry recharge" });
+    }
+  });
+
+  app.post("/api/admin/transactions/:id/mark-success", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const transaction = await storage.getTransaction(req.params.id);
+      if (!transaction) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+
+      if (transaction.paymentStatus !== "PAYMENT_VERIFIED") {
+        return res.status(400).json({ error: "Payment must be verified before marking recharge as success" });
+      }
+
+      await storage.updateTransaction(req.params.id, {
+        rechargeStatus: "RECHARGE_SUCCESS",
+        paysprintRefId: "MANUAL_" + Date.now(),
+      });
+
+      const updatedTx = await storage.getTransaction(req.params.id);
+      res.json({ success: true, transaction: updatedTx });
+    } catch (error) {
+      console.error("Admin mark-success error:", error);
+      res.status(500).json({ error: "Failed to mark transaction as success" });
     }
   });
 

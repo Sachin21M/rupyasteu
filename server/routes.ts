@@ -500,7 +500,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bodyStr = JSON.stringify(requestBody);
       }
 
-      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorisedkey: ${PAYSPRINT_AUTH_KEY}" \\\n  --header "Token: ${jwtToken}" \\\n  --data-raw '${bodyStr}'`;
+      const maskedAuthKey = PAYSPRINT_AUTH_KEY ? PAYSPRINT_AUTH_KEY.substring(0, 8) + "..." : "(not set)";
+      const maskedToken = jwtToken.substring(0, 20) + "...";
+      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorisedkey: ${maskedAuthKey}" \\\n  --header "Token: ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
 
       const response = await fetch(fullUrl, {
         method: "POST",
@@ -528,8 +530,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         request_url: fullUrl,
         request_headers: {
           "Content-Type": "application/json",
-          "Authorisedkey": PAYSPRINT_AUTH_KEY,
-          "Token": jwtToken,
+          "Authorisedkey": PAYSPRINT_AUTH_KEY ? PAYSPRINT_AUTH_KEY.substring(0, 8) + "..." : "(not set)",
+          "Token": jwtToken.substring(0, 20) + "...",
         },
         request_body: requestBody,
         request_body_sent: bodyStr,

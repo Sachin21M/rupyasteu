@@ -621,6 +621,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/admin/server-info", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const ipRes = await fetch("https://api.ipify.org?format=json");
+      const ipData = await ipRes.json() as { ip: string };
+      res.json({ outbound_ip: ipData.ip, env: process.env.PAYSPRINT_ENV, base_url: process.env.PAYSPRINT_BASE_URL });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check IP", details: String(error) });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

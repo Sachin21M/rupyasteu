@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { encryptPayload } from "../utils/encryption";
 
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
 const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";

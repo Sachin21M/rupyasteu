@@ -485,9 +485,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
       let bodyStr: string;
+      let encryptionActual = useEncryption ? "AES-128-CBC" : "Plain JSON";
       if (useEncryption) {
-        const encrypted = encryptPayload(requestBody);
-        bodyStr = JSON.stringify({ body: encrypted });
+        try {
+          const encrypted = encryptPayload(requestBody);
+          bodyStr = JSON.stringify({ body: encrypted });
+        } catch (encErr) {
+          console.warn("[PAYSPRINT RAW TEST] AES encryption failed, falling back to plain JSON:", encErr);
+          bodyStr = JSON.stringify(requestBody);
+          encryptionActual = "Plain JSON (AES fallback)";
+        }
       } else {
         bodyStr = JSON.stringify(requestBody);
       }
@@ -516,7 +523,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         timestamp: new Date().toISOString(),
         environment: PAYSPRINT_ENV_VAL,
-        encryption: useEncryption ? "AES-128-CBC" : "Plain JSON",
+        encryption: encryptionActual,
         request_url: fullUrl,
         request_headers: {
           "Content-Type": "application/json",

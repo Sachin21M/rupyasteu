@@ -45,8 +45,13 @@ async function makePaysprintRequest(
     let requestBody: string;
 
     if (useEncryption) {
-      const encrypted = encryptPayload(payload);
-      requestBody = JSON.stringify({ body: encrypted });
+      try {
+        const encrypted = encryptPayload(payload);
+        requestBody = JSON.stringify({ body: encrypted });
+      } catch (encErr) {
+        console.warn("[PAYSPRINT] AES encryption failed, falling back to plain JSON:", encErr);
+        requestBody = JSON.stringify(payload);
+      }
     } else {
       requestBody = JSON.stringify(payload);
     }

@@ -47,7 +47,7 @@ server/
   storage.ts            # PostgreSQL data storage
   controllers/          # (reserved for future)
   services/
-    paysprint.ts        # Paysprint API integration (SIT — authenticated, wallet funding needed)
+    paysprint.ts        # Paysprint API integration (LIVE — AES encrypted, IP BASED auth)
   utils/
     encryption.ts       # AES encryption, JWT helpers
     validators.ts       # Input validation (UTR, phone, amount)
@@ -63,7 +63,7 @@ shared/
 5. Admin approval flow — UTR submitted → admin approves/rejects → Paysprint recharge triggered on approval
 6. Web-based Admin Panel at `/admin` for transaction management
 7. Transaction history with status tracking
-8. Paysprint API integration (SIT environment — authenticated, wallet funding needed)
+8. Paysprint API integration (LIVE environment — AES encrypted, IP BASED auth)
 9. Privacy, Help & Support, About screens
 
 ## Environment Variables
@@ -104,13 +104,18 @@ shared/
 
 ## Paysprint Integration Notes
 - Official docs: https://pay-sprint.readme.io/reference/authentication-1
+- **Environment: LIVE (PRODUCTION)** — switched from SIT/UAT
+- LIVE Base URL: `https://api.paysprint.in/api/v1` (note: no `service-api/` prefix — different from SIT)
+- SIT Base URL was: `https://sit.paysprint.in/service-api/api/v1`
 - JWT payload: `{ timestamp (ms), partnerId, reqid }` — NO iss/product fields
 - JWT signing: Use raw base64 JWT Token string as HS256 secret (NOT decoded)
-- Payload format: Plain JSON (SIT accepts plain JSON; AES encryption for production)
+- Payload format: AES-128-CBC encrypted for PRODUCTION (`{"body":"<encrypted>"}`) — plain JSON for SIT/UAT
 - Operator codes: Numeric IDs (14=Jio, 4=Airtel, 33=VI, 8=BSNL, 10=MTNL, 34=Idea)
-- IP 34.41.220.14 whitelisted in credential panel
-- Current status: Authentication PASSED, wallet needs funding for successful recharge
-- Fund request: UAT portal > Fund request > Exceptional fund > Amount > Upload JPG
+- LIVE account version: IP BASED (no separate Authorised Key — JWT KEY used as Authorisedkey header)
+- LIVE Partner ID: `PS006853d7abd4d179a5ae3775d9e77eb9caf7471772716264` (decoded from LIVE JWT KEY)
+- Dev server IP: 34.68.16.191 (whitelisted on LIVE panel)
+- Production server IP: 34.111.179.208 (MUST also be whitelisted for deployed app)
+- **IMPORTANT**: LIVE API has geographic restrictions — blocks requests from non-Indian IPs. Server must be deployed in India or IPs must be explicitly unblocked by Paysprint.
 - Paysprint runs in simulation mode when API keys not configured
 
 ## Notes

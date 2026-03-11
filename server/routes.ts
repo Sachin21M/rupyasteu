@@ -452,11 +452,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { action, operator, canumber, amount, recharge_type, referenceid } = req.body;
       const jwt = await import("jsonwebtoken");
+      const { encryptPayload } = await import("./utils/encryption");
 
-      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://sit.paysprint.in/service-api/api/v1";
+      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
       const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
       const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
+      const PAYSPRINT_ENV_VAL = process.env.PAYSPRINT_ENV || "PRODUCTION";
       const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+      const useEncryption = PAYSPRINT_ENV_VAL === "PRODUCTION" || PAYSPRINT_ENV_VAL === "LIVE";
 
       const timestamp = Date.now();
       const reqid = timestamp.toString() + Math.floor(Math.random() * 10000).toString();
@@ -476,12 +479,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           operator: opCode,
           canumber: canumber || "7067018549",
           amount: amount || 10,
-          referenceid: referenceid || `RSUAT${timestamp}`,
+          referenceid: referenceid || `RSLIVE${timestamp}`,
         };
       }
 
       const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
-      const bodyStr = JSON.stringify(requestBody);
+      let bodyStr: string;
+      if (useEncryption) {
+        const encrypted = encryptPayload(requestBody);
+        bodyStr = JSON.stringify({ body: encrypted });
+      } else {
+        bodyStr = JSON.stringify(requestBody);
+      }
 
       const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorisedkey: ${PAYSPRINT_AUTH_KEY}" \\\n  --header "Token: ${jwtToken}" \\\n  --data-raw '${bodyStr}'`;
 
@@ -506,6 +515,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         timestamp: new Date().toISOString(),
+        environment: PAYSPRINT_ENV_VAL,
+        encryption: useEncryption ? "AES-128-CBC" : "Plain JSON",
         request_url: fullUrl,
         request_headers: {
           "Content-Type": "application/json",
@@ -513,6 +524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           "Token": jwtToken,
         },
         request_body: requestBody,
+        request_body_sent: bodyStr,
         jwt_payload: jwtPayload,
         http_status: response.status,
         response: parsedResponse,

@@ -1,9 +1,14 @@
 import jwt from "jsonwebtoken";
+import { encryptPayload } from "../utils/encryption";
 
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://sit.paysprint.in/service-api/api/v1";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
 const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
-const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "UAT";
+const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
+
+function isProductionEnv(): boolean {
+  return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
+}
 
 function generatePaysprintJWT(): string {
   const timestamp = Date.now();
@@ -36,15 +41,25 @@ async function makePaysprintRequest(
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
 
   try {
-    const requestBody = JSON.stringify(payload);
+    const useEncryption = isProductionEnv();
+    let requestBody: string;
+
+    if (useEncryption) {
+      const encrypted = encryptPayload(payload);
+      requestBody = JSON.stringify({ body: encrypted });
+    } else {
+      requestBody = JSON.stringify(payload);
+    }
 
     console.log("=== [PAYSPRINT RAW API LOG] ===");
-    console.log("[PAYSPRINT] Mode: LIVE API CALL");
+    console.log("[PAYSPRINT] Mode:", useEncryption ? "PRODUCTION (AES Encrypted)" : "UAT/SIT (Plain JSON)");
+    console.log("[PAYSPRINT] Environment:", PAYSPRINT_ENV);
     console.log("[PAYSPRINT] Timestamp:", new Date().toISOString());
     console.log("[PAYSPRINT] Request URL:", fullUrl);
     console.log("[PAYSPRINT] Request Method: POST");
     console.log("[PAYSPRINT] Request Headers: { Content-Type: application/json, Authorisedkey: [MASKED], Token: [MASKED] }");
-    console.log("[PAYSPRINT] Request Body:", requestBody);
+    console.log("[PAYSPRINT] Original Payload:", JSON.stringify(payload));
+    console.log("[PAYSPRINT] Request Body (sent):", requestBody);
 
     const jwtToken = generatePaysprintJWT();
     console.log("[PAYSPRINT] JWT Token (masked):", jwtToken.substring(0, 20) + "...[MASKED]");

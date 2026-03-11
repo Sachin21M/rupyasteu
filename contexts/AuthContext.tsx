@@ -43,27 +43,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (storedToken && storedUser) {
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
+        setIsLoading(false);
 
-        try {
-          const baseUrl = getApiUrl();
-          const res = await fetch(`${baseUrl}api/user/profile`, {
-            headers: { Authorization: `Bearer ${storedToken}` },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setUser(data.user);
-            await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
-          } else {
-            await clearAuth();
-          }
-        } catch {
-          // keep cached data if network fails
-        }
+        refreshProfile(storedToken);
+      } else {
+        setIsLoading(false);
       }
     } catch (error) {
       console.error("Failed to load auth:", error);
-    } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function refreshProfile(storedToken: string) {
+    try {
+      const baseUrl = getApiUrl();
+      const res = await fetch(`${baseUrl}api/user/profile`, {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      } else {
+        await clearAuth();
+      }
+    } catch {
+      // keep cached data if network fails
     }
   }
 

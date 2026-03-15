@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "cFeHQ81dACTmhADBYK04r"
+uri = "file://proxy.zip"
+type = "unspecified"
+title = "Paysprint Proxy (Upload to Hostinger)"

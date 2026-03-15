@@ -1,10 +1,11 @@
 import jwt from "jsonwebtoken";
 import { encryptPayload } from "../utils/encryption";
 
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
 const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
+const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
 
 function isProductionEnv(): boolean {
   return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
@@ -71,19 +72,40 @@ async function makePaysprintRequest(
     const jwtToken = generatePaysprintJWT();
     console.log("[PAYSPRINT] JWT Token (masked):", jwtToken.substring(0, 20) + "...[MASKED]");
 
-    const response = await fetch(fullUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorisedkey": PAYSPRINT_AUTH_KEY,
-        "Token": jwtToken,
-      },
-      body: requestBody,
-    });
+    const paysprintHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Authorisedkey": PAYSPRINT_AUTH_KEY,
+      "Token": jwtToken,
+    };
 
-    const rawText = await response.text();
+    let rawText: string;
+    let httpStatus: number;
 
-    console.log("[PAYSPRINT] HTTP Status:", response.status);
+    if (PAYSPRINT_PROXY_URL) {
+      console.log("[PAYSPRINT] Using Lambda proxy:", PAYSPRINT_PROXY_URL);
+      const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: fullUrl,
+          headers: paysprintHeaders,
+          payload: JSON.parse(requestBody),
+        }),
+      });
+      const proxyResult = await proxyResponse.json() as { status: number; body: string };
+      httpStatus = proxyResult.status;
+      rawText = proxyResult.body;
+    } else {
+      const response = await fetch(fullUrl, {
+        method: "POST",
+        headers: paysprintHeaders,
+        body: requestBody,
+      });
+      httpStatus = response.status;
+      rawText = await response.text();
+    }
+
+    console.log("[PAYSPRINT] HTTP Status:", httpStatus);
     console.log("[PAYSPRINT] Raw Response Body:", rawText);
     console.log("=== [END PAYSPRINT RAW API LOG] ===");
 

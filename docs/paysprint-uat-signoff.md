@@ -37,13 +37,17 @@ Prepared By:    RupyaSetu Development Team
     - JWT Payload:
 
       {
+        "iss": "PAYSPRINT",
         "timestamp": <unix_epoch_milliseconds>,
         "partnerId": "<partner_id>",
+        "product": "WALLET",
         "reqid": "<unique_integer_per_request>"
       }
 
+    - iss: "PAYSPRINT" (issuer, per official docs)
     - timestamp: Unix epoch in milliseconds
     - partnerId: PS006853d7abd4d179a5ae3775d9e77eb9caf7471772716264
+    - product: "WALLET" (per official docs)
     - reqid: Unique integer per request
 
   Request Headers:
@@ -100,34 +104,32 @@ Prepared By:    RupyaSetu Development Team
 5. LIVE API STATUS
 ================================================================================
 
-  Date Tested: 11 March 2026
-  Status: GEOGRAPHIC RESTRICTION
+  Date Tested: 12 March 2026
+  Status: PROXY CONFIGURED — PENDING IP WHITELIST
 
-  The LIVE API returns HTTP 401 with text response:
-    "This application is not available in your region"
+  The LIVE API has AWS ELB geo-restriction that blocks ALL requests
+  from non-Indian IPs. Resolved via AWS Lambda proxy in Mumbai.
 
-  This occurs for ALL requests from our server (IP: 34.68.16.191, US-based).
-  The restriction is applied at the CDN/load balancer level (AWS ELB),
-  before any credential validation.
+  Architecture:
+    Replit Server (US) → AWS Lambda (Mumbai) → Paysprint API (India)
 
-  Root Cause:
-    Paysprint's LIVE API enforces geographic restrictions. Requests from
-    non-Indian IP addresses are blocked at the infrastructure level,
-    regardless of IP whitelisting in the credential panel.
+  Lambda Proxy:
+    - Region: ap-south-1 (Mumbai)
+    - URL: stored in PAYSPRINT_PROXY_URL env var
+    - Outbound IP: check via /api/admin/server-info endpoint
+    - The Lambda IP must be whitelisted in Paysprint dashboard
 
-  Resolution Options:
-    1. Contact Paysprint support to explicitly unblock server IPs for
-       LIVE API access from US-based infrastructure
-    2. Deploy the backend to an Indian cloud provider (AWS Mumbai,
-       GCP asia-south1, etc.)
-    3. Use an Indian proxy/VPN for API calls
+  Current Status:
+    - Geo-restriction: BYPASSED (proxy returns real Paysprint responses)
+    - App-level auth: PENDING (Lambda IP needs whitelisting in Paysprint)
+    - Error without whitelist: "Authentication failed. Invalid Ip" (code 7)
 
   Code Readiness:
-    All code changes for LIVE are complete and tested:
-    - LIVE base URL configured
+    All code changes for LIVE are complete:
+    - LIVE base URL configured (api.paysprint.in/api/v1)
     - AES-128-CBC encryption implemented with fallback
-    - LIVE Partner ID set
-    - LIVE JWT KEY, AES KEY, AES IV loaded as secrets
+    - Lambda proxy routing implemented in makePaysprintRequest()
+    - JWT payload includes iss, timestamp, partnerId, product, reqid
     - IP BASED auth headers configured
 
 ================================================================================
@@ -151,9 +153,9 @@ Prepared By:    RupyaSetu Development Team
 
   Account Version   : IP BASED
   Environment       : PRODUCTION (LIVE)
-  Status            : CONFIGURED — pending geo-restriction resolution
-  Dev Server IP     : 34.68.16.191 (whitelisted on LIVE panel)
-  Prod Server IP    : 34.111.179.208 (must be whitelisted for deployment)
+  Status            : CONFIGURED — proxy active, pending Lambda IP whitelist
+  Proxy             : AWS Lambda ap-south-1 (Mumbai)
+  Lambda IP         : check /api/admin/server-info (proxy_outbound_ip)
   Partner ID        : PS006853d7abd4d179a5ae3775d9e77eb9caf7471772716264
   JWT Token         : ******** (stored as PAYSPRINT_JWT_TOKEN secret)
   AES Key           : ******** (stored as PAYSPRINT_AES_KEY secret)
@@ -169,18 +171,18 @@ Prepared By:    RupyaSetu Development Team
   Version      :  10.0
 
   ┌─────────────────────────────────────────────────────────────────┐
-  │  INTEGRATION STATUS: CODE READY — LIVE API BLOCKED BY GEO      │
+  │  INTEGRATION STATUS: PROXY ACTIVE — PENDING IP WHITELIST       │
   │                                                                │
   │  SIT/UAT Testing         : ALL PASSED (archived above)         │
-  │  LIVE URL Config         : DONE                                │
+  │  LIVE URL Config         : DONE (api.paysprint.in/api/v1)      │
   │  AES Encryption          : DONE (with fallback)                │
   │  LIVE Credentials        : LOADED                              │
-  │  IP Whitelisting (dev)   : DONE (34.68.16.191)                 │
-  │  IP Whitelisting (prod)  : PENDING (34.111.179.208)            │
-  │  LIVE API Access         : BLOCKED (geographic restriction)    │
+  │  Lambda Proxy            : ACTIVE (Mumbai ap-south-1)          │
+  │  Geo-Restriction Bypass  : DONE (via Lambda proxy)             │
+  │  Lambda IP Whitelist     : PENDING (check server-info)         │
   │                                                                │
-  │  NEXT STEP: Resolve geographic restriction with Paysprint      │
-  │  to enable LIVE API access from server infrastructure.         │
+  │  NEXT STEP: Whitelist Lambda IP in Paysprint dashboard.        │
+  │  Check IP via /api/admin/server-info (proxy_outbound_ip).      │
   └─────────────────────────────────────────────────────────────────┘
 
 ================================================================================

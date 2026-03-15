@@ -529,7 +529,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const jwt = await import("jsonwebtoken");
       const { encryptPayload } = await import("./utils/encryption");
 
-      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
+      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
       const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
       const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
       const PAYSPRINT_ENV_VAL = process.env.PAYSPRINT_ENV || "PRODUCTION";
@@ -578,17 +578,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const maskedToken = jwtToken.substring(0, 20) + "...";
       const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorisedkey: ${maskedAuthKey}" \\\n  --header "Token: ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
 
-      const response = await fetch(fullUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorisedkey": PAYSPRINT_AUTH_KEY,
-          "Token": jwtToken,
-        },
-        body: bodyStr,
-      });
+      const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
+      const paysprintHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Authorisedkey": PAYSPRINT_AUTH_KEY,
+        "Token": jwtToken,
+      };
 
-      const rawText = await response.text();
+      let rawText: string;
+      let httpStatus: number;
+      let proxyUsed = false;
+
+      if (PAYSPRINT_PROXY_URL) {
+        proxyUsed = true;
+        const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: fullUrl,
+            headers: paysprintHeaders,
+            payload: JSON.parse(bodyStr),
+          }),
+        });
+        const proxyResult = await proxyResponse.json() as { status: number; body: string };
+        httpStatus = proxyResult.status;
+        rawText = proxyResult.body;
+      } else {
+        const response = await fetch(fullUrl, {
+          method: "POST",
+          headers: paysprintHeaders,
+          body: bodyStr,
+        });
+        httpStatus = response.status;
+        rawText = await response.text();
+      }
+
       let parsedResponse;
       try {
         const jsonMatch = rawText.match(/\{[^<]*\}$/);
@@ -601,6 +625,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp: new Date().toISOString(),
         environment: PAYSPRINT_ENV_VAL,
         encryption: encryptionActual,
+        proxy: proxyUsed ? PAYSPRINT_PROXY_URL : "direct",
         request_url: fullUrl,
         request_headers: {
           "Content-Type": "application/json",
@@ -610,7 +635,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         request_body: requestBody,
         request_body_sent: bodyStr,
         jwt_payload: jwtPayload,
-        http_status: response.status,
+        http_status: httpStatus,
         response: parsedResponse,
         curl_command: curlCommand,
       });
@@ -624,7 +649,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ipRes = await fetch("https://api.ipify.org?format=json");
       const ipData = await ipRes.json() as { ip: string };
-      res.json({ outbound_ip: ipData.ip, env: process.env.PAYSPRINT_ENV, base_url: process.env.PAYSPRINT_BASE_URL });
+
+      let proxyIp = "N/A";
+      const proxyUrl = process.env.PAYSPRINT_PROXY_URL || "";
+      if (proxyUrl) {
+        try {
+          const proxyIpRes = await fetch(proxyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: "https://checkip.amazonaws.com", headers: {}, payload: {} }),
+          });
+          const proxyIpData = await proxyIpRes.json() as { body: string };
+          proxyIp = proxyIpData.body?.trim() || "unknown";
+        } catch { proxyIp = "error"; }
+      }
+
+      res.json({
+        server_outbound_ip: ipData.ip,
+        proxy_outbound_ip: proxyIp,
+        proxy_url: proxyUrl || "not configured",
+        env: process.env.PAYSPRINT_ENV,
+        base_url: process.env.PAYSPRINT_BASE_URL,
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to check IP", details: String(error) });
     }

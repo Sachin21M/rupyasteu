@@ -109,19 +109,19 @@ shared/
 - **Environment: LIVE (PRODUCTION)** — switched from SIT/UAT
 - LIVE Base URL: `https://api.paysprint.in/api/v1` (no `service-api/` prefix for LIVE)
 - SIT Base URL was: `https://sit.paysprint.in/service-api/api/v1`
-- JWT payload: `{ iss: "PAYSPRINT", timestamp (ms), partnerId, product: "WALLET", reqid }`
-- JWT signing: Use raw base64 JWT Token string as HS256 secret (NOT decoded)
+- JWT payload: `{ iss: "PAYSPRINT", timestamp (seconds), partnerId, product: "WALLET", reqid }`
+- JWT signing: Use raw base64 JWT Token string as HS256 secret (NOT decoded/Buffer)
 - Payload format: AES-128-CBC encrypted for PRODUCTION (`{"body":"<encrypted>"}`) — plain JSON for SIT/UAT
 - Operator codes: Numeric IDs (14=Jio, 4=Airtel, 33=VI, 8=BSNL, 10=MTNL, 34=Idea)
-- LIVE account version: IP BASED (no separate Authorised Key — JWT KEY used as Authorisedkey header)
+- **LIVE account version: IP BASED** — Authorisedkey header must NOT be sent (causes "Invalid Ip" error)
+- For SIT/UAT (IP + Authorised Key based), Authorisedkey IS sent
 - LIVE Partner ID: `PS006853d7abd4d179a5ae3775d9e77eb9caf7471772716264` (decoded from LIVE JWT KEY)
-- **IMPORTANT**: LIVE API has AWS ELB geo-restriction — blocks ALL requests from non-Indian IPs
-- **Solution**: AWS Lambda proxy in Mumbai (ap-south-1) routes Paysprint API calls through Indian IP
-- Lambda proxy URL: stored in `PAYSPRINT_PROXY_URL` env var
-- Lambda outbound IP: check via `/api/admin/server-info` endpoint (proxy_outbound_ip field)
-- The Lambda IP must be whitelisted in Paysprint dashboard
-- If Lambda IP changes, update whitelist; check with server-info endpoint
-- Paysprint runs in simulation mode when API keys not configured
+- **Geo-restriction**: LIVE API blocks non-Indian IPs via AWS ELB
+- **Solution**: Hostinger proxy in India (static IP `88.222.246.128`) routes Paysprint API calls
+- Proxy URL: stored in `PAYSPRINT_PROXY_URL` env var
+- The proxy IP must be whitelisted in Paysprint dashboard
+- Paysprint runs in simulation mode when partner ID not configured
+- **Current status**: JWT auth works (balance endpoint responds properly), but RECHARGE service returns "Invalid Credential" — RECHARGE servers show "Deactive" on Paysprint dashboard; service activation required
 
 ## Notes
 - Payment mode is configurable via PAYMENT_MODE env var

@@ -536,9 +536,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
       const useEncryption = PAYSPRINT_ENV_VAL === "PRODUCTION" || PAYSPRINT_ENV_VAL === "LIVE";
 
-      const timestamp = Date.now();
-      const reqid = timestamp.toString() + Math.floor(Math.random() * 10000).toString();
-      const jwtPayload = { iss: "PAYSPRINT", timestamp, partnerId: PAYSPRINT_PARTNER_ID, product: "WALLET", reqid };
+      const timestamp = Math.floor(Date.now() / 1000);
+      const jwtPayload = { iss: "PAYSPRINT", timestamp, partnerId: PAYSPRINT_PARTNER_ID, product: "WALLET", reqid: timestamp };
       const jwtToken = jwt.default.sign(jwtPayload, jwtTokenEnv, { algorithm: "HS256" });
 
       let endpoint = "/service/recharge/recharge/dorecharge";
@@ -574,16 +573,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bodyStr = JSON.stringify(requestBody);
       }
 
+      const isLiveIpBased = useEncryption;
       const maskedAuthKey = PAYSPRINT_AUTH_KEY ? PAYSPRINT_AUTH_KEY.substring(0, 8) + "..." : "(not set)";
       const maskedToken = jwtToken.substring(0, 20) + "...";
-      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorisedkey: ${maskedAuthKey}" \\\n  --header "Token: ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
+      const curlCommand = isLiveIpBased
+        ? `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Token: ${maskedToken}" \\\n  --data-raw '${bodyStr}'`
+        : `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorisedkey: ${maskedAuthKey}" \\\n  --header "Token: ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
 
       const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
       const paysprintHeaders: Record<string, string> = {
         "Content-Type": "application/json",
-        "Authorisedkey": PAYSPRINT_AUTH_KEY,
         "Token": jwtToken,
       };
+
+      if (!isLiveIpBased && PAYSPRINT_AUTH_KEY) {
+        paysprintHeaders["Authorisedkey"] = PAYSPRINT_AUTH_KEY;
+      }
 
       let rawText: string;
       let httpStatus: number;
@@ -637,7 +642,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         request_url: fullUrl,
         request_headers: {
           "Content-Type": "application/json",
-          "Authorisedkey": PAYSPRINT_AUTH_KEY ? PAYSPRINT_AUTH_KEY.substring(0, 8) + "..." : "(not set)",
+          ...(isLiveIpBased ? {} : { "Authorisedkey": PAYSPRINT_AUTH_KEY ? PAYSPRINT_AUTH_KEY.substring(0, 8) + "..." : "(not set)" }),
           "Token": jwtToken.substring(0, 20) + "...",
         },
         request_body: requestBody,

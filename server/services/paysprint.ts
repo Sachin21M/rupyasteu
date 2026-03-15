@@ -12,14 +12,13 @@ function isProductionEnv(): boolean {
 }
 
 function generatePaysprintJWT(): string {
-  const timestamp = Date.now();
-  const reqid = timestamp.toString() + Math.floor(Math.random() * 10000).toString();
+  const timestamp = Math.floor(Date.now() / 1000);
   const payload = {
     iss: "PAYSPRINT",
     timestamp: timestamp,
     partnerId: PAYSPRINT_PARTNER_ID,
     product: "WALLET",
-    reqid: reqid,
+    reqid: timestamp,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
   return jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
@@ -36,8 +35,8 @@ async function makePaysprintRequest(
   endpoint: string,
   payload: Record<string, unknown>
 ): Promise<PaysprintResponse> {
-  if (!PAYSPRINT_AUTH_KEY || !PAYSPRINT_PARTNER_ID) {
-    console.log("[Paysprint SIMULATION] No credentials configured. Simulating:", endpoint, payload);
+  if (!PAYSPRINT_PARTNER_ID) {
+    console.log("[Paysprint SIMULATION] No partner ID configured. Simulating:", endpoint, payload);
     return simulateResponse(endpoint, payload);
   }
 
@@ -45,6 +44,7 @@ async function makePaysprintRequest(
 
   try {
     const useEncryption = isProductionEnv();
+    const isLiveIpBased = isProductionEnv();
     let requestBody: string;
 
     if (useEncryption) {
@@ -61,11 +61,11 @@ async function makePaysprintRequest(
 
     console.log("=== [PAYSPRINT RAW API LOG] ===");
     console.log("[PAYSPRINT] Mode:", useEncryption ? "PRODUCTION (AES Encrypted)" : "UAT/SIT (Plain JSON)");
+    console.log("[PAYSPRINT] Auth Mode:", isLiveIpBased ? "LIVE IP BASED (no Authorisedkey)" : "IP + Authorisedkey");
     console.log("[PAYSPRINT] Environment:", PAYSPRINT_ENV);
     console.log("[PAYSPRINT] Timestamp:", new Date().toISOString());
     console.log("[PAYSPRINT] Request URL:", fullUrl);
     console.log("[PAYSPRINT] Request Method: POST");
-    console.log("[PAYSPRINT] Request Headers: { Content-Type: application/json, Authorisedkey: [MASKED], Token: [MASKED] }");
     console.log("[PAYSPRINT] Original Payload:", JSON.stringify(payload));
     console.log("[PAYSPRINT] Request Body (sent):", requestBody);
 
@@ -74,9 +74,15 @@ async function makePaysprintRequest(
 
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
-      "Authorisedkey": PAYSPRINT_AUTH_KEY,
       "Token": jwtToken,
     };
+
+    if (!isLiveIpBased && PAYSPRINT_AUTH_KEY) {
+      paysprintHeaders["Authorisedkey"] = PAYSPRINT_AUTH_KEY;
+      console.log("[PAYSPRINT] Authorisedkey header: INCLUDED");
+    } else {
+      console.log("[PAYSPRINT] Authorisedkey header: SKIPPED (LIVE IP BASED)");
+    }
 
     let rawText: string;
     let httpStatus: number;

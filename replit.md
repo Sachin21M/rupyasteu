@@ -74,6 +74,8 @@ shared/
 - `PAYSPRINT_AES_KEY` - AES encryption key
 - `PAYSPRINT_AES_IV` - AES IV
 - `PAYSPRINT_ENV` - UAT or PRODUCTION
+- `PAYSPRINT_PROXY_URL` - AWS Lambda proxy URL in Mumbai for bypassing Paysprint geo-restriction
+- `PAYSPRINT_BASE_URL` - Paysprint API base URL (default: https://api.paysprint.in/api/v1)
 - `SESSION_SECRET` - JWT signing secret
 - `SMSALERT_API_KEY` - SMS Alert API key
 - `SMSALERT_SENDER` - SMS Alert sender ID

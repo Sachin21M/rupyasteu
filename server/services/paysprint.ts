@@ -92,7 +92,15 @@ async function makePaysprintRequest(
           payload: JSON.parse(requestBody),
         }),
       });
-      const proxyResult = await proxyResponse.json() as { status: number; body: string };
+      if (!proxyResponse.ok) {
+        console.error("[PAYSPRINT] Proxy returned HTTP", proxyResponse.status);
+        return { status: false, response_code: 502, message: `Lambda proxy error: HTTP ${proxyResponse.status}` };
+      }
+      const proxyResult = await proxyResponse.json() as { status?: number; body?: string };
+      if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
+        console.error("[PAYSPRINT] Invalid proxy response format:", JSON.stringify(proxyResult).substring(0, 200));
+        return { status: false, response_code: 502, message: "Invalid response from Lambda proxy" };
+      }
       httpStatus = proxyResult.status;
       rawText = proxyResult.body;
     } else {

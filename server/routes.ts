@@ -600,7 +600,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             payload: JSON.parse(bodyStr),
           }),
         });
-        const proxyResult = await proxyResponse.json() as { status: number; body: string };
+        if (!proxyResponse.ok) {
+          res.status(502).json({ error: "Lambda proxy error", http_status: proxyResponse.status });
+          return;
+        }
+        const proxyResult = await proxyResponse.json() as { status?: number; body?: string };
+        if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
+          res.status(502).json({ error: "Invalid proxy response", raw: JSON.stringify(proxyResult).substring(0, 200) });
+          return;
+        }
         httpStatus = proxyResult.status;
         rawText = proxyResult.body;
       } else {

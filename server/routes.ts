@@ -529,7 +529,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const jwt = await import("jsonwebtoken");
       const { encryptPayload } = await import("./utils/encryption");
 
-      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
+      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
       const PAYSPRINT_PARTNER_NAME = "RUPYASETU";
       const PAYSPRINT_ENV_VAL = process.env.PAYSPRINT_ENV || "PRODUCTION";
       const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
@@ -588,12 +588,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const maskedToken = jwtToken.substring(0, 30) + "...";
-      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorization: Bearer ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
+      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Token: ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
 
       const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
       const paysprintHeaders: Record<string, string> = {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + jwtToken,
+        "Token": jwtToken,
       };
 
       let rawText: string;
@@ -656,7 +656,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             encrypted_preview: encryptedOutput ? encryptedOutput.substring(0, 40) + "..." : "N/A",
           },
           step4_headers: {
-            "Authorization": "Bearer " + jwtToken.substring(0, 20) + "...",
+            "Token": jwtToken.substring(0, 20) + "...",
             "Content-Type": "application/json",
             "Authorisedkey": "NOT included (LIVE IP BASED)",
           },

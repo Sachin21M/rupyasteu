@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { encryptPayload } from "../utils/encryption";
 
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
 const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
 const PAYSPRINT_PARTNER_NAME = "RUPYASETU";
@@ -98,9 +98,9 @@ async function makePaysprintRequest(
     console.log("[STEP 4] REQUEST HEADERS:");
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
-      "Authorization": "Bearer " + jwtToken,
+      "Token": jwtToken,
     };
-    console.log("  Authorization: Bearer " + jwtToken.substring(0, 20) + "...");
+    console.log("  Token:", jwtToken.substring(0, 20) + "...");
     console.log("  Content-Type: application/json");
     console.log("  Authorisedkey: NOT included (LIVE IP BASED)");
 

@@ -529,8 +529,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const jwt = await import("jsonwebtoken");
       const { encryptPayload } = await import("./utils/encryption");
 
-      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
-      const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+      const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
       const PAYSPRINT_PARTNER_NAME = "RUPYASETU";
       const PAYSPRINT_ENV_VAL = process.env.PAYSPRINT_ENV || "PRODUCTION";
       const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
@@ -538,13 +537,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const timestamp = Math.floor(Date.now() / 1000);
       const uniqueReqId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-      const jwtPayload = { iss: "PAYSPRINT", timestamp, partnerId: PAYSPRINT_PARTNER_NAME, product: "WALLET", reqid: timestamp };
+      const jwtPayload = { timestamp, partnerId: PAYSPRINT_PARTNER_NAME, reqid: uniqueReqId };
       const jwtToken = jwt.default.sign(jwtPayload, jwtTokenEnv, { algorithm: "HS256" });
 
       let endpoint = "/service/recharge/recharge/dorecharge";
       let apiFields: Record<string, unknown> = {};
 
-      if (action === "status") {
+      if (action === "balance") {
+        endpoint = "/service/balance/balance/cashbalance";
+        apiFields = {};
+      } else if (action === "status") {
         endpoint = "/service/recharge/recharge/status";
         apiFields = { referenceid: referenceid || "TEST123" };
       } else {
@@ -569,10 +571,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
       let bodyStr: string;
+      let encryptedOutput = "";
       let encryptionActual = useEncryption ? "AES-256-CBC" : "Plain JSON";
       if (useEncryption) {
         try {
           const encrypted = encryptPayload(requestBody);
+          encryptedOutput = encrypted;
           bodyStr = JSON.stringify({ data: encrypted });
         } catch (encErr) {
           console.warn("[PAYSPRINT RAW TEST] AES encryption failed, falling back to plain JSON:", encErr);
@@ -583,19 +587,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bodyStr = JSON.stringify(requestBody);
       }
 
-      const isLiveIpBased = useEncryption;
-      const maskedToken = jwtToken.substring(0, 20) + "...";
-      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Token: ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
+      const maskedToken = jwtToken.substring(0, 30) + "...";
+      const curlCommand = `curl --location --request POST \\\n  "${fullUrl}" \\\n  --header "Content-Type: application/json" \\\n  --header "Authorization: Bearer ${maskedToken}" \\\n  --data-raw '${bodyStr}'`;
 
       const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
       const paysprintHeaders: Record<string, string> = {
         "Content-Type": "application/json",
-        "Token": jwtToken,
+        "Authorization": "Bearer " + jwtToken,
       };
-
-      if (!isLiveIpBased && PAYSPRINT_AUTH_KEY) {
-        paysprintHeaders["Authorisedkey"] = PAYSPRINT_AUTH_KEY;
-      }
 
       let rawText: string;
       let httpStatus: number;
@@ -641,21 +640,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parsedResponse = { raw: rawText };
       }
 
+      const decodedJwt = jwt.default.decode(jwtToken);
+
       res.json({
-        timestamp: new Date().toISOString(),
-        environment: PAYSPRINT_ENV_VAL,
-        encryption: encryptionActual,
-        proxy: proxyUsed ? PAYSPRINT_PROXY_URL : "direct",
-        request_url: fullUrl,
-        request_headers: {
-          "Content-Type": "application/json",
-          "Token": jwtToken.substring(0, 20) + "...",
+        debug_report: {
+          step1_jwt: {
+            payload: jwtPayload,
+            decoded: decodedJwt,
+            token_preview: jwtToken.substring(0, 30) + "...",
+          },
+          step2_payload_before_encryption: requestBody,
+          step3_encryption: {
+            algorithm: encryptionActual,
+            encrypted_length: encryptedOutput.length || 0,
+            encrypted_preview: encryptedOutput ? encryptedOutput.substring(0, 40) + "..." : "N/A",
+          },
+          step4_headers: {
+            "Authorization": "Bearer " + jwtToken.substring(0, 20) + "...",
+            "Content-Type": "application/json",
+            "Authorisedkey": "NOT included (LIVE IP BASED)",
+          },
+          step5_request_body: bodyStr,
+          step6_endpoint: fullUrl,
+          step7_proxy: proxyUsed ? PAYSPRINT_PROXY_URL : "direct",
+          step8_response: {
+            http_status: httpStatus,
+            body: parsedResponse,
+          },
         },
-        payload_before_encryption: requestBody,
-        request_body_sent: bodyStr,
-        jwt_payload: jwtPayload,
-        http_status: httpStatus,
-        response: parsedResponse,
         curl_command: curlCommand,
       });
     } catch (error) {

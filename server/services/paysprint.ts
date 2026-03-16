@@ -1,8 +1,8 @@
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { encryptPayload } from "../utils/encryption";
 
-const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
-const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
 const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
 const PAYSPRINT_PARTNER_NAME = "RUPYASETU";
@@ -15,17 +15,17 @@ function generateUniqueReqId(): string {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
 
-function generatePaysprintJWT(): string {
+function generatePaysprintJWT(): { token: string; payload: Record<string, unknown> } {
   const timestamp = Math.floor(Date.now() / 1000);
+  const reqid = generateUniqueReqId();
   const payload = {
-    iss: "PAYSPRINT",
     timestamp: timestamp,
     partnerId: PAYSPRINT_PARTNER_NAME,
-    product: "WALLET",
-    reqid: timestamp,
+    reqid: reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  return jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  return { token, payload };
 }
 
 interface PaysprintResponse {
@@ -49,7 +49,6 @@ async function makePaysprintRequest(
 
   try {
     const useEncryption = isProductionEnv();
-    const isLiveIpBased = isProductionEnv();
 
     const timestamp = Math.floor(Date.now() / 1000);
     const reqid = generateUniqueReqId();
@@ -61,14 +60,20 @@ async function makePaysprintRequest(
       ...payload,
     };
 
-    console.log("=== [PAYSPRINT RAW API LOG] ===");
-    console.log("[PAYSPRINT] Mode:", useEncryption ? "PRODUCTION (AES-256-CBC Encrypted)" : "UAT/SIT (Plain JSON)");
-    console.log("[PAYSPRINT] Auth Mode:", isLiveIpBased ? "LIVE IP BASED (no Authorisedkey)" : "IP + Authorisedkey");
-    console.log("[PAYSPRINT] Environment:", PAYSPRINT_ENV);
-    console.log("[PAYSPRINT] Timestamp:", new Date().toISOString());
-    console.log("[PAYSPRINT] Request URL:", fullUrl);
-    console.log("[PAYSPRINT] Request Method: POST");
-    console.log("[PAYSPRINT] Payload before encryption:", JSON.stringify(fullPayload));
+    console.log("=== [PAYSPRINT DEBUG REPORT] ===");
+    console.log("[STEP 1] JWT TOKEN:");
+    const jwtResult = generatePaysprintJWT();
+    const jwtToken = jwtResult.token;
+    console.log("  JWT Payload:", JSON.stringify(jwtResult.payload));
+    const decoded = jwt.decode(jwtToken);
+    console.log("  JWT Decoded (verify):", JSON.stringify(decoded));
+    console.log("  JWT Token (first 30 chars):", jwtToken.substring(0, 30) + "...");
+
+    console.log("[STEP 2] REQUEST PAYLOAD (before encryption):");
+    console.log("  ", JSON.stringify(fullPayload));
+    console.log("  partnerId:", fullPayload.partnerId);
+    console.log("  timestamp:", fullPayload.timestamp);
+    console.log("  reqid:", fullPayload.reqid);
 
     let requestBody: string;
 
@@ -76,36 +81,42 @@ async function makePaysprintRequest(
       try {
         const encrypted = encryptPayload(fullPayload);
         requestBody = JSON.stringify({ data: encrypted });
+        console.log("[STEP 3] AES ENCRYPTION:");
+        console.log("  Algorithm: AES-256-CBC");
+        console.log("  Output encoding: Base64");
+        console.log("  Encrypted length:", encrypted.length, "chars");
+        console.log("  Encrypted (first 40 chars):", encrypted.substring(0, 40) + "...");
       } catch (encErr) {
-        console.warn("[PAYSPRINT] AES encryption failed, falling back to plain JSON:", encErr);
+        console.warn("[STEP 3] AES encryption FAILED:", encErr);
         requestBody = JSON.stringify(fullPayload);
       }
     } else {
       requestBody = JSON.stringify(fullPayload);
+      console.log("[STEP 3] AES ENCRYPTION: SKIPPED (non-production env)");
     }
 
-    console.log("[PAYSPRINT] Request Body (sent):", requestBody);
-
-    const jwtToken = generatePaysprintJWT();
-    console.log("[PAYSPRINT] JWT Token (masked):", jwtToken.substring(0, 20) + "...[MASKED]");
-
+    console.log("[STEP 4] REQUEST HEADERS:");
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
-      "Token": jwtToken,
+      "Authorization": "Bearer " + jwtToken,
     };
+    console.log("  Authorization: Bearer " + jwtToken.substring(0, 20) + "...");
+    console.log("  Content-Type: application/json");
+    console.log("  Authorisedkey: NOT included (LIVE IP BASED)");
 
-    if (!isLiveIpBased && PAYSPRINT_AUTH_KEY) {
-      paysprintHeaders["Authorisedkey"] = PAYSPRINT_AUTH_KEY;
-      console.log("[PAYSPRINT] Authorisedkey header: INCLUDED");
-    } else {
-      console.log("[PAYSPRINT] Authorisedkey header: SKIPPED (LIVE IP BASED)");
-    }
+    console.log("[STEP 5] REQUEST BODY:");
+    console.log("  ", requestBody);
+
+    console.log("[STEP 6] API ENDPOINT:");
+    console.log("  URL:", fullUrl);
+    console.log("  Method: POST");
 
     let rawText: string;
     let httpStatus: number;
 
     if (PAYSPRINT_PROXY_URL) {
-      console.log("[PAYSPRINT] Using proxy:", PAYSPRINT_PROXY_URL);
+      console.log("[STEP 7] SERVER IP: Using proxy for whitelisted IP 88.222.246.128");
+      console.log("  Proxy URL:", PAYSPRINT_PROXY_URL);
       const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -127,6 +138,7 @@ async function makePaysprintRequest(
       httpStatus = proxyResult.status;
       rawText = proxyResult.body;
     } else {
+      console.log("[STEP 7] SERVER IP: Direct request (no proxy)");
       const response = await fetch(fullUrl, {
         method: "POST",
         headers: paysprintHeaders,
@@ -136,9 +148,10 @@ async function makePaysprintRequest(
       rawText = await response.text();
     }
 
-    console.log("[PAYSPRINT] HTTP Status:", httpStatus);
-    console.log("[PAYSPRINT] Raw Response Body:", rawText);
-    console.log("=== [END PAYSPRINT RAW API LOG] ===");
+    console.log("[STEP 8] API RESPONSE:");
+    console.log("  HTTP Status:", httpStatus);
+    console.log("  Raw Response Body:", rawText);
+    console.log("=== [END PAYSPRINT DEBUG REPORT] ===");
 
     let jsonText = rawText;
     const jsonMatch = rawText.match(/\{[^<]*\}$/);
@@ -235,6 +248,10 @@ export async function checkRechargeStatus(referenceId: string): Promise<Paysprin
   return makePaysprintRequest("/service/recharge/recharge/status", {
     referenceid: referenceId,
   });
+}
+
+export async function checkBalance(): Promise<PaysprintResponse> {
+  return makePaysprintRequest("/service/balance/balance/cashbalance", {});
 }
 
 export async function getOperatorInfo(params: {

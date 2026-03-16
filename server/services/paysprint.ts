@@ -3,12 +3,16 @@ import { encryptPayload } from "../utils/encryption";
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
-const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
 const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
+const PAYSPRINT_PARTNER_NAME = "RUPYASETU";
 
 function isProductionEnv(): boolean {
   return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
+}
+
+function generateUniqueReqId(): string {
+  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
 
 function generatePaysprintJWT(): string {
@@ -16,7 +20,7 @@ function generatePaysprintJWT(): string {
   const payload = {
     iss: "PAYSPRINT",
     timestamp: timestamp,
-    partnerId: PAYSPRINT_PARTNER_ID,
+    partnerId: PAYSPRINT_PARTNER_NAME,
     product: "WALLET",
     reqid: timestamp,
   };
@@ -35,8 +39,9 @@ async function makePaysprintRequest(
   endpoint: string,
   payload: Record<string, unknown>
 ): Promise<PaysprintResponse> {
-  if (!PAYSPRINT_PARTNER_ID) {
-    console.log("[Paysprint SIMULATION] No partner ID configured. Simulating:", endpoint, payload);
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  if (!jwtTokenEnv) {
+    console.log("[Paysprint SIMULATION] No JWT token configured. Simulating:", endpoint, payload);
     return simulateResponse(endpoint, payload);
   }
 
@@ -45,28 +50,40 @@ async function makePaysprintRequest(
   try {
     const useEncryption = isProductionEnv();
     const isLiveIpBased = isProductionEnv();
-    let requestBody: string;
 
-    if (useEncryption) {
-      try {
-        const encrypted = encryptPayload(payload);
-        requestBody = JSON.stringify({ body: encrypted });
-      } catch (encErr) {
-        console.warn("[PAYSPRINT] AES encryption failed, falling back to plain JSON:", encErr);
-        requestBody = JSON.stringify(payload);
-      }
-    } else {
-      requestBody = JSON.stringify(payload);
-    }
+    const timestamp = Math.floor(Date.now() / 1000);
+    const reqid = generateUniqueReqId();
+
+    const fullPayload: Record<string, unknown> = {
+      partnerId: PAYSPRINT_PARTNER_NAME,
+      timestamp: timestamp,
+      reqid: reqid,
+      ...payload,
+    };
 
     console.log("=== [PAYSPRINT RAW API LOG] ===");
-    console.log("[PAYSPRINT] Mode:", useEncryption ? "PRODUCTION (AES Encrypted)" : "UAT/SIT (Plain JSON)");
+    console.log("[PAYSPRINT] Mode:", useEncryption ? "PRODUCTION (AES-256-CBC Encrypted)" : "UAT/SIT (Plain JSON)");
     console.log("[PAYSPRINT] Auth Mode:", isLiveIpBased ? "LIVE IP BASED (no Authorisedkey)" : "IP + Authorisedkey");
     console.log("[PAYSPRINT] Environment:", PAYSPRINT_ENV);
     console.log("[PAYSPRINT] Timestamp:", new Date().toISOString());
     console.log("[PAYSPRINT] Request URL:", fullUrl);
     console.log("[PAYSPRINT] Request Method: POST");
-    console.log("[PAYSPRINT] Original Payload:", JSON.stringify(payload));
+    console.log("[PAYSPRINT] Payload before encryption:", JSON.stringify(fullPayload));
+
+    let requestBody: string;
+
+    if (useEncryption) {
+      try {
+        const encrypted = encryptPayload(fullPayload);
+        requestBody = JSON.stringify({ data: encrypted });
+      } catch (encErr) {
+        console.warn("[PAYSPRINT] AES encryption failed, falling back to plain JSON:", encErr);
+        requestBody = JSON.stringify(fullPayload);
+      }
+    } else {
+      requestBody = JSON.stringify(fullPayload);
+    }
+
     console.log("[PAYSPRINT] Request Body (sent):", requestBody);
 
     const jwtToken = generatePaysprintJWT();
@@ -88,7 +105,7 @@ async function makePaysprintRequest(
     let httpStatus: number;
 
     if (PAYSPRINT_PROXY_URL) {
-      console.log("[PAYSPRINT] Using Lambda proxy:", PAYSPRINT_PROXY_URL);
+      console.log("[PAYSPRINT] Using proxy:", PAYSPRINT_PROXY_URL);
       const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -100,12 +117,12 @@ async function makePaysprintRequest(
       });
       if (!proxyResponse.ok) {
         console.error("[PAYSPRINT] Proxy returned HTTP", proxyResponse.status);
-        return { status: false, response_code: 502, message: `Lambda proxy error: HTTP ${proxyResponse.status}` };
+        return { status: false, response_code: 502, message: `Proxy error: HTTP ${proxyResponse.status}` };
       }
       const proxyResult = await proxyResponse.json() as { status?: number; body?: string };
       if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
         console.error("[PAYSPRINT] Invalid proxy response format:", JSON.stringify(proxyResult).substring(0, 200));
-        return { status: false, response_code: 502, message: "Invalid response from Lambda proxy" };
+        return { status: false, response_code: 502, message: "Invalid response from proxy" };
       }
       httpStatus = proxyResult.status;
       rawText = proxyResult.body;

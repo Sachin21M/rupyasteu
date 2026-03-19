@@ -1025,7 +1025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 200);
       const offset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
 
-      const filters: any = { limit, offset };
+      const filters: { endpoint?: string; success?: boolean; fromDate?: string; toDate?: string; limit: number; offset: number } = { limit, offset };
       if (endpoint) filters.endpoint = endpoint;
       if (successParam === "true") filters.success = true;
       if (successParam === "false") filters.success = false;

@@ -343,6 +343,7 @@
         <input type="date" id="logToDate" onchange="apiLogsPage=0;loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;" />
         <button class="refresh-btn" onclick="loadApiLogs()">&#x21bb; Refresh</button>
         <button class="refresh-btn" onclick="exportApiLogs()" style="background:#2563eb;color:#fff;">Export CSV</button>
+        <button class="refresh-btn" onclick="downloadPdfReport()" id="pdfReportBtn" style="background:#2E9E5B;color:#fff;">&#128196; PDF Report</button>
       </div>
     </div>
     <div style="padding:0 16px 8px;font-size:13px;color:#666;" id="logStats"></div>
@@ -1024,6 +1025,35 @@ async function exportApiLogs() {
   a.download = 'aeps-api-logs-' + new Date().toISOString().split('T')[0] + '.csv';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function downloadPdfReport() {
+  const btn = document.getElementById('pdfReportBtn');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  try {
+    const res = await fetch('/api/admin/aeps-report', {
+      headers: { 'Authorization': 'Bearer ' + adminToken },
+    });
+    if (res.status === 401) { handleLogout(); return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed' }));
+      alert(err.error || 'Failed to generate report');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'RupyaSetu_AEPS_Report_' + new Date().toISOString().split('T')[0] + '.pdf';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Failed to download report: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '&#128196; PDF Report';
+  }
 }
 
 function startAutoRefresh() {

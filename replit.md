@@ -151,7 +151,9 @@ shared/
 - URL: `/admin` (served from `server/templates/admin-panel.html`)
 - Login: username/password (env vars ADMIN_USERNAME / ADMIN_PASSWORD)
 - Features: dashboard stats, recharge transaction table, AEPS transaction table, approve/reject buttons, auto-refresh every 30s
-- Admin API: POST `/api/admin/login`, GET `/api/admin/transactions`, GET `/api/admin/aeps-transactions`, POST `/api/admin/transactions/:id/approve`, POST `/api/admin/transactions/:id/reject`
+- AEPS API Logs: filterable by endpoint, status, date range; CSV export; PDF report generation
+- **PDF Report**: `GET /api/admin/aeps-report` — generates a professional PDF with RupyaSetu branding, real API call results (bank list, transaction status), captured API logs from DB, endpoint documentation, security measures summary. Uses pdfkit library.
+- Admin API: POST `/api/admin/login`, GET `/api/admin/transactions`, GET `/api/admin/aeps-transactions`, POST `/api/admin/transactions/:id/approve`, POST `/api/admin/transactions/:id/reject`, GET `/api/admin/aeps-api-logs`, GET `/api/admin/aeps-report`
 
 ## Paysprint Integration Notes
 - Official docs: https://pay-sprint.readme.io/reference/authentication-1

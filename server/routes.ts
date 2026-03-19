@@ -6,6 +6,7 @@ import { validateUtr, validatePhone, validateAmount } from "./utils/validators";
 import { generateOtp, sendSmsAlert } from "./utils/smsalert";
 import { initiateRecharge, checkRechargeStatus, getOperatorInfo } from "./services/paysprint";
 import * as aepsService from "./services/aeps";
+import { generateAepsReport } from "./services/aeps-report";
 import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema, aepsTransactionSchema } from "../shared/schema";
 
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "MANUAL";
@@ -1068,6 +1069,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to check IP", details: String(error) });
+    }
+  });
+
+  app.get("/api/admin/aeps-report", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const pdfBuffer = await generateAepsReport();
+      const filename = `RupyaSetu_AEPS_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", pdfBuffer.length);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("AEPS report generation error:", error);
+      res.status(500).json({ error: "Failed to generate AEPS report" });
     }
   });
 

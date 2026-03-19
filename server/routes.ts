@@ -1014,6 +1014,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/admin/aeps-api-logs", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const endpoint = req.query.endpoint as string | undefined;
+      const successParam = req.query.success as string | undefined;
+      const fromDate = req.query.fromDate as string | undefined;
+      const toDate = req.query.toDate as string | undefined;
+      const rawLimit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      const rawOffset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+      const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 200);
+      const offset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
+
+      const filters: any = { limit, offset };
+      if (endpoint) filters.endpoint = endpoint;
+      if (successParam === "true") filters.success = true;
+      if (successParam === "false") filters.success = false;
+      if (fromDate) filters.fromDate = fromDate;
+      if (toDate) filters.toDate = toDate;
+
+      const result = await storage.getAepsApiLogs(filters);
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to fetch AEPS API logs:", error);
+      res.status(500).json({ error: "Failed to fetch AEPS API logs" });
+    }
+  });
+
   app.get("/api/admin/server-info", adminAuthMiddleware, async (_req: Request, res: Response) => {
     try {
       const ipRes = await fetch("https://api.ipify.org?format=json");

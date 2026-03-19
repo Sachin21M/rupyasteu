@@ -113,6 +113,19 @@ export interface AepsBank {
   bankName: string;
 }
 
+export interface AepsApiLog {
+  id: string;
+  endpoint: string;
+  method: string;
+  requestPayload: string;
+  responseBody: string;
+  httpStatus: number;
+  success: boolean;
+  durationMs: number;
+  errorMessage?: string;
+  createdAt: string;
+}
+
 export const sendOtpSchema = z.object({
   phone: phoneSchema,
 });

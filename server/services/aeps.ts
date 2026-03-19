@@ -1,5 +1,39 @@
 import jwt from "jsonwebtoken";
 import { encryptPayload } from "../utils/encryption";
+import { storage } from "../storage";
+
+const SENSITIVE_KEYS = new Set([
+  "adhaarnumber", "aadhaar", "aadhar", "aadharnumber",
+  "data", "piddata", "pid", "biometric", "biometricdata",
+  "hmac", "skey", "ci", "sessionkey",
+]);
+
+function maskSensitiveFields(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === "string") {
+    return obj.replace(/\b\d{12}\b/g, (m) => "XXXX-XXXX-" + m.slice(-4));
+  }
+  if (Array.isArray(obj)) return obj.map(maskSensitiveFields);
+  if (typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      const lowerKey = key.toLowerCase();
+      if (SENSITIVE_KEYS.has(lowerKey)) {
+        if (lowerKey === "adhaarnumber" || lowerKey === "aadhaar" || lowerKey === "aadhar" || lowerKey === "aadharnumber") {
+          result[key] = typeof value === "string" && value.length >= 4
+            ? "XXXX-XXXX-" + value.slice(-4)
+            : "[REDACTED]";
+        } else {
+          result[key] = "[REDACTED]";
+        }
+      } else {
+        result[key] = maskSensitiveFields(value);
+      }
+    }
+    return result;
+  }
+  return obj;
+}
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
@@ -40,6 +74,37 @@ interface AepsResponse {
   txnid?: string;
 }
 
+async function logAepsApiCall(
+  endpoint: string,
+  requestPayload: Record<string, unknown>,
+  responseBody: string,
+  httpStatus: number,
+  success: boolean,
+  durationMs: number,
+  errorMessage?: string
+) {
+  try {
+    const maskedPayload = maskSensitiveFields(requestPayload) as Record<string, unknown>;
+    let maskedResponse = responseBody;
+    try {
+      const parsed = JSON.parse(responseBody);
+      maskedResponse = JSON.stringify(maskSensitiveFields(parsed));
+    } catch {}
+    await storage.createAepsApiLog({
+      endpoint,
+      method: "POST",
+      requestPayload: JSON.stringify(maskedPayload, null, 2),
+      responseBody: maskedResponse.substring(0, 10000),
+      httpStatus,
+      success,
+      durationMs,
+      errorMessage,
+    });
+  } catch (err) {
+    console.error("[AEPS LOG] Failed to save API log:", err);
+  }
+}
+
 async function makeAepsRequest(
   endpoint: string,
   payload: Record<string, unknown>
@@ -47,10 +112,13 @@ async function makeAepsRequest(
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
   if (!jwtTokenEnv) {
     console.log("[AEPS SIMULATION] No JWT token configured. Simulating:", endpoint);
-    return simulateAepsResponse(endpoint, payload);
+    const simResult = simulateAepsResponse(endpoint, payload);
+    await logAepsApiCall(endpoint, payload, JSON.stringify(simResult), 200, simResult.status, 0, "SIMULATION MODE");
+    return simResult;
   }
 
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
+  const startTime = Date.now();
 
   try {
     const useEncryption = isProductionEnv();
@@ -102,11 +170,17 @@ async function makeAepsRequest(
           signal: controller.signal,
         });
         if (!proxyResponse.ok) {
-          return { status: false, response_code: 502, message: `Proxy error: HTTP ${proxyResponse.status}` };
+          const duration = Date.now() - startTime;
+          const errResult = { status: false, response_code: 502, message: `Proxy error: HTTP ${proxyResponse.status}` };
+          await logAepsApiCall(endpoint, fullPayload, JSON.stringify(errResult), proxyResponse.status, false, duration, `Proxy error: HTTP ${proxyResponse.status}`);
+          return errResult;
         }
         const proxyResult = await proxyResponse.json() as { status?: number; body?: string };
         if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
-          return { status: false, response_code: 502, message: "Invalid response from proxy" };
+          const duration = Date.now() - startTime;
+          const errResult = { status: false, response_code: 502, message: "Invalid response from proxy" };
+          await logAepsApiCall(endpoint, fullPayload, JSON.stringify(proxyResult), 502, false, duration, "Invalid proxy response format");
+          return errResult;
         }
         httpStatus = proxyResult.status;
         rawText = proxyResult.body;
@@ -124,7 +198,8 @@ async function makeAepsRequest(
       clearTimeout(timeout);
     }
 
-    console.log(`[AEPS] Response from ${endpoint}: HTTP ${httpStatus}`);
+    const duration = Date.now() - startTime;
+    console.log(`[AEPS] Response from ${endpoint}: HTTP ${httpStatus} (${duration}ms)`);
     console.log(`[AEPS] Body: ${rawText.substring(0, 500)}`);
 
     let jsonText = rawText;
@@ -138,18 +213,29 @@ async function makeAepsRequest(
       data = JSON.parse(jsonText) as AepsResponse;
     } catch {
       if (rawText.includes("not available in your region")) {
-        return { status: false, response_code: 403, message: "AEPS API blocked: geographic restriction" };
+        const errResult = { status: false, response_code: 403, message: "AEPS API blocked: geographic restriction" };
+        await logAepsApiCall(endpoint, fullPayload, rawText, httpStatus, false, duration, "Geographic restriction");
+        return errResult;
       }
-      return { status: false, response_code: 500, message: "Invalid JSON response from Paysprint AEPS" };
+      const errResult = { status: false, response_code: 500, message: "Invalid JSON response from Paysprint AEPS" };
+      await logAepsApiCall(endpoint, fullPayload, rawText, httpStatus, false, duration, "Invalid JSON response");
+      return errResult;
     }
+
+    await logAepsApiCall(endpoint, fullPayload, rawText, httpStatus, data.status, duration);
 
     return data;
   } catch (error: any) {
+    const duration = Date.now() - startTime;
     if (error.name === "AbortError") {
-      return { status: false, response_code: 408, message: "AEPS request timeout (180s)" };
+      const errResult = { status: false, response_code: 408, message: "AEPS request timeout (180s)" };
+      await logAepsApiCall(endpoint, payload, JSON.stringify(errResult), 408, false, duration, "Request timeout (180s)");
+      return errResult;
     }
     console.error("[AEPS] Network Error:", error);
-    return { status: false, response_code: 500, message: "Failed to connect to AEPS service" };
+    const errResult = { status: false, response_code: 500, message: "Failed to connect to AEPS service" };
+    await logAepsApiCall(endpoint, payload, JSON.stringify(errResult), 500, false, duration, error.message);
+    return errResult;
   }
 }
 

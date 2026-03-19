@@ -320,6 +320,55 @@
     </div>
   </div>
 
+  <div class="table-section" id="apiLogsSection" style="display:none;">
+    <div class="table-header">
+      <h2>AEPS API Logs</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="logEndpointFilter" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
+          <option value="">All Endpoints</option>
+          <option value="bank2">/bank2 (Balance)</option>
+          <option value="bank3">/bank3 (Withdrawal)</option>
+          <option value="bank5">/bank5 (Statement)</option>
+          <option value="bank6">/bank6 (Aadhaar Pay)</option>
+          <option value="banklist">/banklist</option>
+          <option value="ekyc">/ekyc</option>
+        </select>
+        <select id="logSuccessFilter" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
+          <option value="">All Status</option>
+          <option value="true">Success</option>
+          <option value="false">Failed</option>
+        </select>
+        <input type="date" id="logFromDate" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;" />
+        <input type="date" id="logToDate" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;" />
+        <button class="refresh-btn" onclick="loadApiLogs()">&#x21bb; Refresh</button>
+        <button class="refresh-btn" onclick="exportApiLogs()" style="background:#2563eb;color:#fff;">Export CSV</button>
+      </div>
+    </div>
+    <div style="padding:0 16px 8px;font-size:13px;color:#666;" id="logStats"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Endpoint</th>
+            <th>HTTP</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>Error</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="apiLogsTableBody">
+        </tbody>
+      </table>
+      <div class="empty-state" id="apiLogsEmptyState" style="display:none;">
+        <p>No AEPS API logs found</p>
+      </div>
+    </div>
+    <div style="padding:12px 16px;display:flex;gap:8px;align-items:center;" id="logPagination"></div>
+    <div class="raw-log" id="logDetailView" style="display:none;margin:12px 16px;"></div>
+  </div>
+
   <div class="paysprint-section">
     <div class="paysprint-card">
       <h2>Paysprint API Test</h2>
@@ -425,8 +474,10 @@ function showAdmin() {
   document.getElementById('loginView').style.display = 'none';
   document.getElementById('adminView').style.display = 'block';
   document.getElementById('aepsSection').style.display = 'block';
+  document.getElementById('apiLogsSection').style.display = 'block';
   loadTransactions();
   loadAepsTransactions();
+  loadApiLogs();
   startAutoRefresh();
 }
 
@@ -436,6 +487,7 @@ function handleLogout() {
   document.getElementById('loginView').style.display = 'flex';
   document.getElementById('adminView').style.display = 'none';
   document.getElementById('aepsSection').style.display = 'none';
+  document.getElementById('apiLogsSection').style.display = 'none';
   stopAutoRefresh();
 }
 
@@ -782,6 +834,165 @@ function copyRawLog() {
   });
 }
 
+let apiLogsData = [];
+let apiLogsTotal = 0;
+let apiLogsPage = 0;
+const API_LOGS_PER_PAGE = 50;
+
+async function loadApiLogs() {
+  try {
+    const endpoint = document.getElementById('logEndpointFilter').value;
+    const success = document.getElementById('logSuccessFilter').value;
+    const fromDate = document.getElementById('logFromDate').value;
+    const toDate = document.getElementById('logToDate').value;
+    const offset = apiLogsPage * API_LOGS_PER_PAGE;
+
+    const params = new URLSearchParams();
+    if (endpoint) params.set('endpoint', endpoint);
+    if (success) params.set('success', success);
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    params.set('limit', String(API_LOGS_PER_PAGE));
+    params.set('offset', String(offset));
+
+    const res = await fetch('/api/admin/aeps-api-logs?' + params.toString(), {
+      headers: { 'Authorization': 'Bearer ' + adminToken },
+    });
+    if (res.status === 401) { handleLogout(); return; }
+    const data = await res.json();
+    apiLogsData = data.logs || [];
+    apiLogsTotal = data.total || 0;
+    renderApiLogs();
+  } catch (err) {
+    console.error('Failed to load API logs:', err);
+  }
+}
+
+function renderApiLogs() {
+  const tbody = document.getElementById('apiLogsTableBody');
+  const empty = document.getElementById('apiLogsEmptyState');
+  const stats = document.getElementById('logStats');
+  const pagination = document.getElementById('logPagination');
+
+  stats.textContent = `Total: ${apiLogsTotal} logs | Page ${apiLogsPage + 1} of ${Math.max(1, Math.ceil(apiLogsTotal / API_LOGS_PER_PAGE))}`;
+
+  if (apiLogsData.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    pagination.innerHTML = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  tbody.innerHTML = apiLogsData.map(log => {
+    const successCls = log.success ? 'success' : 'failed';
+    const successLabel = log.success ? 'OK' : 'FAIL';
+    const duration = log.durationMs > 0 ? log.durationMs + 'ms' : '—';
+    const error = log.errorMessage ? esc(log.errorMessage.substring(0, 60)) : '—';
+    return `<tr>
+      <td>${esc(formatDate(log.createdAt))}</td>
+      <td style="font-family:monospace;font-size:12px;">${esc(log.endpoint)}</td>
+      <td>${log.httpStatus}</td>
+      <td><span class="pill ${successCls}">${successLabel}</span></td>
+      <td>${duration}</td>
+      <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(log.errorMessage || '')}">${error}</td>
+      <td>
+        <button class="action-btn" style="background:#2E9E5B;color:#fff;font-size:11px;padding:4px 10px;" onclick="viewLogDetail('${esc(log.id)}')">View</button>
+        <button class="action-btn" style="background:#6b7280;color:#fff;font-size:11px;padding:4px 10px;margin-left:4px;" onclick="copyLogDetail('${esc(log.id)}')">Copy</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const totalPages = Math.ceil(apiLogsTotal / API_LOGS_PER_PAGE);
+  let pagHtml = '';
+  if (apiLogsPage > 0) {
+    pagHtml += `<button class="refresh-btn" onclick="apiLogsPage--;loadApiLogs();">&laquo; Prev</button>`;
+  }
+  if (apiLogsPage < totalPages - 1) {
+    pagHtml += `<button class="refresh-btn" onclick="apiLogsPage++;loadApiLogs();">Next &raquo;</button>`;
+  }
+  pagination.innerHTML = pagHtml;
+}
+
+function viewLogDetail(logId) {
+  const log = apiLogsData.find(l => l.id === logId);
+  if (!log) return;
+
+  const detailView = document.getElementById('logDetailView');
+  let content = '=== AEPS API LOG DETAIL ===\n';
+  content += 'ID: ' + log.id + '\n';
+  content += 'Timestamp: ' + log.createdAt + '\n';
+  content += 'Endpoint: ' + log.endpoint + '\n';
+  content += 'Method: ' + log.method + '\n';
+  content += 'HTTP Status: ' + log.httpStatus + '\n';
+  content += 'Success: ' + log.success + '\n';
+  content += 'Duration: ' + log.durationMs + 'ms\n';
+  if (log.errorMessage) content += 'Error: ' + log.errorMessage + '\n';
+  content += '\n--- REQUEST PAYLOAD ---\n';
+  try {
+    content += JSON.stringify(JSON.parse(log.requestPayload), null, 2);
+  } catch {
+    content += log.requestPayload;
+  }
+  content += '\n\n--- RESPONSE BODY ---\n';
+  try {
+    content += JSON.stringify(JSON.parse(log.responseBody), null, 2);
+  } catch {
+    content += log.responseBody;
+  }
+  content += '\n\n=== END LOG ===';
+
+  detailView.textContent = content;
+  detailView.style.display = 'block';
+  detailView.scrollIntoView({ behavior: 'smooth' });
+}
+
+function copyLogDetail(logId) {
+  const log = apiLogsData.find(l => l.id === logId);
+  if (!log) return;
+
+  let reqPayload, resBody;
+  try { reqPayload = JSON.parse(log.requestPayload || '{}'); } catch { reqPayload = log.requestPayload; }
+  try { resBody = JSON.parse(log.responseBody || '{}'); } catch { resBody = log.responseBody; }
+
+  let content = JSON.stringify({
+    id: log.id,
+    endpoint: log.endpoint,
+    method: log.method,
+    httpStatus: log.httpStatus,
+    success: log.success,
+    durationMs: log.durationMs,
+    errorMessage: log.errorMessage,
+    createdAt: log.createdAt,
+    requestPayload: reqPayload,
+    responseBody: resBody,
+  }, null, 2);
+
+  navigator.clipboard.writeText(content).then(() => {
+    alert('Log copied to clipboard');
+  });
+}
+
+function exportApiLogs() {
+  if (apiLogsData.length === 0) {
+    alert('No logs to export');
+    return;
+  }
+
+  let csv = 'ID,Timestamp,Endpoint,Method,HTTP Status,Success,Duration (ms),Error\n';
+  apiLogsData.forEach(log => {
+    csv += `"${log.id}","${log.createdAt}","${log.endpoint}","${log.method}",${log.httpStatus},${log.success},${log.durationMs},"${(log.errorMessage || '').replace(/"/g, '""')}"\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'aeps-api-logs-' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function startAutoRefresh() {
   stopAutoRefresh();
   countdownValue = 30;
@@ -791,6 +1002,7 @@ function startAutoRefresh() {
     if (countdownValue <= 0) {
       loadTransactions();
       loadAepsTransactions();
+      loadApiLogs();
       countdownValue = 30;
     }
   }, 1000);

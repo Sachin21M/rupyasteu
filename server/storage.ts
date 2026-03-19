@@ -1,4 +1,4 @@
-import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction } from "../shared/schema";
+import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction, AepsApiLog } from "../shared/schema";
 import { randomUUID } from "crypto";
 import pg from "pg";
 
@@ -54,6 +54,26 @@ async function initAepsTables() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_api_logs (
+        id VARCHAR(64) PRIMARY KEY,
+        endpoint VARCHAR(255) NOT NULL,
+        method VARCHAR(10) NOT NULL DEFAULT 'POST',
+        request_payload TEXT NOT NULL DEFAULT '{}',
+        response_body TEXT NOT NULL DEFAULT '{}',
+        http_status INTEGER NOT NULL DEFAULT 0,
+        success BOOLEAN NOT NULL DEFAULT FALSE,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_aeps_api_logs_created ON aeps_api_logs(created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_aeps_api_logs_endpoint ON aeps_api_logs(endpoint)
+    `);
     console.log("AEPS tables initialized successfully");
   } catch (err: any) {
     console.error("Failed to create AEPS tables:", err.message);
@@ -96,6 +116,9 @@ export interface IStorage {
   updateAepsTransaction(id: string, data: Partial<AepsTransaction>): Promise<AepsTransaction | undefined>;
   getUserAepsTransactions(userId: string): Promise<AepsTransaction[]>;
   getAllAepsTransactions(): Promise<AepsTransaction[]>;
+
+  createAepsApiLog(data: Omit<AepsApiLog, "id" | "createdAt">): Promise<AepsApiLog>;
+  getAepsApiLogs(filters?: { endpoint?: string; success?: boolean; fromDate?: string; toDate?: string; limit?: number; offset?: number }): Promise<{ logs: AepsApiLog[]; total: number }>;
 }
 
 const OPERATORS: Operator[] = [
@@ -465,6 +488,70 @@ export class PgStorage implements IStorage {
     const result = await pool.query("SELECT * FROM aeps_transactions ORDER BY created_at DESC");
     return result.rows.map(rowToAepsTransaction);
   }
+
+  async createAepsApiLog(data: Omit<AepsApiLog, "id" | "createdAt">): Promise<AepsApiLog> {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_api_logs (id, endpoint, method, request_payload, response_body, http_status, success, duration_ms, error_message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [id, data.endpoint, data.method, data.requestPayload, data.responseBody, data.httpStatus, data.success, data.durationMs, data.errorMessage || null]
+    );
+    return rowToAepsApiLog(result.rows[0]);
+  }
+
+  async getAepsApiLogs(filters?: { endpoint?: string; success?: boolean; fromDate?: string; toDate?: string; limit?: number; offset?: number }): Promise<{ logs: AepsApiLog[]; total: number }> {
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (filters?.endpoint) {
+      conditions.push(`endpoint LIKE $${idx++}`);
+      values.push(`%${filters.endpoint}%`);
+    }
+    if (filters?.success !== undefined) {
+      conditions.push(`success = $${idx++}`);
+      values.push(filters.success);
+    }
+    if (filters?.fromDate) {
+      conditions.push(`created_at >= $${idx++}`);
+      values.push(filters.fromDate);
+    }
+    if (filters?.toDate) {
+      conditions.push(`created_at <= $${idx++}`);
+      values.push(filters.toDate + " 23:59:59");
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const countResult = await pool.query(`SELECT COUNT(*) FROM aeps_api_logs ${where}`, values);
+    const total = parseInt(countResult.rows[0].count);
+
+    const limit = filters?.limit || 50;
+    const offset = filters?.offset || 0;
+    const dataValues = [...values, limit, offset];
+    const result = await pool.query(
+      `SELECT * FROM aeps_api_logs ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`,
+      dataValues
+    );
+
+    return { logs: result.rows.map(rowToAepsApiLog), total };
+  }
+}
+
+function rowToAepsApiLog(row: any): AepsApiLog {
+  return {
+    id: row.id,
+    endpoint: row.endpoint,
+    method: row.method,
+    requestPayload: row.request_payload,
+    responseBody: row.response_body,
+    httpStatus: row.http_status,
+    success: row.success,
+    durationMs: row.duration_ms,
+    errorMessage: row.error_message || undefined,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+  };
 }
 
 export const storage = new PgStorage();

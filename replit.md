@@ -109,19 +109,22 @@ shared/
 - **Environment: LIVE (PRODUCTION)** — switched from SIT/UAT
 - LIVE Base URL: `https://api.paysprint.in/api/v1` (no `service-api/` prefix for LIVE)
 - SIT Base URL was: `https://sit.paysprint.in/service-api/api/v1`
-- JWT payload: `{ iss: "PAYSPRINT", timestamp (seconds), partnerId, product: "WALLET", reqid }`
+- JWT payload: `{ timestamp (seconds), partnerId (from PAYSPRINT_PARTNER_ID env var), reqid (unique integer) }`
 - JWT signing: Use raw base64 JWT Token string as HS256 secret (NOT decoded/Buffer)
-- Payload format: AES-128-CBC encrypted for PRODUCTION (`{"body":"<encrypted>"}`) — plain JSON for SIT/UAT
+- **partnerId**: Must be the Paysprint-assigned user ID from `PAYSPRINT_PARTNER_ID` env var (e.g. `PS006853...`), NOT a custom name
+- Payload format: AES-128-CBC encrypted for PRODUCTION (`{"data":"<encrypted>"}`) — plain JSON for SIT/UAT
+- **AES encryption**: AES-128-CBC with 16-byte key and 16-byte IV from env vars, Base64 output
+- Request body wrapper: `{ "data": "<encrypted_base64>" }`
+- Request header: `Token: <jwt>` (NOT `Authorization: Bearer`)
 - Operator codes: Numeric IDs (14=Jio, 4=Airtel, 33=VI, 8=BSNL, 10=MTNL, 34=Idea)
 - **LIVE account version: IP BASED** — Authorisedkey header must NOT be sent (causes "Invalid Ip" error)
 - For SIT/UAT (IP + Authorised Key based), Authorisedkey IS sent
-- LIVE Partner ID: `PS006853d7abd4d179a5ae3775d9e77eb9caf7471772716264` (decoded from LIVE JWT KEY)
 - **Geo-restriction**: LIVE API blocks non-Indian IPs via AWS ELB
 - **Solution**: Hostinger proxy in India (static IP `88.222.246.128`) routes Paysprint API calls
 - Proxy URL: stored in `PAYSPRINT_PROXY_URL` env var
 - The proxy IP must be whitelisted in Paysprint dashboard
-- Paysprint runs in simulation mode when partner ID not configured
-- **Current status**: JWT auth works (balance endpoint responds properly), but RECHARGE service returns "Invalid Credential" — RECHARGE servers show "Deactive" on Paysprint dashboard; service activation required
+- Paysprint runs in simulation mode when JWT token not configured
+- **Current status**: Authentication WORKING — balance API responds correctly (returns service hours info). Service maintenance window: 23:00–05:30 IST.
 
 ## Notes
 - Payment mode is configurable via PAYMENT_MODE env var

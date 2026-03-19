@@ -1,18 +1,17 @@
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
 import { encryptPayload } from "../utils/encryption";
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
+const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
 const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
-const PAYSPRINT_PARTNER_NAME = "RUPYASETU";
 
 function isProductionEnv(): boolean {
   return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
 }
 
 function generateUniqueReqId(): string {
-  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+  return Math.floor(Math.random() * 1000000000).toString();
 }
 
 function generatePaysprintJWT(): { token: string; payload: Record<string, unknown> } {
@@ -20,7 +19,7 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const reqid = generateUniqueReqId();
   const payload = {
     timestamp: timestamp,
-    partnerId: PAYSPRINT_PARTNER_NAME,
+    partnerId: PAYSPRINT_PARTNER_ID,
     reqid: reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
@@ -54,7 +53,7 @@ async function makePaysprintRequest(
     const reqid = generateUniqueReqId();
 
     const fullPayload: Record<string, unknown> = {
-      partnerId: PAYSPRINT_PARTNER_NAME,
+      partnerId: PAYSPRINT_PARTNER_ID,
       timestamp: timestamp,
       reqid: reqid,
       ...payload,
@@ -82,7 +81,7 @@ async function makePaysprintRequest(
         const encrypted = encryptPayload(fullPayload);
         requestBody = JSON.stringify({ data: encrypted });
         console.log("[STEP 3] AES ENCRYPTION:");
-        console.log("  Algorithm: AES-256-CBC");
+        console.log("  Algorithm: AES-128-CBC");
         console.log("  Output encoding: Base64");
         console.log("  Encrypted length:", encrypted.length, "chars");
         console.log("  Encrypted (first 40 chars):", encrypted.substring(0, 40) + "...");

@@ -530,14 +530,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { encryptPayload } = await import("./utils/encryption");
 
       const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
-      const PAYSPRINT_PARTNER_NAME = "RUPYASETU";
+      const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
       const PAYSPRINT_ENV_VAL = process.env.PAYSPRINT_ENV || "PRODUCTION";
       const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
       const useEncryption = PAYSPRINT_ENV_VAL === "PRODUCTION" || PAYSPRINT_ENV_VAL === "LIVE";
 
       const timestamp = Math.floor(Date.now() / 1000);
-      const uniqueReqId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-      const jwtPayload = { timestamp, partnerId: PAYSPRINT_PARTNER_NAME, reqid: uniqueReqId };
+      const uniqueReqId = Math.floor(Math.random() * 1000000000).toString();
+      const jwtPayload = { timestamp, partnerId: PAYSPRINT_PARTNER_ID, reqid: uniqueReqId };
       const jwtToken = jwt.default.sign(jwtPayload, jwtTokenEnv, { algorithm: "HS256" });
 
       let endpoint = "/service/recharge/recharge/dorecharge";
@@ -561,7 +561,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const requestBody: Record<string, unknown> = {
-        partnerId: PAYSPRINT_PARTNER_NAME,
+        partnerId: PAYSPRINT_PARTNER_ID,
         timestamp: timestamp,
         reqid: uniqueReqId,
         ...apiFields,
@@ -572,7 +572,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
       let bodyStr: string;
       let encryptedOutput = "";
-      let encryptionActual = useEncryption ? "AES-256-CBC" : "Plain JSON";
+      let encryptionActual = useEncryption ? "AES-128-CBC" : "Plain JSON";
       if (useEncryption) {
         try {
           const encrypted = encryptPayload(requestBody);

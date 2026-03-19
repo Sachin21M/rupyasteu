@@ -94,7 +94,7 @@ async function logAepsApiCall(
       endpoint,
       method: "POST",
       requestPayload: JSON.stringify(maskedPayload, null, 2),
-      responseBody: maskedResponse.substring(0, 10000),
+      responseBody: maskedResponse,
       httpStatus,
       success,
       durationMs,
@@ -119,18 +119,17 @@ async function makeAepsRequest(
 
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
   const startTime = Date.now();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const reqid = generateUniqueReqId();
+  const fullPayload: Record<string, unknown> = {
+    partnerId: PAYSPRINT_PARTNER_ID,
+    timestamp,
+    reqid,
+    ...payload,
+  };
 
   try {
     const useEncryption = isProductionEnv();
-    const timestamp = Math.floor(Date.now() / 1000);
-    const reqid = generateUniqueReqId();
-
-    const fullPayload: Record<string, unknown> = {
-      partnerId: PAYSPRINT_PARTNER_ID,
-      timestamp,
-      reqid,
-      ...payload,
-    };
 
     console.log(`[AEPS] Request to ${endpoint}`);
 
@@ -229,12 +228,12 @@ async function makeAepsRequest(
     const duration = Date.now() - startTime;
     if (error.name === "AbortError") {
       const errResult = { status: false, response_code: 408, message: "AEPS request timeout (180s)" };
-      await logAepsApiCall(endpoint, payload, JSON.stringify(errResult), 408, false, duration, "Request timeout (180s)");
+      await logAepsApiCall(endpoint, fullPayload, JSON.stringify(errResult), 408, false, duration, "Request timeout (180s)");
       return errResult;
     }
     console.error("[AEPS] Network Error:", error);
     const errResult = { status: false, response_code: 500, message: "Failed to connect to AEPS service" };
-    await logAepsApiCall(endpoint, payload, JSON.stringify(errResult), 500, false, duration, error.message);
+    await logAepsApiCall(endpoint, fullPayload, JSON.stringify(errResult), 500, false, duration, error.message);
     return errResult;
   }
 }

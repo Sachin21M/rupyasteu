@@ -326,12 +326,13 @@
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <select id="logEndpointFilter" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
           <option value="">All Endpoints</option>
-          <option value="bank2">/bank2 (Balance)</option>
-          <option value="bank3">/bank3 (Withdrawal)</option>
-          <option value="bank5">/bank5 (Statement)</option>
-          <option value="bank6">/bank6 (Aadhaar Pay)</option>
-          <option value="banklist">/banklist</option>
-          <option value="ekyc">/ekyc</option>
+          <option value="balanceenquiry">Balance Enquiry</option>
+          <option value="cashwithdraw">Cash Withdrawal</option>
+          <option value="ministatement">Mini Statement</option>
+          <option value="aadharpay">Aadhaar Pay</option>
+          <option value="cashdeposit">Cash Deposit</option>
+          <option value="banklist">Bank List</option>
+          <option value="Twofactorkyc">2FA KYC</option>
         </select>
         <select id="logSuccessFilter" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
           <option value="">All Status</option>

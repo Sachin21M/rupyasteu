@@ -26,11 +26,6 @@ const CAPTURE_XML = `<?xml version="1.0"?>
   <CustOpts><Param name="mantrakey" value="" /></CustOpts>
 </PidOptions>`;
 
-const DEVICE_INFO_XML = `<?xml version="1.0"?>
-<PidOptions ver="1.0">
-  <Opts fCount="1" fType="2" iCount="0" pCount="0" format="0" pidVer="2.0" timeout="10000" env="P" />
-</PidOptions>`;
-
 const SIMULATED_PID = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS100" mc="MIIEGDCCAwCgAwIBAgIEA" dc="2f196bbc-e2f8-4018-87a9-9b58eb" /><Skey ci="20250101">SIMULATED_KEY</Skey><Hmac>SIMULATED_HMAC</Hmac><Data type="X">SIMULATED_BIOMETRIC_DATA</Data></PidData>`;
 
 function parseDeviceInfoFromXml(xml: string): Partial<RdDeviceInfo> {

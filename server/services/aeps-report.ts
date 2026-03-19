@@ -44,13 +44,21 @@ function redactForPdf(obj: unknown): unknown {
 interface ReportData {
   bankListResponse: any;
   txnStatusResponse: any;
+  bankListLog: any | null;
+  txnStatusLog: any | null;
   apiLogs: any[];
   totalLogs: number;
   generatedAt: string;
+  isLive: boolean;
 }
 
 async function gatherReportData(): Promise<ReportData> {
   const generatedAt = new Date().toISOString();
+  const isLive = !!(process.env.PAYSPRINT_JWT_TOKEN);
+
+  if (!isLive) {
+    throw new Error("Cannot generate AEPS approval report: JWT token not configured. Report requires LIVE API calls for valid evidence.");
+  }
 
   let bankListResponse: any = null;
   try {
@@ -70,12 +78,27 @@ async function gatherReportData(): Promise<ReportData> {
 
   const logsResult = await storage.getAepsApiLogs({ limit: 200, offset: 0 });
 
+  let bankListLog: any = null;
+  let txnStatusLog: any = null;
+  for (const log of logsResult.logs) {
+    if (!bankListLog && log.endpoint && log.endpoint.includes("banklist")) {
+      bankListLog = log;
+    }
+    if (!txnStatusLog && log.endpoint && log.endpoint.includes("cashwithdraw/status")) {
+      txnStatusLog = log;
+    }
+    if (bankListLog && txnStatusLog) break;
+  }
+
   return {
     bankListResponse,
     txnStatusResponse,
+    bankListLog,
+    txnStatusLog,
     apiLogs: logsResult.logs,
     totalLogs: logsResult.total,
     generatedAt,
+    isLive,
   };
 }
 
@@ -223,36 +246,103 @@ export async function generateAepsReport(): Promise<Buffer> {
     y = drawKeyValue(doc, "Report Generated", new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }), 50, y, 450);
     y += 10;
 
-    // === ENDPOINTS DOCUMENTATION ===
-    y = drawSectionTitle(doc, "2. AEPS Endpoints Implemented", y);
+    // === ENDPOINTS DOCUMENTATION WITH FORMAT ===
+    y = drawSectionTitle(doc, "2. AEPS Endpoints — Request/Response Format", y);
 
-    const endpoints = [
-      { path: "/service/aeps/banklist/index", desc: "Fetch supported bank list for AEPS", biometric: "No" },
-      { path: "/service/aeps/balanceenquiry/index", desc: "Check Aadhaar-linked bank balance", biometric: "Yes" },
-      { path: "/service/aeps/ministatement/index", desc: "Fetch mini statement", biometric: "Yes" },
-      { path: "/service/aeps/v3/cashwithdraw/index", desc: "Cash withdrawal via AEPS", biometric: "Yes" },
-      { path: "/service/aeps/aadharpay/index", desc: "Aadhaar Pay transaction", biometric: "Yes" },
-      { path: "/service/aeps/cashdeposit/index", desc: "Cash deposit via AEPS", biometric: "Yes" },
-      { path: "/service/aeps/cashwithdraw/status", desc: "Check transaction status", biometric: "No" },
-      { path: "/service/aeps/kyc/Twofactorkyc/registration", desc: "2FA KYC registration", biometric: "Yes" },
-      { path: "/service/aeps/kyc/Twofactorkyc/authentication", desc: "2FA daily authentication", biometric: "Yes" },
-      { path: "/service/onboard/onboard/getonboardurl", desc: "Merchant onboarding URL", biometric: "No" },
+    const endpointDocs = [
+      {
+        path: "/service/aeps/banklist/index",
+        desc: "Fetch supported bank list for AEPS",
+        biometric: false,
+        requestFields: "partnerId, timestamp, reqid",
+        responseFields: "status, response_code, message, banklist.data[{id, bankName, iinno, activeFlag}]",
+      },
+      {
+        path: "/service/aeps/balanceenquiry/index",
+        desc: "Check Aadhaar-linked bank balance",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, requestremarks",
+        responseFields: "status, response_code, message, balanceamount, bankrrn",
+      },
+      {
+        path: "/service/aeps/ministatement/index",
+        desc: "Fetch mini bank statement",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, requestremarks",
+        responseFields: "status, response_code, message, balanceamount, bankrrn, ministatement[{date, txnType, amount, narration}]",
+      },
+      {
+        path: "/service/aeps/v3/cashwithdraw/index",
+        desc: "Cash withdrawal via AEPS",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, amount, requestremarks",
+        responseFields: "status, response_code, message, balanceamount, bankrrn, data.ackno",
+      },
+      {
+        path: "/service/aeps/aadharpay/index",
+        desc: "Aadhaar Pay transaction",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, amount, requestremarks",
+        responseFields: "status, response_code, message, bankrrn, data.ackno",
+      },
+      {
+        path: "/service/aeps/cashdeposit/index",
+        desc: "Cash deposit via AEPS",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, amount, requestremarks",
+        responseFields: "status, response_code, message, bankrrn, data.ackno",
+      },
+      {
+        path: "/service/aeps/cashwithdraw/status",
+        desc: "Check transaction status by reference",
+        biometric: false,
+        requestFields: "partnerId, timestamp, reqid, referenceno",
+        responseFields: "status, response_code, message, data",
+      },
+      {
+        path: "/service/aeps/kyc/Twofactorkyc/registration",
+        desc: "2FA KYC registration",
+        biometric: true,
+        requestFields: "accessmodetype, adhaarnumber, mobilenumber, latitude, longitude, referenceno, submerchantid, data (PID XML), ipaddress, timestamp, is_iris",
+        responseFields: "status, response_code, message",
+      },
+      {
+        path: "/service/aeps/kyc/Twofactorkyc/authentication",
+        desc: "2FA daily authentication",
+        biometric: true,
+        requestFields: "accessmodetype, adhaarnumber, mobilenumber, latitude, longitude, referenceno, submerchantid, data (PID XML), ipaddress, timestamp, is_iris",
+        responseFields: "status, response_code, message",
+      },
+      {
+        path: "/service/onboard/onboard/getonboardurl",
+        desc: "Merchant onboarding URL",
+        biometric: false,
+        requestFields: "merchantcode, mobile, email, firm, callback",
+        responseFields: "status, response_code, message, data.redirecturl",
+      },
     ];
 
-    const epWidths = [200, 200, 55];
-    y = drawTableRow(doc, ["Endpoint Path", "Description", "Biometric"], epWidths, 50, y, true);
-    for (const ep of endpoints) {
-      y = drawTableRow(doc, [ep.path, ep.desc, ep.biometric], epWidths, 50, y, false);
+    for (const ep of endpointDocs) {
+      y = drawKeyValue(doc, "Endpoint", ep.path, 50, y, 450);
+      y = drawKeyValue(doc, "Description", ep.desc, 50, y, 450);
+      y = drawKeyValue(doc, "Biometric Required", ep.biometric ? "Yes" : "No", 50, y, 450);
+      y = drawKeyValue(doc, "Request Fields", ep.requestFields, 50, y, 450);
+      y = drawKeyValue(doc, "Response Fields", ep.responseFields, 50, y, 450);
+      y += 6;
     }
-    y += 15;
+    y += 5;
 
-    // === LIVE API CALL: BANK LIST ===
-    y = drawSectionTitle(doc, "3. Live API Call — Bank List", y);
+    // === LIVE API CALL: BANK LIST (with full request/response from DB log) ===
+    y = drawSectionTitle(doc, "3. Live API Call — Bank List (Full Evidence)", y);
     y = drawKeyValue(doc, "Endpoint", "/service/aeps/banklist/index", 50, y, 450);
     y = drawKeyValue(doc, "Method", "POST", 50, y, 450);
     y = drawKeyValue(doc, "Status", data.bankListResponse?.status ? "SUCCESS" : "FAILED", 50, y, 450);
     y = drawKeyValue(doc, "Response Code", String(data.bankListResponse?.response_code ?? "N/A"), 50, y, 450);
     y = drawKeyValue(doc, "Message", data.bankListResponse?.message || "N/A", 50, y, 450);
+    if (data.bankListLog) {
+      y = drawKeyValue(doc, "Duration", `${data.bankListLog.durationMs}ms`, 50, y, 450);
+      y = drawKeyValue(doc, "HTTP Status", String(data.bankListLog.httpStatus), 50, y, 450);
+    }
 
     const bankData = data.bankListResponse?.data || data.bankListResponse?.banklist?.data;
     if (bankData && Array.isArray(bankData)) {
@@ -271,19 +361,41 @@ export async function generateAepsReport(): Promise<Buffer> {
       }
     }
     y += 5;
-    y = drawKeyValue(doc, "Full Response", "", 50, y, 450);
-    y = drawJsonBlock(doc, data.bankListResponse, 50, y, doc.page.width - 100, 20);
 
-    // === LIVE API CALL: TRANSACTION STATUS ===
-    y = drawSectionTitle(doc, "4. Live API Call — Transaction Status Check", y);
+    if (data.bankListLog) {
+      y = drawKeyValue(doc, "Request Payload (redacted)", "", 50, y, 450);
+      try {
+        y = drawJsonBlock(doc, redactForPdf(JSON.parse(data.bankListLog.requestPayload)), 50, y, doc.page.width - 100, 15);
+      } catch {
+        y = drawJsonBlock(doc, redactForPdf(data.bankListLog.requestPayload), 50, y, doc.page.width - 100, 15);
+      }
+    }
+    y = drawKeyValue(doc, "Response Body", "", 50, y, 450);
+    y = drawJsonBlock(doc, data.bankListResponse, 50, y, doc.page.width - 100, 25);
+
+    // === LIVE API CALL: TRANSACTION STATUS (with full request/response) ===
+    y = drawSectionTitle(doc, "4. Live API Call — Transaction Status (Full Evidence)", y);
     y = drawKeyValue(doc, "Endpoint", "/service/aeps/cashwithdraw/status", 50, y, 450);
     y = drawKeyValue(doc, "Method", "POST", 50, y, 450);
-    y = drawKeyValue(doc, "Test Reference", `REPORT_TEST_*`, 50, y, 450);
+    y = drawKeyValue(doc, "Test Reference", "REPORT_TEST_*", 50, y, 450);
     y = drawKeyValue(doc, "Status", data.txnStatusResponse?.status ? "SUCCESS" : "FAILED/NOT FOUND", 50, y, 450);
     y = drawKeyValue(doc, "Response Code", String(data.txnStatusResponse?.response_code ?? "N/A"), 50, y, 450);
     y = drawKeyValue(doc, "Message", data.txnStatusResponse?.message || "N/A", 50, y, 450);
+    if (data.txnStatusLog) {
+      y = drawKeyValue(doc, "Duration", `${data.txnStatusLog.durationMs}ms`, 50, y, 450);
+      y = drawKeyValue(doc, "HTTP Status", String(data.txnStatusLog.httpStatus), 50, y, 450);
+    }
     y += 5;
-    y = drawKeyValue(doc, "Full Response", "", 50, y, 450);
+
+    if (data.txnStatusLog) {
+      y = drawKeyValue(doc, "Request Payload (redacted)", "", 50, y, 450);
+      try {
+        y = drawJsonBlock(doc, redactForPdf(JSON.parse(data.txnStatusLog.requestPayload)), 50, y, doc.page.width - 100, 15);
+      } catch {
+        y = drawJsonBlock(doc, redactForPdf(data.txnStatusLog.requestPayload), 50, y, doc.page.width - 100, 15);
+      }
+    }
+    y = drawKeyValue(doc, "Response Body", "", 50, y, 450);
     y = drawJsonBlock(doc, data.txnStatusResponse, 50, y, doc.page.width - 100, 15);
 
     // === API LOGS FROM DATABASE ===
@@ -308,37 +420,10 @@ export async function generateAepsReport(): Promise<Buffer> {
         (log.errorMessage || "").substring(0, 30),
       ], logWidths, 50, y, false);
     }
-
-    if (data.apiLogs.length > 0) {
-      y += 15;
-      y = drawSectionTitle(doc, "6. Sample Log Detail", y);
-      const sampleLog = data.apiLogs[0];
-      y = drawKeyValue(doc, "Log ID", sampleLog.id, 50, y, 450);
-      y = drawKeyValue(doc, "Endpoint", sampleLog.endpoint, 50, y, 450);
-      y = drawKeyValue(doc, "HTTP Status", String(sampleLog.httpStatus), 50, y, 450);
-      y = drawKeyValue(doc, "Success", String(sampleLog.success), 50, y, 450);
-      y = drawKeyValue(doc, "Duration", `${sampleLog.durationMs}ms`, 50, y, 450);
-      y = drawKeyValue(doc, "Timestamp", sampleLog.createdAt, 50, y, 450);
-      if (sampleLog.errorMessage) {
-        y = drawKeyValue(doc, "Error", sampleLog.errorMessage, 50, y, 450);
-      }
-      y += 5;
-      y = drawKeyValue(doc, "Request Payload (redacted)", "", 50, y, 450);
-      try {
-        y = drawJsonBlock(doc, redactForPdf(JSON.parse(sampleLog.requestPayload)), 50, y, doc.page.width - 100, 15);
-      } catch {
-        y = drawJsonBlock(doc, redactForPdf(sampleLog.requestPayload), 50, y, doc.page.width - 100, 15);
-      }
-      y = drawKeyValue(doc, "Response Body (redacted)", "", 50, y, 450);
-      try {
-        y = drawJsonBlock(doc, redactForPdf(JSON.parse(sampleLog.responseBody)), 50, y, doc.page.width - 100, 15);
-      } catch {
-        y = drawJsonBlock(doc, redactForPdf(sampleLog.responseBody), 50, y, doc.page.width - 100, 15);
-      }
-    }
+    y += 10;
 
     // === SECURITY MEASURES ===
-    y = drawSectionTitle(doc, "7. Security & Data Protection", y);
+    y = drawSectionTitle(doc, "6. Security & Data Protection", y);
     const securityItems = [
       ["Encryption", "AES-128-CBC encryption for all production API payloads"],
       ["JWT Auth", "HS256 JWT tokens with timestamp and unique request IDs"],
@@ -356,7 +441,7 @@ export async function generateAepsReport(): Promise<Buffer> {
     y += 10;
 
     // === ADMIN PANEL CAPABILITIES ===
-    y = drawSectionTitle(doc, "8. Admin Panel Logging Capabilities", y);
+    y = drawSectionTitle(doc, "7. Admin Panel Logging Capabilities", y);
     const adminItems = [
       ["Real-time Logs", "Auto-refreshing AEPS API logs table in admin panel"],
       ["Endpoint Filter", "Filter logs by specific AEPS endpoint (balance, withdraw, etc.)"],

@@ -4,7 +4,7 @@ import { storage } from "../storage";
 
 const SENSITIVE_KEYS = new Set([
   "adhaarnumber", "aadhaar", "aadhar", "aadharnumber",
-  "data", "piddata", "pid", "biometric", "biometricdata",
+  "piddata", "pid", "biometric", "biometricdata",
   "hmac", "skey", "ci", "sessionkey",
 ]);
 

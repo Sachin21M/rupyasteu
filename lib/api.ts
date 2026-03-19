@@ -165,6 +165,19 @@ export async function performAepsTransaction(data: {
   return handleAepsResponse(res);
 }
 
+export async function aepsOnboardComplete(data: { status: string; merchantCode?: string }) {
+  const res = await authFetch("/api/aeps/onboard/complete", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return handleAepsResponse(res);
+}
+
+export async function getAepsTransactionStatus(id: string) {
+  const res = await authFetch(`/api/aeps/transaction/${id}/status`);
+  return handleAepsResponse(res);
+}
+
 export async function getAepsTransactions() {
   const res = await authFetch("/api/aeps/transactions");
   return handleAepsResponse(res);

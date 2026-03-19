@@ -677,16 +677,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  let cachedBankList: { banks: any[]; cachedAt: number } | null = null;
+  const BANK_CACHE_TTL = 24 * 60 * 60 * 1000;
+
   app.get("/api/aeps/banks", authMiddleware, async (_req: Request, res: Response) => {
     try {
+      if (cachedBankList && (Date.now() - cachedBankList.cachedAt) < BANK_CACHE_TTL) {
+        return res.json({ success: true, banks: cachedBankList.banks });
+      }
       const result = await aepsService.getAepsBankList();
       if (result.status && result.data) {
+        cachedBankList = { banks: result.data, cachedAt: Date.now() };
         res.json({ success: true, banks: result.data });
       } else {
         res.json({ success: false, error: result.message, banks: [] });
       }
     } catch (error) {
       console.error("AEPS bank list error:", error);
+      if (cachedBankList) {
+        return res.json({ success: true, banks: cachedBankList.banks });
+      }
       res.status(500).json({ error: "Failed to fetch bank list" });
     }
   });
@@ -740,16 +750,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/aeps/onboard/callback", authMiddleware, async (req: Request, res: Response) => {
+  app.post("/api/aeps/onboard/complete", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { status } = req.body;
-      const kycStatus = status === "success" ? "COMPLETED" : "FAILED";
-      const merchant = await storage.updateAepsMerchant((req as any).userId, { kycStatus });
+      const { status, merchantCode } = req.body;
+      if (status !== "success") {
+        const merchant = await storage.updateAepsMerchant((req as any).userId, { kycStatus: "FAILED" });
+        return res.json({ success: false, kycStatus: "FAILED" });
+      }
+      const updates: Record<string, string> = { kycStatus: "COMPLETED" };
+      if (merchantCode) updates.merchantCode = merchantCode;
+      const merchant = await storage.updateAepsMerchant((req as any).userId, updates);
       if (!merchant) return res.status(404).json({ error: "Merchant not found" });
-      res.json({ success: kycStatus === "COMPLETED", kycStatus });
+      res.json({ success: true, kycStatus: "COMPLETED" });
     } catch (error) {
-      console.error("AEPS onboard callback error:", error);
-      res.status(500).json({ error: "Callback processing failed" });
+      console.error("AEPS onboard complete error:", error);
+      res.status(500).json({ error: "Onboarding completion failed" });
     }
   });
 
@@ -758,6 +773,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tx = await storage.getAepsTransaction(req.params.id);
       if (!tx) return res.status(404).json({ error: "Transaction not found" });
       if (tx.userId !== (req as any).userId) return res.status(403).json({ error: "Unauthorized" });
+
+      if (tx.status === "AEPS_PROCESSING" && tx.referenceNo) {
+        try {
+          const liveStatus = await aepsService.checkAepsTransactionStatus({
+            referenceno: tx.referenceNo,
+          });
+          if (liveStatus.status && liveStatus.data) {
+            const newStatus = liveStatus.response_code === 1 ? "AEPS_SUCCESS" : "AEPS_FAILED";
+            await storage.updateAepsTransaction(tx.id, {
+              status: newStatus,
+              message: liveStatus.message,
+              apiResponse: JSON.stringify(liveStatus),
+            });
+            tx.status = newStatus;
+            tx.message = liveStatus.message;
+          }
+        } catch {
+        }
+      }
       res.json({ transaction: tx });
     } catch (error) {
       console.error("AEPS transaction status error:", error);

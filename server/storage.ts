@@ -369,7 +369,7 @@ export class PgStorage implements IStorage {
     const id = randomUUID();
     const result = await pool.query(
       `INSERT INTO aeps_merchants (id, user_id, merchant_code, kyc_status, bank_pipes)
-       VALUES ($1, $2, $3, 'COMPLETED', $4) RETURNING *`,
+       VALUES ($1, $2, $3, 'PENDING', $4) RETURNING *`,
       [id, userId, merchantCode, bankPipes]
     );
     return rowToAepsMerchant(result.rows[0]);

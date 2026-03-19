@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,12 +8,13 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  TextInput,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant } from "@/lib/api";
+import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
 
 type ServiceType = {
   id: string;
@@ -70,10 +71,12 @@ const AEPS_SERVICES: ServiceType[] = [
 export default function AepsServicesScreen() {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
-  const [merchantStatus, setMerchantStatus] = useState<{
-    onboarded: boolean;
-    dailyAuthenticated: boolean;
-  } | null>(null);
+  const [onboarded, setOnboarded] = useState(false);
+  const [dailyAuthenticated, setDailyAuthenticated] = useState(false);
+  const [kycStatus, setKycStatus] = useState("NOT_STARTED");
+  const [merchantCode, setMerchantCode] = useState("");
+  const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -81,17 +84,96 @@ export default function AepsServicesScreen() {
     checkMerchantStatus();
   }, []);
 
-  async function checkMerchantStatus() {
+  const checkMerchantStatus = useCallback(async () => {
     try {
       const result = await getAepsMerchant();
-      setMerchantStatus({
-        onboarded: result.onboarded || false,
-        dailyAuthenticated: result.dailyAuthenticated || false,
-      });
+      setOnboarded(result.onboarded || false);
+      setDailyAuthenticated(result.dailyAuthenticated || false);
+      setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
     } catch {
-      setMerchantStatus({ onboarded: false, dailyAuthenticated: false });
+      setOnboarded(false);
+      setDailyAuthenticated(false);
+      setKycStatus("NOT_STARTED");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  async function handleStartOnboarding() {
+    if (!merchantCode.trim()) {
+      Alert.alert("Required", "Please enter your merchant code");
+      return;
+    }
+    setOnboardingLoading(true);
+    try {
+      const result = await aepsOnboard(merchantCode.trim());
+      if (result.success && result.redirectUrl) {
+        Alert.alert(
+          "Complete KYC",
+          "You will be redirected to complete your KYC verification. After completing, tap 'I have completed KYC' below.",
+          [
+            { text: "Open KYC Page", onPress: () => {} },
+          ]
+        );
+        setKycStatus("PENDING");
+      } else {
+        Alert.alert("Error", result.error || "Failed to start onboarding");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Onboarding failed");
+    } finally {
+      setOnboardingLoading(false);
+    }
+  }
+
+  async function handleCompleteKyc() {
+    setOnboardingLoading(true);
+    try {
+      const result = await aepsOnboardComplete({ status: "success", merchantCode: merchantCode.trim() || undefined });
+      if (result.success) {
+        setOnboarded(true);
+        setKycStatus("COMPLETED");
+        Alert.alert("Success", "Merchant onboarding completed successfully!");
+      } else {
+        Alert.alert("Error", "KYC verification not yet complete. Please try again after completing verification.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to verify KYC");
+    } finally {
+      setOnboardingLoading(false);
+    }
+  }
+
+  async function handleDailyAuth() {
+    setAuthLoading(true);
+    try {
+      const biometricXml = Platform.OS === "web"
+        ? `<PidData><Resp errCode="0" fCount="1" fType="2" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" /><Skey ci="20250101">AUTH_KEY</Skey><Data type="X">AUTH_DATA</Data></PidData>`
+        : "";
+
+      if (!biometricXml) {
+        Alert.alert("Biometric Required", "Please connect a UIDAI-certified fingerprint/iris scanner.");
+        setAuthLoading(false);
+        return;
+      }
+
+      const result = await aeps2faAuthenticate({
+        accessmodetype: "site",
+        latitude: "0.0",
+        longitude: "0.0",
+        data: biometricXml,
+        pipe: "bank2",
+      });
+      if (result.success) {
+        setDailyAuthenticated(true);
+        Alert.alert("Authenticated", "Daily 2FA authentication completed. You can now perform AEPS transactions.");
+      } else {
+        Alert.alert("Failed", result.message || "Authentication failed. Please try again.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Authentication failed");
+    } finally {
+      setAuthLoading(false);
     }
   }
 
@@ -138,14 +220,104 @@ export default function AepsServicesScreen() {
         </View>
       </View>
 
+      {!onboarded && (
+        <View style={styles.setupSection}>
+          <View style={styles.setupCard}>
+            <View style={styles.setupStep}>
+              <View style={[styles.stepBadge, kycStatus === "COMPLETED" && styles.stepBadgeDone]}>
+                {kycStatus === "COMPLETED" ? (
+                  <Ionicons name="checkmark" size={16} color="#fff" />
+                ) : (
+                  <Text style={styles.stepBadgeText}>1</Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.setupTitle}>Merchant Onboarding</Text>
+                <Text style={styles.setupSub}>Complete KYC to activate AEPS services</Text>
+              </View>
+            </View>
+            {kycStatus !== "COMPLETED" && (
+              <>
+                <View style={styles.merchantCodeInput}>
+                  <TextInput
+                    style={styles.mcInput}
+                    placeholder="Enter Merchant Code"
+                    placeholderTextColor={Colors.textTertiary}
+                    value={merchantCode}
+                    onChangeText={setMerchantCode}
+                  />
+                </View>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <Pressable
+                    style={[styles.setupBtn, onboardingLoading && { opacity: 0.6 }]}
+                    onPress={kycStatus === "PENDING" ? handleCompleteKyc : handleStartOnboarding}
+                    disabled={onboardingLoading}
+                  >
+                    {onboardingLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.setupBtnText}>
+                        {kycStatus === "PENDING" ? "I Completed KYC" : "Start Onboarding"}
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      )}
+
+      {onboarded && !dailyAuthenticated && (
+        <View style={styles.setupSection}>
+          <View style={[styles.setupCard, { borderColor: "#6366F1" }]}>
+            <View style={styles.setupStep}>
+              <View style={[styles.stepBadge, { backgroundColor: "#6366F1" }]}>
+                <MaterialCommunityIcons name="fingerprint" size={16} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.setupTitle}>Daily Authentication</Text>
+                <Text style={styles.setupSub}>Complete biometric 2FA to proceed with transactions today</Text>
+              </View>
+            </View>
+            <Pressable
+              style={[styles.setupBtn, { backgroundColor: "#6366F1" }, authLoading && { opacity: 0.6 }]}
+              onPress={handleDailyAuth}
+              disabled={authLoading}
+            >
+              {authLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="fingerprint" size={18} color="#fff" />
+                  <Text style={styles.setupBtnText}>Authenticate Now</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {onboarded && dailyAuthenticated && (
+        <View style={styles.statusBanner}>
+          <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
+          <Text style={styles.statusText}>Ready for AEPS transactions</Text>
+        </View>
+      )}
+
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Select Service</Text>
         <View style={styles.servicesGrid}>
           {AEPS_SERVICES.map((service) => (
             <Pressable
               key={service.id}
-              style={({ pressed }) => [styles.serviceCard, pressed && { transform: [{ scale: 0.97 }], opacity: 0.9 }]}
+              style={({ pressed }) => [
+                styles.serviceCard,
+                pressed && { transform: [{ scale: 0.97 }], opacity: 0.9 },
+                (!onboarded || !dailyAuthenticated) && { opacity: 0.5 },
+              ]}
               onPress={() => handleServicePress(service)}
+              disabled={!onboarded || !dailyAuthenticated}
             >
               <View style={[styles.serviceIconWrap, { backgroundColor: service.color + "15" }]}>
                 {service.icon}
@@ -209,7 +381,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 24,
+    marginBottom: 20,
     gap: 16,
   },
   infoBannerIcon: {
@@ -234,6 +406,95 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "rgba(255,255,255,0.8)",
     lineHeight: 18,
+  },
+  setupSection: {
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  setupCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 18,
+    gap: 14,
+    borderWidth: 1.5,
+    borderColor: "#F59E0B",
+  },
+  setupStep: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  stepBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F59E0B",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  stepBadgeDone: {
+    backgroundColor: Colors.success,
+  },
+  stepBadgeText: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+    color: "#fff",
+  },
+  setupTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+  },
+  setupSub: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  merchantCodeInput: {
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 48,
+    justifyContent: "center",
+  },
+  mcInput: {
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
+    color: Colors.text,
+    height: "100%",
+  },
+  setupBtn: {
+    flex: 1,
+    height: 44,
+    backgroundColor: "#F59E0B",
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  setupBtnText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
+  },
+  statusBanner: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.successLight + "40",
+    borderRadius: 12,
+    padding: 12,
+    paddingHorizontal: 16,
+  },
+  statusText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.success,
   },
   section: {
     paddingHorizontal: 20,

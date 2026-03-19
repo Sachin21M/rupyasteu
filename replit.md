@@ -44,6 +44,7 @@ constants/
   colors.ts             # Theme colors
 lib/
   api.ts                # Frontend API client (recharge + AEPS functions)
+  rd-service.ts         # RD (Registered Device) biometric scanner integration
   query-client.ts       # React Query setup
 server/
   index.ts              # Express server
@@ -102,6 +103,16 @@ shared/
 - Bank pipe values: bank2, bank3, bank5, bank6 for LIVE (bank1 = UAT only)
 - 2FA: One-time registration + daily authentication required before transactions
 - Runs in simulation mode when JWT token not configured
+
+### RD Device Integration (`lib/rd-service.ts`)
+- RD Service apps (Mantra, Morpho, Startek, SecuGen) run HTTP server on localhost ports 11100-11103
+- Discovery: `GET http://127.0.0.1:{port}/rd/info` with method RDSERVICE
+- Capture: `POST http://127.0.0.1:{port}/rd/capture` with method CAPTURE and PidOptions XML body
+- Returns PID XML with encrypted biometric data, device info, and error codes
+- On web: uses simulated PID XML for testing; on native: calls real RD device
+- Both AEPS services page (daily 2FA) and transaction screen use real RD capture on native
+- RD device status indicator shown on native (green dot = connected, red dot = not found)
+- Supports re-capture and device refresh scanning
 
 ## Environment Variables
 - `PAYMENT_MODE` - MANUAL or GATEWAY (default: MANUAL)

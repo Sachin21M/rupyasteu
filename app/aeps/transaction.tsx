@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getAepsBanks, getAepsMerchant, performAepsTransaction } from "@/lib/api";
+import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
+import type { RdDeviceInfo } from "@/lib/rd-service";
 import type { AepsBank } from "@/shared/schema";
 
 type MerchantStatus = {
@@ -40,6 +42,9 @@ export default function AepsTransactionScreen() {
   const [banksLoading, setBanksLoading] = useState(true);
   const [biometricCaptured, setBiometricCaptured] = useState(false);
   const [biometricData, setBiometricData] = useState("");
+  const [capturingBiometric, setCapturingBiometric] = useState(false);
+  const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
+  const [rdChecking, setRdChecking] = useState(false);
   const [merchantStatus, setMerchantStatus] = useState<MerchantStatus>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
 
@@ -49,7 +54,18 @@ export default function AepsTransactionScreen() {
   useEffect(() => {
     loadBanks();
     checkMerchantStatus();
+    checkRdDevice();
   }, []);
+
+  async function checkRdDevice() {
+    if (Platform.OS === "web") return;
+    setRdChecking(true);
+    try {
+      const device = await discoverRdDevice();
+      setRdDevice(device);
+    } catch {}
+    setRdChecking(false);
+  }
 
   async function checkMerchantStatus() {
     try {
@@ -84,18 +100,27 @@ export default function AepsTransactionScreen() {
     }
   }
 
-  function handleCaptureBiometric() {
-    if (Platform.OS === "web") {
-      const simulated = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS100" mc="MIIEGDCCAwCgAwIBAgIEA" dc="2f196bbc-e2f8-4018-87a9-9b58eb" /><Skey ci="20250101">CAPTURED_KEY</Skey><Hmac>CAPTURED_HMAC</Hmac><Data type="X">CAPTURED_BIOMETRIC_DATA</Data></PidData>`;
-      setBiometricData(simulated);
-      setBiometricCaptured(true);
-      Alert.alert("Biometric Captured", "Simulated biometric data captured for web testing. In production, a UIDAI-certified RD device would capture real fingerprint/iris data.");
-    } else {
-      Alert.alert(
-        "Connect Biometric Device",
-        "Please connect a UIDAI-certified fingerprint/iris scanner (RD Service) to capture biometric data.",
-        [{ text: "OK" }]
-      );
+  async function handleCaptureBiometric() {
+    setCapturingBiometric(true);
+    try {
+      const result = await captureFingerprint(rdDevice?.port);
+      if (result.success) {
+        setBiometricData(result.pidData);
+        setBiometricCaptured(true);
+        if (result.deviceInfo) setRdDevice(result.deviceInfo);
+        if (isSimulated()) {
+          Alert.alert("Biometric Captured", "Simulated biometric data captured for web testing.");
+        } else {
+          const dev = result.deviceInfo;
+          Alert.alert("Biometric Captured", `Fingerprint captured successfully.\n\nDevice: ${dev?.manufacturer} ${dev?.model}\nSerial: ${dev?.serialNo}`);
+        }
+      } else {
+        Alert.alert("Capture Failed", result.error || "Could not capture biometric data.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Biometric capture failed");
+    } finally {
+      setCapturingBiometric(false);
     }
   }
 
@@ -343,33 +368,60 @@ export default function AepsTransactionScreen() {
           </View>
         )}
 
+        {Platform.OS !== "web" && (
+          <View style={styles.rdStatusRow}>
+            <View style={[styles.rdDot, { backgroundColor: rdDevice ? Colors.success : "#EF4444" }]} />
+            <Text style={[styles.rdStatusText, { color: rdDevice ? Colors.success : Colors.textSecondary }]}>
+              {rdChecking ? "Scanning for RD device..." : rdDevice ? `${rdDevice.manufacturer} ${rdDevice.model} connected` : "No RD device detected"}
+            </Text>
+            {!rdDevice && !rdChecking && (
+              <Pressable onPress={checkRdDevice} hitSlop={8}>
+                <Ionicons name="refresh" size={18} color={Colors.primary} />
+              </Pressable>
+            )}
+          </View>
+        )}
+
         <View style={styles.biometricSection}>
           <Text style={styles.fieldLabel}>Biometric Verification</Text>
           <Pressable
             style={[styles.biometricBtn, biometricCaptured && styles.biometricBtnCaptured]}
             onPress={handleCaptureBiometric}
+            disabled={capturingBiometric}
           >
-            <MaterialCommunityIcons
-              name="fingerprint"
-              size={32}
-              color={biometricCaptured ? Colors.success : Colors.primary}
-            />
+            {capturingBiometric ? (
+              <ActivityIndicator size={32} color={Colors.primary} />
+            ) : (
+              <MaterialCommunityIcons
+                name="fingerprint"
+                size={32}
+                color={biometricCaptured ? Colors.success : Colors.primary}
+              />
+            )}
             <View style={{ flex: 1 }}>
               <Text style={[styles.biometricBtnTitle, biometricCaptured && { color: Colors.success }]}>
-                {biometricCaptured ? "Biometric Captured" : "Capture Biometric"}
+                {capturingBiometric ? "Place finger on scanner..." : biometricCaptured ? "Biometric Captured" : "Capture Biometric"}
               </Text>
               <Text style={styles.biometricBtnSub}>
-                {biometricCaptured
-                  ? "Fingerprint data ready for authentication"
+                {capturingBiometric
+                  ? "Waiting for fingerprint capture from RD device"
+                  : biometricCaptured
+                  ? `${rdDevice ? rdDevice.manufacturer + " " + rdDevice.model : "Fingerprint"} data ready`
                   : "Tap to capture fingerprint via RD device"}
               </Text>
             </View>
             {biometricCaptured ? (
               <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
-            ) : (
+            ) : capturingBiometric ? null : (
               <Ionicons name="finger-print" size={24} color={Colors.primary} />
             )}
           </Pressable>
+          {biometricCaptured && (
+            <Pressable onPress={handleCaptureBiometric} disabled={capturingBiometric} style={styles.recaptureBtn}>
+              <Ionicons name="refresh" size={16} color={Colors.primary} />
+              <Text style={styles.recaptureBtnText}>Re-capture</Text>
+            </Pressable>
+          )}
         </View>
 
         <Pressable
@@ -460,6 +512,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Inter_500Medium",
     color: Colors.textTertiary,
+  },
+  rdStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  rdDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  rdStatusText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  recaptureBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 8,
+  },
+  recaptureBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.primary,
   },
   biometricSection: {
     gap: 8,

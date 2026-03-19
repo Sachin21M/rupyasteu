@@ -16,6 +16,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
+import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
+import type { RdDeviceInfo } from "@/lib/rd-service";
 
 type ServiceType = {
   id: string;
@@ -78,12 +80,25 @@ export default function AepsServicesScreen() {
   const [merchantCode, setMerchantCode] = useState("");
   const [onboardingLoading, setOnboardingLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
+  const [rdChecking, setRdChecking] = useState(false);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
   useEffect(() => {
     checkMerchantStatus();
+    checkRdDevice();
   }, []);
+
+  async function checkRdDevice() {
+    if (Platform.OS === "web") return;
+    setRdChecking(true);
+    try {
+      const device = await discoverRdDevice();
+      setRdDevice(device);
+    } catch {}
+    setRdChecking(false);
+  }
 
   const checkMerchantStatus = useCallback(async () => {
     try {
@@ -149,23 +164,23 @@ export default function AepsServicesScreen() {
   async function handleDailyAuth() {
     setAuthLoading(true);
     try {
-      let biometricXml = "";
-      if (Platform.OS === "web") {
-        biometricXml = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS100" mc="MIIEGDCCAwCgAwIBAgIEA" dc="2f196bbc-e2f8-4018-87a9-9b58eb" /><Skey ci="20250101">AUTH_SKEY</Skey><Hmac>AUTH_HMAC</Hmac><Data type="X">AUTH_BIOMETRIC_DATA</Data></PidData>`;
-      } else {
-        Alert.alert("Biometric Required", "Please connect a UIDAI-certified fingerprint/iris scanner to perform daily authentication.");
+      const captureResult = await captureFingerprint(rdDevice?.port);
+      if (!captureResult.success) {
+        Alert.alert("Capture Failed", captureResult.error || "Could not capture biometric data.");
         setAuthLoading(false);
         return;
       }
+      if (captureResult.deviceInfo) setRdDevice(captureResult.deviceInfo);
 
       const result = await aeps2faAuthenticate({
-        data: biometricXml,
+        data: captureResult.pidData,
         latitude: "0.0",
         longitude: "0.0",
       });
       if (result.success) {
         setDailyAuthenticated(true);
-        Alert.alert("Authenticated", "Daily 2FA authentication completed. You can now perform AEPS transactions.");
+        const devMsg = isSimulated() ? "" : `\n\nDevice: ${captureResult.deviceInfo?.manufacturer} ${captureResult.deviceInfo?.model}`;
+        Alert.alert("Authenticated", `Daily 2FA authentication completed. You can now perform AEPS transactions.${devMsg}`);
       } else {
         Alert.alert("Failed", result.message || "Authentication failed. Please try again.");
       }
@@ -279,6 +294,19 @@ export default function AepsServicesScreen() {
                 <Text style={styles.setupSub}>Complete biometric 2FA to proceed with transactions today</Text>
               </View>
             </View>
+            {Platform.OS !== "web" && (
+              <View style={styles.rdStatusRow}>
+                <View style={[styles.rdDot, { backgroundColor: rdDevice ? Colors.success : "#EF4444" }]} />
+                <Text style={[styles.rdStatusText, { color: rdDevice ? Colors.success : Colors.textSecondary }]}>
+                  {rdChecking ? "Scanning for RD device..." : rdDevice ? `${rdDevice.manufacturer} ${rdDevice.model} connected` : "No RD device detected"}
+                </Text>
+                {!rdDevice && !rdChecking && (
+                  <Pressable onPress={checkRdDevice} hitSlop={8}>
+                    <Ionicons name="refresh" size={18} color={Colors.primary} />
+                  </Pressable>
+                )}
+              </View>
+            )}
             <Pressable
               style={[styles.setupBtn, { backgroundColor: "#6366F1" }, authLoading && { opacity: 0.6 }]}
               onPress={handleDailyAuth}
@@ -405,6 +433,22 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "rgba(255,255,255,0.8)",
     lineHeight: 18,
+  },
+  rdStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 4,
+  },
+  rdDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  rdStatusText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
   setupSection: {
     paddingHorizontal: 20,

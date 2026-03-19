@@ -223,8 +223,13 @@ export async function generateAepsReport(): Promise<Buffer> {
       : "Environment: SIMULATION MODE (JWT not configured)";
     doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF")
       .text(envLabel, 0, 380, { align: "center", width: doc.page.width });
+    const maskedPartner = process.env.PAYSPRINT_PARTNER_ID
+      ? "Partner ID: ***" + (process.env.PAYSPRINT_PARTNER_ID || "").slice(-4)
+      : "Partner ID: Not configured";
     doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF")
-      .text(`Total API Calls Logged: ${data.totalLogs}`, 0, 405, { align: "center", width: doc.page.width });
+      .text(maskedPartner, 0, 405, { align: "center", width: doc.page.width });
+    doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF")
+      .text(`Total API Calls Logged: ${data.totalLogs}`, 0, 430, { align: "center", width: doc.page.width });
 
     doc.fontSize(10).font("Helvetica").fillColor("#FFFFFF")
       .text("Confidential - For Internal Use Only", 0, 700, { align: "center", width: doc.page.width });
@@ -455,6 +460,14 @@ export async function generateAepsReport(): Promise<Buffer> {
     for (const [label, desc] of adminItems) {
       y = drawKeyValue(doc, label, desc, 50, y, 450);
     }
+
+    // === UAT NOTE ===
+    y = drawSectionTitle(doc, "8. UAT / Biometric Testing Note", y);
+    y = drawKeyValue(doc, "Non-biometric endpoints", "Bank List and Transaction Status — tested live in this report", 50, y, 450);
+    y = drawKeyValue(doc, "Biometric endpoints", "Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay, Cash Deposit, 2FA KYC — require UIDAI-certified RD device with real Aadhaar biometric data", 50, y, 450);
+    y = drawKeyValue(doc, "UAT Plan", "Biometric-dependent endpoints will be tested during UAT with the Paysprint team using a certified RD device and live Aadhaar authentication", 50, y, 450);
+    y = drawKeyValue(doc, "Supported Pipes", "bank2, bank3, bank5, bank6 (LIVE); bank1 (UAT only)", 50, y, 450);
+    y += 10;
 
     // === FOOTER ON LAST PAGE ===
     doc.fontSize(8).font("Helvetica").fillColor(GRAY_TEXT)

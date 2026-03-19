@@ -77,6 +77,75 @@ var pool = new pg.Pool({
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : void 0
 });
 pool.query("SELECT 1").then(() => console.log("Connected to PostgreSQL successfully")).catch((err) => console.error("PostgreSQL connection error:", err.message));
+async function initAepsTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_merchants (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        merchant_code VARCHAR(64) NOT NULL DEFAULT '',
+        kyc_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+        bank_pipes TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_daily_auth (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        auth_date VARCHAR(10) NOT NULL,
+        authenticated BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, auth_date)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        type VARCHAR(30) NOT NULL,
+        aadhaar_masked VARCHAR(16) NOT NULL,
+        customer_mobile VARCHAR(15) NOT NULL,
+        bank_name VARCHAR(100) NOT NULL,
+        bank_iin VARCHAR(20) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        status VARCHAR(30) NOT NULL DEFAULT 'AEPS_PENDING',
+        reference_no VARCHAR(64) NOT NULL,
+        paysprint_ref_id VARCHAR(100),
+        balance VARCHAR(50),
+        mini_statement TEXT,
+        message TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_api_logs (
+        id VARCHAR(64) PRIMARY KEY,
+        endpoint VARCHAR(255) NOT NULL,
+        method VARCHAR(10) NOT NULL DEFAULT 'POST',
+        request_payload TEXT NOT NULL DEFAULT '{}',
+        response_body TEXT NOT NULL DEFAULT '{}',
+        http_status INTEGER NOT NULL DEFAULT 0,
+        success BOOLEAN NOT NULL DEFAULT FALSE,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_aeps_api_logs_created ON aeps_api_logs(created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_aeps_api_logs_endpoint ON aeps_api_logs(endpoint)
+    `);
+    console.log("AEPS tables initialized successfully");
+  } catch (err) {
+    console.error("Failed to create AEPS tables:", err.message);
+  }
+}
+initAepsTables();
 var OPERATORS = [
   { id: "jio", name: "Jio", type: "MOBILE", icon: "jio" },
   { id: "airtel", name: "Airtel", type: "MOBILE", icon: "airtel" },
@@ -140,6 +209,46 @@ function rowToTransaction(row) {
     rechargeStatus: row.recharge_status,
     utr: row.utr || void 0,
     paysprintRefId: row.paysprint_ref_id || void 0,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at
+  };
+}
+function rowToAepsMerchant(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    merchantCode: row.merchant_code,
+    kycStatus: row.kyc_status,
+    bankPipes: row.bank_pipes,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at
+  };
+}
+function rowToAepsDailyAuth(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    authDate: row.auth_date,
+    authenticated: row.authenticated,
+    createdAt: row.created_at?.toISOString?.() || row.created_at
+  };
+}
+function rowToAepsTransaction(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    aadhaarMasked: row.aadhaar_masked,
+    customerMobile: row.customer_mobile,
+    bankName: row.bank_name,
+    bankIin: row.bank_iin,
+    amount: parseFloat(row.amount),
+    status: row.status,
+    referenceNo: row.reference_no,
+    paysprintRefId: row.paysprint_ref_id || void 0,
+    balance: row.balance || void 0,
+    miniStatement: row.mini_statement || void 0,
+    message: row.message || void 0,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at
   };
@@ -281,7 +390,177 @@ var PgStorage = class {
     const result = await pool.query("SELECT * FROM transactions WHERE utr = $1", [utr]);
     return result.rows[0] ? rowToTransaction(result.rows[0]) : void 0;
   }
+  async getAepsMerchant(userId) {
+    const result = await pool.query("SELECT * FROM aeps_merchants WHERE user_id = $1", [userId]);
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : void 0;
+  }
+  async createAepsMerchant(userId, merchantCode, bankPipes) {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_merchants (id, user_id, merchant_code, kyc_status, bank_pipes)
+       VALUES ($1, $2, $3, 'PENDING', $4) RETURNING *`,
+      [id, userId, merchantCode, bankPipes]
+    );
+    return rowToAepsMerchant(result.rows[0]);
+  }
+  async updateAepsMerchant(userId, data) {
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (data.merchantCode !== void 0) {
+      fields.push(`merchant_code = $${idx++}`);
+      values.push(data.merchantCode);
+    }
+    if (data.kycStatus !== void 0) {
+      fields.push(`kyc_status = $${idx++}`);
+      values.push(data.kycStatus);
+    }
+    if (data.bankPipes !== void 0) {
+      fields.push(`bank_pipes = $${idx++}`);
+      values.push(data.bankPipes);
+    }
+    if (fields.length === 0) return this.getAepsMerchant(userId);
+    fields.push(`updated_at = NOW()`);
+    values.push(userId);
+    const result = await pool.query(
+      `UPDATE aeps_merchants SET ${fields.join(", ")} WHERE user_id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : void 0;
+  }
+  async getAepsDailyAuth(userId, date) {
+    const result = await pool.query(
+      "SELECT * FROM aeps_daily_auth WHERE user_id = $1 AND auth_date = $2",
+      [userId, date]
+    );
+    return result.rows[0] ? rowToAepsDailyAuth(result.rows[0]) : void 0;
+  }
+  async setAepsDailyAuth(userId, date) {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_daily_auth (id, user_id, auth_date, authenticated)
+       VALUES ($1, $2, $3, TRUE)
+       ON CONFLICT (user_id, auth_date) DO UPDATE SET authenticated = TRUE
+       RETURNING *`,
+      [id, userId, date]
+    );
+    return rowToAepsDailyAuth(result.rows[0]);
+  }
+  async createAepsTransaction(data) {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_transactions (id, user_id, type, aadhaar_masked, customer_mobile, bank_name, bank_iin, amount, status, reference_no, paysprint_ref_id, balance, mini_statement, message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING *`,
+      [id, data.userId, data.type, data.aadhaarMasked, data.customerMobile, data.bankName, data.bankIin, data.amount, data.status, data.referenceNo, data.paysprintRefId || null, data.balance || null, data.miniStatement || null, data.message || null]
+    );
+    return rowToAepsTransaction(result.rows[0]);
+  }
+  async getAepsTransaction(id) {
+    const result = await pool.query("SELECT * FROM aeps_transactions WHERE id = $1", [id]);
+    return result.rows[0] ? rowToAepsTransaction(result.rows[0]) : void 0;
+  }
+  async updateAepsTransaction(id, data) {
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (data.status !== void 0) {
+      fields.push(`status = $${idx++}`);
+      values.push(data.status);
+    }
+    if (data.paysprintRefId !== void 0) {
+      fields.push(`paysprint_ref_id = $${idx++}`);
+      values.push(data.paysprintRefId);
+    }
+    if (data.balance !== void 0) {
+      fields.push(`balance = $${idx++}`);
+      values.push(data.balance);
+    }
+    if (data.miniStatement !== void 0) {
+      fields.push(`mini_statement = $${idx++}`);
+      values.push(data.miniStatement);
+    }
+    if (data.message !== void 0) {
+      fields.push(`message = $${idx++}`);
+      values.push(data.message);
+    }
+    if (fields.length === 0) return this.getAepsTransaction(id);
+    fields.push(`updated_at = NOW()`);
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE aeps_transactions SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToAepsTransaction(result.rows[0]) : void 0;
+  }
+  async getUserAepsTransactions(userId) {
+    const result = await pool.query(
+      "SELECT * FROM aeps_transactions WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    return result.rows.map(rowToAepsTransaction);
+  }
+  async getAllAepsTransactions() {
+    const result = await pool.query("SELECT * FROM aeps_transactions ORDER BY created_at DESC");
+    return result.rows.map(rowToAepsTransaction);
+  }
+  async createAepsApiLog(data) {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_api_logs (id, endpoint, method, request_payload, response_body, http_status, success, duration_ms, error_message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [id, data.endpoint, data.method, data.requestPayload, data.responseBody, data.httpStatus, data.success, data.durationMs, data.errorMessage || null]
+    );
+    return rowToAepsApiLog(result.rows[0]);
+  }
+  async getAepsApiLogs(filters) {
+    const conditions = [];
+    const values = [];
+    let idx = 1;
+    if (filters?.endpoint) {
+      conditions.push(`endpoint LIKE $${idx++}`);
+      values.push(`%${filters.endpoint}%`);
+    }
+    if (filters?.success !== void 0) {
+      conditions.push(`success = $${idx++}`);
+      values.push(filters.success);
+    }
+    if (filters?.fromDate) {
+      conditions.push(`created_at >= $${idx++}`);
+      values.push(filters.fromDate);
+    }
+    if (filters?.toDate) {
+      conditions.push(`created_at <= $${idx++}`);
+      values.push(filters.toDate + " 23:59:59");
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const countResult = await pool.query(`SELECT COUNT(*) FROM aeps_api_logs ${where}`, values);
+    const total = parseInt(countResult.rows[0].count);
+    const limit = filters?.limit || 50;
+    const offset = filters?.offset || 0;
+    const dataValues = [...values, limit, offset];
+    const result = await pool.query(
+      `SELECT * FROM aeps_api_logs ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`,
+      dataValues
+    );
+    return { logs: result.rows.map(rowToAepsApiLog), total };
+  }
 };
+function rowToAepsApiLog(row) {
+  return {
+    id: row.id,
+    endpoint: row.endpoint,
+    method: row.method,
+    requestPayload: row.request_payload,
+    responseBody: row.response_body,
+    httpStatus: row.http_status,
+    success: row.success,
+    durationMs: row.duration_ms,
+    errorMessage: row.error_message || void 0,
+    createdAt: row.created_at?.toISOString?.() || row.created_at
+  };
+}
 var storage = new PgStorage();
 
 // server/routes.ts
@@ -355,70 +634,128 @@ async function sendSmsAlert(phone, otp) {
 // server/services/paysprint.ts
 init_encryption();
 import jwt from "jsonwebtoken";
-var PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
-var PAYSPRINT_AUTH_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+var PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 var PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 var PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
+var PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
 function isProductionEnv() {
   return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
 }
+function generateUniqueReqId() {
+  return Math.floor(Math.random() * 1e9).toString();
+}
 function generatePaysprintJWT() {
-  const timestamp = Date.now();
-  const reqid = timestamp.toString() + Math.floor(Math.random() * 1e4).toString();
+  const timestamp = Math.floor(Date.now() / 1e3);
+  const reqid = generateUniqueReqId();
   const payload = {
-    iss: "PAYSPRINT",
     timestamp,
     partnerId: PAYSPRINT_PARTNER_ID,
-    product: "WALLET",
     reqid
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  return jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  return { token, payload };
 }
 async function makePaysprintRequest(endpoint, payload) {
-  if (!PAYSPRINT_AUTH_KEY || !PAYSPRINT_PARTNER_ID) {
-    console.log("[Paysprint SIMULATION] No credentials configured. Simulating:", endpoint, payload);
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  if (!jwtTokenEnv) {
+    console.log("[Paysprint SIMULATION] No JWT token configured. Simulating:", endpoint, payload);
     return simulateResponse(endpoint, payload);
   }
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
   try {
     const useEncryption = isProductionEnv();
+    const timestamp = Math.floor(Date.now() / 1e3);
+    const reqid = generateUniqueReqId();
+    const fullPayload = {
+      partnerId: PAYSPRINT_PARTNER_ID,
+      timestamp,
+      reqid,
+      ...payload
+    };
+    console.log("=== [PAYSPRINT DEBUG REPORT] ===");
+    console.log("[STEP 1] JWT TOKEN:");
+    const jwtResult = generatePaysprintJWT();
+    const jwtToken = jwtResult.token;
+    console.log("  JWT Payload:", JSON.stringify(jwtResult.payload));
+    const decoded = jwt.decode(jwtToken);
+    console.log("  JWT Decoded (verify):", JSON.stringify(decoded));
+    console.log("  JWT Token (first 30 chars):", jwtToken.substring(0, 30) + "...");
+    console.log("[STEP 2] REQUEST PAYLOAD (before encryption):");
+    console.log("  ", JSON.stringify(fullPayload));
+    console.log("  partnerId:", fullPayload.partnerId);
+    console.log("  timestamp:", fullPayload.timestamp);
+    console.log("  reqid:", fullPayload.reqid);
     let requestBody;
     if (useEncryption) {
       try {
-        const encrypted = encryptPayload(payload);
-        requestBody = JSON.stringify({ body: encrypted });
+        const encrypted = encryptPayload(fullPayload);
+        requestBody = JSON.stringify({ data: encrypted });
+        console.log("[STEP 3] AES ENCRYPTION:");
+        console.log("  Algorithm: AES-128-CBC");
+        console.log("  Output encoding: Base64");
+        console.log("  Encrypted length:", encrypted.length, "chars");
+        console.log("  Encrypted (first 40 chars):", encrypted.substring(0, 40) + "...");
       } catch (encErr) {
-        console.warn("[PAYSPRINT] AES encryption failed, falling back to plain JSON:", encErr);
-        requestBody = JSON.stringify(payload);
+        console.warn("[STEP 3] AES encryption FAILED:", encErr);
+        requestBody = JSON.stringify(fullPayload);
       }
     } else {
-      requestBody = JSON.stringify(payload);
+      requestBody = JSON.stringify(fullPayload);
+      console.log("[STEP 3] AES ENCRYPTION: SKIPPED (non-production env)");
     }
-    console.log("=== [PAYSPRINT RAW API LOG] ===");
-    console.log("[PAYSPRINT] Mode:", useEncryption ? "PRODUCTION (AES Encrypted)" : "UAT/SIT (Plain JSON)");
-    console.log("[PAYSPRINT] Environment:", PAYSPRINT_ENV);
-    console.log("[PAYSPRINT] Timestamp:", (/* @__PURE__ */ new Date()).toISOString());
-    console.log("[PAYSPRINT] Request URL:", fullUrl);
-    console.log("[PAYSPRINT] Request Method: POST");
-    console.log("[PAYSPRINT] Request Headers: { Content-Type: application/json, Authorisedkey: [MASKED], Token: [MASKED] }");
-    console.log("[PAYSPRINT] Original Payload:", JSON.stringify(payload));
-    console.log("[PAYSPRINT] Request Body (sent):", requestBody);
-    const jwtToken = generatePaysprintJWT();
-    console.log("[PAYSPRINT] JWT Token (masked):", jwtToken.substring(0, 20) + "...[MASKED]");
-    const response = await fetch(fullUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorisedkey": PAYSPRINT_AUTH_KEY,
-        "Token": jwtToken
-      },
-      body: requestBody
-    });
-    const rawText = await response.text();
-    console.log("[PAYSPRINT] HTTP Status:", response.status);
-    console.log("[PAYSPRINT] Raw Response Body:", rawText);
-    console.log("=== [END PAYSPRINT RAW API LOG] ===");
+    console.log("[STEP 4] REQUEST HEADERS:");
+    const paysprintHeaders = {
+      "Content-Type": "application/json",
+      "Token": jwtToken
+    };
+    console.log("  Token:", jwtToken.substring(0, 20) + "...");
+    console.log("  Content-Type: application/json");
+    console.log("  Authorisedkey: NOT included (LIVE IP BASED)");
+    console.log("[STEP 5] REQUEST BODY:");
+    console.log("  ", requestBody);
+    console.log("[STEP 6] API ENDPOINT:");
+    console.log("  URL:", fullUrl);
+    console.log("  Method: POST");
+    let rawText;
+    let httpStatus;
+    if (PAYSPRINT_PROXY_URL) {
+      console.log("[STEP 7] SERVER IP: Using proxy for whitelisted IP 88.222.246.128");
+      console.log("  Proxy URL:", PAYSPRINT_PROXY_URL);
+      const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: fullUrl,
+          headers: paysprintHeaders,
+          payload: JSON.parse(requestBody)
+        })
+      });
+      if (!proxyResponse.ok) {
+        console.error("[PAYSPRINT] Proxy returned HTTP", proxyResponse.status);
+        return { status: false, response_code: 502, message: `Proxy error: HTTP ${proxyResponse.status}` };
+      }
+      const proxyResult = await proxyResponse.json();
+      if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
+        console.error("[PAYSPRINT] Invalid proxy response format:", JSON.stringify(proxyResult).substring(0, 200));
+        return { status: false, response_code: 502, message: "Invalid response from proxy" };
+      }
+      httpStatus = proxyResult.status;
+      rawText = proxyResult.body;
+    } else {
+      console.log("[STEP 7] SERVER IP: Direct request (no proxy)");
+      const response = await fetch(fullUrl, {
+        method: "POST",
+        headers: paysprintHeaders,
+        body: requestBody
+      });
+      httpStatus = response.status;
+      rawText = await response.text();
+    }
+    console.log("[STEP 8] API RESPONSE:");
+    console.log("  HTTP Status:", httpStatus);
+    console.log("  Raw Response Body:", rawText);
+    console.log("=== [END PAYSPRINT DEBUG REPORT] ===");
     let jsonText = rawText;
     const jsonMatch = rawText.match(/\{[^<]*\}$/);
     if (jsonMatch) {
@@ -505,12 +842,735 @@ async function getOperatorInfo(params) {
   });
 }
 
+// server/services/aeps.ts
+init_encryption();
+import jwt2 from "jsonwebtoken";
+var SENSITIVE_KEYS = /* @__PURE__ */ new Set([
+  "adhaarnumber",
+  "aadhaar",
+  "aadhar",
+  "aadharnumber",
+  "piddata",
+  "pid",
+  "biometric",
+  "biometricdata",
+  "hmac",
+  "skey",
+  "ci",
+  "sessionkey"
+]);
+function maskSensitiveFields(obj) {
+  if (obj === null || obj === void 0) return obj;
+  if (typeof obj === "string") {
+    return obj.replace(/\b\d{12}\b/g, (m) => "XXXX-XXXX-" + m.slice(-4));
+  }
+  if (Array.isArray(obj)) return obj.map(maskSensitiveFields);
+  if (typeof obj === "object") {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const lowerKey = key.toLowerCase();
+      if (SENSITIVE_KEYS.has(lowerKey)) {
+        if (lowerKey === "adhaarnumber" || lowerKey === "aadhaar" || lowerKey === "aadhar" || lowerKey === "aadharnumber") {
+          result[key] = typeof value === "string" && value.length >= 4 ? "XXXX-XXXX-" + value.slice(-4) : "[REDACTED]";
+        } else {
+          result[key] = "[REDACTED]";
+        }
+      } else {
+        result[key] = maskSensitiveFields(value);
+      }
+    }
+    return result;
+  }
+  return obj;
+}
+var PAYSPRINT_BASE_URL2 = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
+var PAYSPRINT_PARTNER_ID2 = process.env.PAYSPRINT_PARTNER_ID || "";
+var PAYSPRINT_ENV2 = process.env.PAYSPRINT_ENV || "PRODUCTION";
+var PAYSPRINT_PROXY_URL2 = process.env.PAYSPRINT_PROXY_URL || "";
+var AEPS_TIMEOUT = 18e4;
+function isProductionEnv2() {
+  return PAYSPRINT_ENV2 === "PRODUCTION" || PAYSPRINT_ENV2 === "LIVE";
+}
+function generateUniqueReqId2() {
+  return Math.floor(Math.random() * 1e9).toString();
+}
+function generatePaysprintJWT2() {
+  const timestamp = Math.floor(Date.now() / 1e3);
+  const reqid = generateUniqueReqId2();
+  const payload = {
+    timestamp,
+    partnerId: PAYSPRINT_PARTNER_ID2,
+    reqid
+  };
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  const token = jwt2.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  return { token, payload };
+}
+async function logAepsApiCall(endpoint, requestPayload, responseBody, httpStatus, success, durationMs, errorMessage) {
+  try {
+    const maskedPayload = maskSensitiveFields(requestPayload);
+    let maskedResponse = responseBody;
+    try {
+      const parsed = JSON.parse(responseBody);
+      maskedResponse = JSON.stringify(maskSensitiveFields(parsed));
+    } catch {
+      maskedResponse = typeof responseBody === "string" ? responseBody.replace(/\b\d{12}\b/g, (m) => "XXXX-XXXX-" + m.slice(-4)) : responseBody;
+    }
+    await storage.createAepsApiLog({
+      endpoint,
+      method: "POST",
+      requestPayload: JSON.stringify(maskedPayload, null, 2),
+      responseBody: maskedResponse,
+      httpStatus,
+      success,
+      durationMs,
+      errorMessage
+    });
+  } catch (err) {
+    console.error("[AEPS LOG] Failed to save API log:", err);
+  }
+}
+async function makeAepsRequest(endpoint, payload) {
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  if (!jwtTokenEnv) {
+    console.log("[AEPS SIMULATION] No JWT token configured. Simulating:", endpoint);
+    const simResult = simulateAepsResponse(endpoint, payload);
+    await logAepsApiCall(endpoint, payload, JSON.stringify(simResult), 200, simResult.status, 0, "SIMULATION MODE");
+    return simResult;
+  }
+  const fullUrl = `${PAYSPRINT_BASE_URL2}${endpoint}`;
+  const startTime = Date.now();
+  const timestamp = Math.floor(Date.now() / 1e3);
+  const reqid = generateUniqueReqId2();
+  const fullPayload = {
+    partnerId: PAYSPRINT_PARTNER_ID2,
+    timestamp,
+    reqid,
+    ...payload
+  };
+  try {
+    const useEncryption = isProductionEnv2();
+    console.log(`[AEPS] Request to ${endpoint}`);
+    const jwtResult = generatePaysprintJWT2();
+    const jwtToken = jwtResult.token;
+    let requestBody;
+    if (useEncryption) {
+      const encrypted = encryptPayload(fullPayload);
+      requestBody = JSON.stringify({ data: encrypted });
+    } else {
+      requestBody = JSON.stringify(fullPayload);
+    }
+    const paysprintHeaders = {
+      "Content-Type": "application/json",
+      "Token": jwtToken
+    };
+    let rawText;
+    let httpStatus;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AEPS_TIMEOUT);
+    try {
+      if (PAYSPRINT_PROXY_URL2) {
+        const proxyResponse = await fetch(PAYSPRINT_PROXY_URL2, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: fullUrl,
+            headers: paysprintHeaders,
+            payload: JSON.parse(requestBody)
+          }),
+          signal: controller.signal
+        });
+        if (!proxyResponse.ok) {
+          const duration2 = Date.now() - startTime;
+          const errResult = { status: false, response_code: 502, message: `Proxy error: HTTP ${proxyResponse.status}` };
+          await logAepsApiCall(endpoint, fullPayload, JSON.stringify(errResult), proxyResponse.status, false, duration2, `Proxy error: HTTP ${proxyResponse.status}`);
+          return errResult;
+        }
+        const proxyResult = await proxyResponse.json();
+        if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
+          const duration2 = Date.now() - startTime;
+          const errResult = { status: false, response_code: 502, message: "Invalid response from proxy" };
+          await logAepsApiCall(endpoint, fullPayload, JSON.stringify(proxyResult), 502, false, duration2, "Invalid proxy response format");
+          return errResult;
+        }
+        httpStatus = proxyResult.status;
+        rawText = proxyResult.body;
+      } else {
+        const response = await fetch(fullUrl, {
+          method: "POST",
+          headers: paysprintHeaders,
+          body: requestBody,
+          signal: controller.signal
+        });
+        httpStatus = response.status;
+        rawText = await response.text();
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+    const duration = Date.now() - startTime;
+    console.log(`[AEPS] Response from ${endpoint}: HTTP ${httpStatus} (${duration}ms)`);
+    console.log(`[AEPS] Body: ${rawText.substring(0, 500)}`);
+    let jsonText = rawText;
+    const jsonMatch = rawText.match(/\{[^<]*\}$/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[0];
+    }
+    let data;
+    try {
+      data = JSON.parse(jsonText);
+    } catch {
+      if (rawText.includes("not available in your region")) {
+        const errResult2 = { status: false, response_code: 403, message: "AEPS API blocked: geographic restriction" };
+        await logAepsApiCall(endpoint, fullPayload, rawText, httpStatus, false, duration, "Geographic restriction");
+        return errResult2;
+      }
+      const errResult = { status: false, response_code: 500, message: "Invalid JSON response from Paysprint AEPS" };
+      await logAepsApiCall(endpoint, fullPayload, rawText, httpStatus, false, duration, "Invalid JSON response");
+      return errResult;
+    }
+    await logAepsApiCall(endpoint, fullPayload, rawText, httpStatus, data.status, duration);
+    return data;
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    if (error.name === "AbortError") {
+      const errResult2 = { status: false, response_code: 408, message: "AEPS request timeout (180s)" };
+      await logAepsApiCall(endpoint, fullPayload, JSON.stringify(errResult2), 408, false, duration, "Request timeout (180s)");
+      return errResult2;
+    }
+    console.error("[AEPS] Network Error:", error);
+    const errResult = { status: false, response_code: 500, message: "Failed to connect to AEPS service" };
+    await logAepsApiCall(endpoint, fullPayload, JSON.stringify(errResult), 500, false, duration, error.message);
+    return errResult;
+  }
+}
+function simulateAepsResponse(endpoint, payload) {
+  if (endpoint.includes("banklist")) {
+    return {
+      status: true,
+      response_code: 1,
+      message: "Bank list fetched",
+      data: [
+        { iinno: "607094", bankName: "State Bank of India" },
+        { iinno: "608001", bankName: "Punjab National Bank" },
+        { iinno: "508505", bankName: "Bank of India" },
+        { iinno: "607161", bankName: "Bank of Baroda" },
+        { iinno: "607387", bankName: "Union Bank of India" },
+        { iinno: "607095", bankName: "Canara Bank" },
+        { iinno: "607027", bankName: "Indian Bank" },
+        { iinno: "607105", bankName: "Central Bank of India" },
+        { iinno: "607153", bankName: "IDBI Bank" },
+        { iinno: "607021", bankName: "UCO Bank" }
+      ]
+    };
+  }
+  if (endpoint.includes("balanceenquiry")) {
+    return {
+      status: true,
+      response_code: 1,
+      message: "Balance enquiry successful",
+      balanceamount: "15432.50",
+      bankrrn: `RRN${Date.now()}`
+    };
+  }
+  if (endpoint.includes("ministatement")) {
+    return {
+      status: true,
+      response_code: 1,
+      message: "Mini statement fetched",
+      balanceamount: "15432.50",
+      bankrrn: `RRN${Date.now()}`,
+      ministatement: [
+        { date: "15/03/2026", txnType: "CR", amount: "5000.00", narration: "NEFT-CREDIT" },
+        { date: "14/03/2026", txnType: "DR", amount: "2000.00", narration: "ATM-WITHDRAWAL" },
+        { date: "13/03/2026", txnType: "CR", amount: "25000.00", narration: "SALARY" }
+      ]
+    };
+  }
+  if (endpoint.includes("cashwithdraw")) {
+    return {
+      status: true,
+      response_code: 1,
+      message: "Cash withdrawal successful",
+      balanceamount: "13432.50",
+      bankrrn: `RRN${Date.now()}`,
+      data: { ackno: `AEPS${Date.now()}` }
+    };
+  }
+  if (endpoint.includes("aadharpay")) {
+    return {
+      status: true,
+      response_code: 1,
+      message: "Aadhaar pay successful",
+      bankrrn: `RRN${Date.now()}`,
+      data: { ackno: `AEPS${Date.now()}` }
+    };
+  }
+  if (endpoint.includes("cashdeposit")) {
+    return {
+      status: true,
+      response_code: 1,
+      message: "Cash deposit successful",
+      bankrrn: `RRN${Date.now()}`,
+      data: { ackno: `AEPS${Date.now()}` }
+    };
+  }
+  if (endpoint.includes("onboard")) {
+    return {
+      status: true,
+      response_code: 1,
+      message: "Onboarding URL generated",
+      data: { redirecturl: "https://api.paysprint.in/onboard/kyc-form" }
+    };
+  }
+  if (endpoint.includes("Twofactorkyc")) {
+    return { status: true, response_code: 1, message: "2FA operation successful" };
+  }
+  return { status: true, response_code: 1, message: "Success" };
+}
+async function getAepsBankList() {
+  return makeAepsRequest("/service/aeps/banklist/index", {});
+}
+async function getOnboardingUrl(params) {
+  return makeAepsRequest("/service/onboard/onboard/getonboardurl", {
+    merchantcode: params.merchantCode,
+    mobile: params.mobile,
+    email: params.email || "",
+    firm: params.firmName || "RupyaSetu",
+    callback: params.callbackUrl || ""
+  });
+}
+async function twoFactorRegistration(params) {
+  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/registration", params);
+}
+async function twoFactorAuthentication(params) {
+  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/authentication", params);
+}
+async function balanceEnquiry(params) {
+  return makeAepsRequest("/service/aeps/balanceenquiry/index", params);
+}
+async function miniStatement(params) {
+  return makeAepsRequest("/service/aeps/ministatement/index", params);
+}
+async function cashWithdrawal(params) {
+  return makeAepsRequest("/service/aeps/v3/cashwithdraw/index", params);
+}
+async function aadhaarPay(params) {
+  return makeAepsRequest("/service/aeps/aadharpay/index", params);
+}
+async function cashDeposit(params) {
+  return makeAepsRequest("/service/aeps/cashdeposit/index", params);
+}
+async function checkAepsTransactionStatus(params) {
+  return makeAepsRequest("/service/aeps/cashwithdraw/status", params);
+}
+
+// server/services/aeps-report.ts
+import PDFDocument from "pdfkit";
+var GREEN = "#2E9E5B";
+var DARK_GREEN = "#1E6F44";
+var LIGHT_GREEN = "#E8F5E9";
+var DARK_TEXT = "#1a1a1a";
+var GRAY_TEXT = "#666666";
+var PDF_REDACT_KEYS = /* @__PURE__ */ new Set([
+  "mobilenumber",
+  "mobile",
+  "ipaddress",
+  "ip",
+  "submerchantid",
+  "merchantcode",
+  "email",
+  "callback",
+  "firm",
+  "adhaarnumber",
+  "aadhaar",
+  "aadhar",
+  "aadharnumber",
+  "piddata",
+  "pid",
+  "biometric",
+  "biometricdata",
+  "hmac",
+  "skey",
+  "ci",
+  "sessionkey",
+  "data",
+  "partnerid",
+  "reqid",
+  "timestamp"
+]);
+function redactForPdf(obj) {
+  if (obj === null || obj === void 0) return obj;
+  if (typeof obj === "string") {
+    return obj.replace(/\b\d{12}\b/g, (m) => "XXXX-XXXX-" + m.slice(-4)).replace(/\b[6-9]\d{9}\b/g, "XXXXXXXXXX").replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, "XXX.XXX.XXX.XXX");
+  }
+  if (Array.isArray(obj)) return obj.map(redactForPdf);
+  if (typeof obj === "object") {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (PDF_REDACT_KEYS.has(key.toLowerCase())) {
+        result[key] = "[REDACTED]";
+      } else {
+        result[key] = redactForPdf(value);
+      }
+    }
+    return result;
+  }
+  return obj;
+}
+async function gatherReportData() {
+  const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const isLive = !!process.env.PAYSPRINT_JWT_TOKEN;
+  if (!isLive) {
+    throw new Error("Cannot generate AEPS approval report: JWT token not configured. Report requires LIVE API calls for valid evidence.");
+  }
+  let bankListResponse = null;
+  try {
+    bankListResponse = await getAepsBankList();
+  } catch (err) {
+    bankListResponse = { error: err.message, status: false };
+  }
+  let txnStatusResponse = null;
+  try {
+    txnStatusResponse = await checkAepsTransactionStatus({
+      referenceno: `REPORT_TEST_${Date.now()}`
+    });
+  } catch (err) {
+    txnStatusResponse = { error: err.message, status: false };
+  }
+  const logsResult = await storage.getAepsApiLogs({ limit: 200, offset: 0 });
+  let bankListLog = null;
+  let txnStatusLog = null;
+  for (const log2 of logsResult.logs) {
+    if (!bankListLog && log2.endpoint && log2.endpoint.includes("banklist")) {
+      bankListLog = log2;
+    }
+    if (!txnStatusLog && log2.endpoint && log2.endpoint.includes("cashwithdraw/status")) {
+      txnStatusLog = log2;
+    }
+    if (bankListLog && txnStatusLog) break;
+  }
+  return {
+    bankListResponse,
+    txnStatusResponse,
+    bankListLog,
+    txnStatusLog,
+    apiLogs: logsResult.logs,
+    totalLogs: logsResult.total,
+    generatedAt,
+    isLive
+  };
+}
+function drawHeader(doc, y) {
+  doc.rect(0, y, doc.page.width, 80).fill(GREEN);
+  doc.fontSize(28).font("Helvetica-Bold").fillColor("#FFFFFF").text("RupyaSetu", 50, y + 15, { width: doc.page.width - 100 });
+  doc.fontSize(12).font("Helvetica").fillColor("#FFFFFF").text("AEPS API Integration Report", 50, y + 48, { width: doc.page.width - 100 });
+  return y + 80;
+}
+function drawSectionTitle(doc, title, y) {
+  if (y > doc.page.height - 100) {
+    doc.addPage();
+    y = 50;
+  }
+  doc.rect(50, y, doc.page.width - 100, 30).fill(DARK_GREEN);
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#FFFFFF").text(title, 60, y + 8, { width: doc.page.width - 120 });
+  return y + 40;
+}
+function drawKeyValue(doc, key, value, x, y, maxWidth) {
+  if (y > doc.page.height - 60) {
+    doc.addPage();
+    y = 50;
+  }
+  doc.fontSize(10).font("Helvetica-Bold").fillColor(DARK_TEXT).text(key + ":", x, y, { width: 160, continued: false });
+  doc.fontSize(10).font("Helvetica").fillColor(GRAY_TEXT).text(value, x + 165, y, { width: maxWidth - 165 });
+  const textHeight = doc.heightOfString(value, { width: maxWidth - 165 });
+  return y + Math.max(textHeight, 14) + 4;
+}
+function drawTableRow(doc, cols, widths, x, y, isHeader) {
+  if (y > doc.page.height - 40) {
+    doc.addPage();
+    y = 50;
+  }
+  const rowHeight = 20;
+  if (isHeader) {
+    doc.rect(x, y, widths.reduce((a, b) => a + b, 0), rowHeight).fill(LIGHT_GREEN);
+  }
+  let cx = x;
+  for (let i = 0; i < cols.length; i++) {
+    doc.fontSize(isHeader ? 9 : 8).font(isHeader ? "Helvetica-Bold" : "Helvetica").fillColor(isHeader ? DARK_GREEN : DARK_TEXT).text(cols[i] || "", cx + 4, y + 5, { width: widths[i] - 8, ellipsis: true, lineBreak: false });
+    cx += widths[i];
+  }
+  if (!isHeader) {
+    doc.moveTo(x, y + rowHeight).lineTo(x + widths.reduce((a, b) => a + b, 0), y + rowHeight).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
+  }
+  return y + rowHeight;
+}
+function drawJsonBlock(doc, json, x, y, maxWidth, maxLines = 30) {
+  if (y > doc.page.height - 80) {
+    doc.addPage();
+    y = 50;
+  }
+  const text = typeof json === "string" ? json : JSON.stringify(json, null, 2);
+  const lines = text.split("\n").slice(0, maxLines);
+  const truncated = text.split("\n").length > maxLines;
+  const content = lines.join("\n") + (truncated ? "\n... (truncated)" : "");
+  const blockHeight = doc.heightOfString(content, { width: maxWidth - 20 }) + 16;
+  doc.rect(x, y, maxWidth, Math.min(blockHeight, 300)).fill("#1a1a2e");
+  doc.fontSize(7).font("Courier").fillColor("#00ff88").text(content, x + 10, y + 8, { width: maxWidth - 20, height: 290 });
+  return y + Math.min(blockHeight, 300) + 8;
+}
+async function generateAepsReport() {
+  const data = await gatherReportData();
+  return new Promise((resolve2, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margins: { top: 40, bottom: 40, left: 50, right: 50 },
+      info: {
+        Title: "RupyaSetu AEPS API Integration Report",
+        Author: "RupyaSetu Admin",
+        Subject: "AEPS Paysprint API Response Logs",
+        Creator: "RupyaSetu Report Generator"
+      }
+    });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve2(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    let y = 0;
+    doc.rect(0, 0, doc.page.width, doc.page.height).fill(GREEN);
+    doc.rect(0, 0, doc.page.width, doc.page.height).fillOpacity(0.1).fill("#000000");
+    doc.fillOpacity(1);
+    doc.fontSize(42).font("Helvetica-Bold").fillColor("#FFFFFF").text("RupyaSetu", 0, 200, { align: "center", width: doc.page.width });
+    doc.fontSize(18).font("Helvetica").fillColor("#FFFFFF").text("AEPS API Integration Report", 0, 260, { align: "center", width: doc.page.width });
+    doc.moveTo(doc.page.width / 2 - 80, 300).lineTo(doc.page.width / 2 + 80, 300).strokeColor("#FFFFFF").lineWidth(2).stroke();
+    doc.fontSize(12).font("Helvetica").fillColor("#FFFFFF").text("Prepared for: Paysprint Integration Team", 0, 330, { align: "center", width: doc.page.width });
+    doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF").text(`Generated: ${new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`, 0, 355, { align: "center", width: doc.page.width });
+    const jwtConfigured = !!process.env.PAYSPRINT_JWT_TOKEN;
+    const envLabel = jwtConfigured ? `Environment: ${process.env.PAYSPRINT_ENV || "PRODUCTION"} (LIVE API)` : "Environment: SIMULATION MODE (JWT not configured)";
+    doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF").text(envLabel, 0, 380, { align: "center", width: doc.page.width });
+    doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF").text(`Total API Calls Logged: ${data.totalLogs}`, 0, 405, { align: "center", width: doc.page.width });
+    doc.fontSize(10).font("Helvetica").fillColor("#FFFFFF").text("Confidential - For Internal Use Only", 0, 700, { align: "center", width: doc.page.width });
+    doc.addPage();
+    y = drawHeader(doc, 0);
+    y += 20;
+    y = drawSectionTitle(doc, "1. Report Summary", y);
+    y = drawKeyValue(doc, "Report Type", "AEPS API Response Logs & Integration Status", 50, y, 450);
+    y = drawKeyValue(doc, "Base URL", process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1", 50, y, 450);
+    y = drawKeyValue(doc, "Partner ID", process.env.PAYSPRINT_PARTNER_ID ? "***" + (process.env.PAYSPRINT_PARTNER_ID || "").slice(-4) : "Not configured", 50, y, 450);
+    y = drawKeyValue(doc, "Environment", process.env.PAYSPRINT_ENV || "PRODUCTION", 50, y, 450);
+    y = drawKeyValue(doc, "Encryption", "AES-128-CBC (Production Mode)", 50, y, 450);
+    y = drawKeyValue(doc, "Authentication", "JWT (HS256) with Token header", 50, y, 450);
+    y = drawKeyValue(doc, "Request Timeout", "180 seconds (all AEPS endpoints)", 50, y, 450);
+    y = drawKeyValue(doc, "Total Logged API Calls", data.totalLogs.toString(), 50, y, 450);
+    y = drawKeyValue(doc, "Report Generated", new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }), 50, y, 450);
+    y += 10;
+    y = drawSectionTitle(doc, "2. AEPS Endpoints \u2014 Request/Response Format", y);
+    const endpointDocs = [
+      {
+        path: "/service/aeps/banklist/index",
+        desc: "Fetch supported bank list for AEPS",
+        biometric: false,
+        requestFields: "partnerId, timestamp, reqid",
+        responseFields: "status, response_code, message, banklist.data[{id, bankName, iinno, activeFlag}]"
+      },
+      {
+        path: "/service/aeps/balanceenquiry/index",
+        desc: "Check Aadhaar-linked bank balance",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, requestremarks",
+        responseFields: "status, response_code, message, balanceamount, bankrrn"
+      },
+      {
+        path: "/service/aeps/ministatement/index",
+        desc: "Fetch mini bank statement",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, requestremarks",
+        responseFields: "status, response_code, message, balanceamount, bankrrn, ministatement[{date, txnType, amount, narration}]"
+      },
+      {
+        path: "/service/aeps/v3/cashwithdraw/index",
+        desc: "Cash withdrawal via AEPS",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, amount, requestremarks",
+        responseFields: "status, response_code, message, balanceamount, bankrrn, data.ackno"
+      },
+      {
+        path: "/service/aeps/aadharpay/index",
+        desc: "Aadhaar Pay transaction",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, amount, requestremarks",
+        responseFields: "status, response_code, message, bankrrn, data.ackno"
+      },
+      {
+        path: "/service/aeps/cashdeposit/index",
+        desc: "Cash deposit via AEPS",
+        biometric: true,
+        requestFields: "latitude, longitude, mobilenumber, adhaarnumber, nationalbankidentification, data (PID XML), pipe, accessmodetype, submerchantid, referenceno, timestamp, transactiontype, is_iris, amount, requestremarks",
+        responseFields: "status, response_code, message, bankrrn, data.ackno"
+      },
+      {
+        path: "/service/aeps/cashwithdraw/status",
+        desc: "Check transaction status by reference",
+        biometric: false,
+        requestFields: "partnerId, timestamp, reqid, referenceno",
+        responseFields: "status, response_code, message, data"
+      },
+      {
+        path: "/service/aeps/kyc/Twofactorkyc/registration",
+        desc: "2FA KYC registration",
+        biometric: true,
+        requestFields: "accessmodetype, adhaarnumber, mobilenumber, latitude, longitude, referenceno, submerchantid, data (PID XML), ipaddress, timestamp, is_iris",
+        responseFields: "status, response_code, message"
+      },
+      {
+        path: "/service/aeps/kyc/Twofactorkyc/authentication",
+        desc: "2FA daily authentication",
+        biometric: true,
+        requestFields: "accessmodetype, adhaarnumber, mobilenumber, latitude, longitude, referenceno, submerchantid, data (PID XML), ipaddress, timestamp, is_iris",
+        responseFields: "status, response_code, message"
+      },
+      {
+        path: "/service/onboard/onboard/getonboardurl",
+        desc: "Merchant onboarding URL",
+        biometric: false,
+        requestFields: "merchantcode, mobile, email, firm, callback",
+        responseFields: "status, response_code, message, data.redirecturl"
+      }
+    ];
+    for (const ep of endpointDocs) {
+      y = drawKeyValue(doc, "Endpoint", ep.path, 50, y, 450);
+      y = drawKeyValue(doc, "Description", ep.desc, 50, y, 450);
+      y = drawKeyValue(doc, "Biometric Required", ep.biometric ? "Yes" : "No", 50, y, 450);
+      y = drawKeyValue(doc, "Request Fields", ep.requestFields, 50, y, 450);
+      y = drawKeyValue(doc, "Response Fields", ep.responseFields, 50, y, 450);
+      y += 6;
+    }
+    y += 5;
+    y = drawSectionTitle(doc, "3. Live API Call \u2014 Bank List (Full Evidence)", y);
+    y = drawKeyValue(doc, "Endpoint", "/service/aeps/banklist/index", 50, y, 450);
+    y = drawKeyValue(doc, "Method", "POST", 50, y, 450);
+    y = drawKeyValue(doc, "Status", data.bankListResponse?.status ? "SUCCESS" : "FAILED", 50, y, 450);
+    y = drawKeyValue(doc, "Response Code", String(data.bankListResponse?.response_code ?? "N/A"), 50, y, 450);
+    y = drawKeyValue(doc, "Message", data.bankListResponse?.message || "N/A", 50, y, 450);
+    if (data.bankListLog) {
+      y = drawKeyValue(doc, "Duration", `${data.bankListLog.durationMs}ms`, 50, y, 450);
+      y = drawKeyValue(doc, "HTTP Status", String(data.bankListLog.httpStatus), 50, y, 450);
+    }
+    const bankData = data.bankListResponse?.data || data.bankListResponse?.banklist?.data;
+    if (bankData && Array.isArray(bankData)) {
+      y = drawKeyValue(doc, "Banks Returned", bankData.length.toString(), 50, y, 450);
+      y += 5;
+      const bankWidths = [120, 335];
+      y = drawTableRow(doc, ["IIN Number", "Bank Name"], bankWidths, 50, y, true);
+      const banksToShow = bankData.slice(0, 25);
+      for (const bank of banksToShow) {
+        y = drawTableRow(doc, [bank.iinno || bank.iinNo || "", bank.bankName || bank.bankname || ""], bankWidths, 50, y, false);
+      }
+      if (bankData.length > 25) {
+        doc.fontSize(8).font("Helvetica").fillColor(GRAY_TEXT).text(`... and ${bankData.length - 25} more banks`, 50, y + 2);
+        y += 14;
+      }
+    }
+    y += 5;
+    if (data.bankListLog) {
+      y = drawKeyValue(doc, "Request Payload (redacted)", "", 50, y, 450);
+      try {
+        y = drawJsonBlock(doc, redactForPdf(JSON.parse(data.bankListLog.requestPayload)), 50, y, doc.page.width - 100, 15);
+      } catch {
+        y = drawJsonBlock(doc, redactForPdf(data.bankListLog.requestPayload), 50, y, doc.page.width - 100, 15);
+      }
+    }
+    y = drawKeyValue(doc, "Response Body", "", 50, y, 450);
+    y = drawJsonBlock(doc, data.bankListResponse, 50, y, doc.page.width - 100, 25);
+    y = drawSectionTitle(doc, "4. Live API Call \u2014 Transaction Status (Full Evidence)", y);
+    y = drawKeyValue(doc, "Endpoint", "/service/aeps/cashwithdraw/status", 50, y, 450);
+    y = drawKeyValue(doc, "Method", "POST", 50, y, 450);
+    y = drawKeyValue(doc, "Test Reference", "REPORT_TEST_*", 50, y, 450);
+    y = drawKeyValue(doc, "Status", data.txnStatusResponse?.status ? "SUCCESS" : "FAILED/NOT FOUND", 50, y, 450);
+    y = drawKeyValue(doc, "Response Code", String(data.txnStatusResponse?.response_code ?? "N/A"), 50, y, 450);
+    y = drawKeyValue(doc, "Message", data.txnStatusResponse?.message || "N/A", 50, y, 450);
+    if (data.txnStatusLog) {
+      y = drawKeyValue(doc, "Duration", `${data.txnStatusLog.durationMs}ms`, 50, y, 450);
+      y = drawKeyValue(doc, "HTTP Status", String(data.txnStatusLog.httpStatus), 50, y, 450);
+    }
+    y += 5;
+    if (data.txnStatusLog) {
+      y = drawKeyValue(doc, "Request Payload (redacted)", "", 50, y, 450);
+      try {
+        y = drawJsonBlock(doc, redactForPdf(JSON.parse(data.txnStatusLog.requestPayload)), 50, y, doc.page.width - 100, 15);
+      } catch {
+        y = drawJsonBlock(doc, redactForPdf(data.txnStatusLog.requestPayload), 50, y, doc.page.width - 100, 15);
+      }
+    }
+    y = drawKeyValue(doc, "Response Body", "", 50, y, 450);
+    y = drawJsonBlock(doc, data.txnStatusResponse, 50, y, doc.page.width - 100, 15);
+    y = drawSectionTitle(doc, "5. Captured API Logs (from Database)", y);
+    y = drawKeyValue(doc, "Total Logs in DB", data.totalLogs.toString(), 50, y, 450);
+    y = drawKeyValue(doc, "Showing", `${Math.min(data.apiLogs.length, 50)} most recent`, 50, y, 450);
+    y += 5;
+    const logWidths = [90, 130, 40, 45, 50, 100];
+    y = drawTableRow(doc, ["Timestamp", "Endpoint", "HTTP", "Result", "Duration", "Error"], logWidths, 50, y, true);
+    const logsToShow = data.apiLogs.slice(0, 50);
+    for (const log2 of logsToShow) {
+      const ts = log2.createdAt ? new Date(log2.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }).replace(",", "") : "N/A";
+      const shortEndpoint = (log2.endpoint || "").replace("/service/aeps/", "").replace("/index", "");
+      y = drawTableRow(doc, [
+        ts,
+        shortEndpoint,
+        String(log2.httpStatus),
+        log2.success ? "OK" : "FAIL",
+        `${log2.durationMs}ms`,
+        (log2.errorMessage || "").substring(0, 30)
+      ], logWidths, 50, y, false);
+    }
+    y += 10;
+    y = drawSectionTitle(doc, "6. Security & Data Protection", y);
+    const securityItems = [
+      ["Encryption", "AES-128-CBC encryption for all production API payloads"],
+      ["JWT Auth", "HS256 JWT tokens with timestamp and unique request IDs"],
+      ["Aadhaar Masking", "All Aadhaar numbers masked to XXXX-XXXX-NNNN in logs"],
+      ["Biometric Redaction", "PID data, HMAC, session keys fully redacted in logs"],
+      ["Request Timeout", "180-second timeout for all AEPS calls"],
+      ["Daily 2FA", "Mandatory biometric 2FA authentication before transactions"],
+      ["KYC Onboarding", "Merchant KYC verification before AEPS access"],
+      ["Admin Logging", "All API calls logged with timing, request/response for audit"],
+      ["Sensitive Fields", "adhaarnumber, piddata, hmac, skey, ci, sessionkey are never stored in plaintext"]
+    ];
+    for (const [label, desc] of securityItems) {
+      y = drawKeyValue(doc, label, desc, 50, y, 450);
+    }
+    y += 10;
+    y = drawSectionTitle(doc, "7. Admin Panel Logging Capabilities", y);
+    const adminItems = [
+      ["Real-time Logs", "Auto-refreshing AEPS API logs table in admin panel"],
+      ["Endpoint Filter", "Filter logs by specific AEPS endpoint (balance, withdraw, etc.)"],
+      ["Status Filter", "Filter by success/failure status"],
+      ["Date Range", "Filter by date range for historical analysis"],
+      ["Pagination", "Paginated log viewing (50 per page)"],
+      ["Log Detail", "Expandable request/response detail view for each log"],
+      ["CSV Export", "Full filtered export to CSV with all log data"],
+      ["Copy Function", "One-click copy of log details"]
+    ];
+    for (const [label, desc] of adminItems) {
+      y = drawKeyValue(doc, label, desc, 50, y, 450);
+    }
+    doc.fontSize(8).font("Helvetica").fillColor(GRAY_TEXT).text(
+      `RupyaSetu AEPS Report | Generated ${new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} | Confidential`,
+      50,
+      doc.page.height - 30,
+      { width: doc.page.width - 100, align: "center" }
+    );
+    doc.end();
+  });
+}
+
 // shared/schema.ts
 import { z } from "zod";
 var phoneSchema = z.string().regex(/^[6-9]\d{9}$/, "Invalid Indian mobile number");
 var otpSchema = z.string().regex(/^\d{4,6}$/, "Invalid OTP format");
 var utrSchema = z.string().regex(/^[A-Za-z0-9]{12,22}$/, "Invalid UTR format (12-22 alphanumeric characters)");
 var rechargeTypes = ["MOBILE", "DTH"];
+var aepsTransactionTypes = ["BALANCE_ENQUIRY", "MINI_STATEMENT", "CASH_WITHDRAWAL", "AADHAAR_PAY", "CASH_DEPOSIT"];
 var sendOtpSchema = z.object({
   phone: phoneSchema
 });
@@ -528,6 +1588,21 @@ var createRechargeSchema = z.object({
 var submitUtrSchema = z.object({
   transactionId: z.string().min(1),
   utr: utrSchema
+});
+var aepsOnboardSchema = z.object({
+  merchantCode: z.string().min(1)
+});
+var aepsTransactionSchema = z.object({
+  type: z.enum(aepsTransactionTypes),
+  aadhaarNumber: z.string().regex(/^\d{12}$/, "Invalid Aadhaar number"),
+  customerMobile: z.string().regex(/^[6-9]\d{9}$/, "Invalid mobile number"),
+  bankIin: z.string().min(1, "Bank is required"),
+  bankName: z.string().min(1, "Bank name is required"),
+  amount: z.number().optional(),
+  latitude: z.string().default("28.6139"),
+  longitude: z.string().default("77.2090"),
+  fingerprintData: z.string().optional(),
+  pipe: z.string().default("bank2")
 });
 
 // server/routes.ts
@@ -978,40 +2053,51 @@ async function registerRoutes(app2) {
   app2.post("/api/admin/paysprint-test-raw", adminAuthMiddleware, async (req, res) => {
     try {
       const { action, operator, canumber, amount, recharge_type, referenceid } = req.body;
-      const jwt2 = await import("jsonwebtoken");
+      const jwt3 = await import("jsonwebtoken");
       const { encryptPayload: encryptPayload2 } = await Promise.resolve().then(() => (init_encryption(), encryption_exports));
-      const PAYSPRINT_BASE_URL2 = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/service-api/api/v1";
-      const PAYSPRINT_AUTH_KEY2 = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
-      const PAYSPRINT_PARTNER_ID2 = process.env.PAYSPRINT_PARTNER_ID || "";
+      const PAYSPRINT_BASE_URL3 = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
+      const PAYSPRINT_PARTNER_ID4 = process.env.PAYSPRINT_PARTNER_ID || "";
       const PAYSPRINT_ENV_VAL = process.env.PAYSPRINT_ENV || "PRODUCTION";
       const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
       const useEncryption = PAYSPRINT_ENV_VAL === "PRODUCTION" || PAYSPRINT_ENV_VAL === "LIVE";
-      const timestamp = Date.now();
-      const reqid = timestamp.toString() + Math.floor(Math.random() * 1e4).toString();
-      const jwtPayload = { iss: "PAYSPRINT", timestamp, partnerId: PAYSPRINT_PARTNER_ID2, product: "WALLET", reqid };
-      const jwtToken = jwt2.default.sign(jwtPayload, jwtTokenEnv, { algorithm: "HS256" });
+      const timestamp = Math.floor(Date.now() / 1e3);
+      const uniqueReqId = Math.floor(Math.random() * 1e9).toString();
+      const jwtPayload = { timestamp, partnerId: PAYSPRINT_PARTNER_ID4, reqid: uniqueReqId };
+      const jwtToken = jwt3.default.sign(jwtPayload, jwtTokenEnv, { algorithm: "HS256" });
       let endpoint = "/service/recharge/recharge/dorecharge";
-      let requestBody = {};
-      if (action === "status") {
+      let apiFields = {};
+      if (action === "balance") {
+        endpoint = "/service/balance/balance/cashbalance";
+        apiFields = {};
+      } else if (action === "status") {
         endpoint = "/service/recharge/recharge/status";
-        requestBody = { referenceid: referenceid || "TEST123" };
+        apiFields = { referenceid: referenceid || "TEST123" };
       } else {
         const OPERATOR_MAP2 = { jio: 14, airtel: 4, vi: 33, vodafone: 33, idea: 34, bsnl: 8, mtnl: 10 };
         const opCode = OPERATOR_MAP2[(operator || "jio").toLowerCase()] || parseInt(operator) || 14;
-        requestBody = {
+        apiFields = {
           operator: opCode,
           canumber: canumber || "7067018549",
           amount: amount || 10,
           referenceid: referenceid || `RSLIVE${timestamp}`
         };
       }
-      const fullUrl = `${PAYSPRINT_BASE_URL2}${endpoint}`;
+      const requestBody = {
+        partnerId: PAYSPRINT_PARTNER_ID4,
+        timestamp,
+        reqid: uniqueReqId,
+        ...apiFields
+      };
+      console.log("[PAYSPRINT RAW TEST] Payload before encryption:", JSON.stringify(requestBody));
+      const fullUrl = `${PAYSPRINT_BASE_URL3}${endpoint}`;
       let bodyStr;
+      let encryptedOutput = "";
       let encryptionActual = useEncryption ? "AES-128-CBC" : "Plain JSON";
       if (useEncryption) {
         try {
           const encrypted = encryptPayload2(requestBody);
-          bodyStr = JSON.stringify({ body: encrypted });
+          encryptedOutput = encrypted;
+          bodyStr = JSON.stringify({ data: encrypted });
         } catch (encErr) {
           console.warn("[PAYSPRINT RAW TEST] AES encryption failed, falling back to plain JSON:", encErr);
           bodyStr = JSON.stringify(requestBody);
@@ -1020,24 +2106,51 @@ async function registerRoutes(app2) {
       } else {
         bodyStr = JSON.stringify(requestBody);
       }
-      const maskedAuthKey = PAYSPRINT_AUTH_KEY2 ? PAYSPRINT_AUTH_KEY2.substring(0, 8) + "..." : "(not set)";
-      const maskedToken = jwtToken.substring(0, 20) + "...";
+      const maskedToken = jwtToken.substring(0, 30) + "...";
       const curlCommand = `curl --location --request POST \\
   "${fullUrl}" \\
   --header "Content-Type: application/json" \\
-  --header "Authorisedkey: ${maskedAuthKey}" \\
   --header "Token: ${maskedToken}" \\
   --data-raw '${bodyStr}'`;
-      const response = await fetch(fullUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorisedkey": PAYSPRINT_AUTH_KEY2,
-          "Token": jwtToken
-        },
-        body: bodyStr
-      });
-      const rawText = await response.text();
+      const PAYSPRINT_PROXY_URL3 = process.env.PAYSPRINT_PROXY_URL || "";
+      const paysprintHeaders = {
+        "Content-Type": "application/json",
+        "Token": jwtToken
+      };
+      let rawText;
+      let httpStatus;
+      let proxyUsed = false;
+      if (PAYSPRINT_PROXY_URL3) {
+        proxyUsed = true;
+        const proxyResponse = await fetch(PAYSPRINT_PROXY_URL3, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: fullUrl,
+            headers: paysprintHeaders,
+            payload: JSON.parse(bodyStr)
+          })
+        });
+        if (!proxyResponse.ok) {
+          res.status(502).json({ error: "Lambda proxy error", http_status: proxyResponse.status });
+          return;
+        }
+        const proxyResult = await proxyResponse.json();
+        if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
+          res.status(502).json({ error: "Invalid proxy response", raw: JSON.stringify(proxyResult).substring(0, 200) });
+          return;
+        }
+        httpStatus = proxyResult.status;
+        rawText = proxyResult.body;
+      } else {
+        const response = await fetch(fullUrl, {
+          method: "POST",
+          headers: paysprintHeaders,
+          body: bodyStr
+        });
+        httpStatus = response.status;
+        rawText = await response.text();
+      }
       let parsedResponse;
       try {
         const jsonMatch = rawText.match(/\{[^<]*\}$/);
@@ -1045,21 +2158,33 @@ async function registerRoutes(app2) {
       } catch {
         parsedResponse = { raw: rawText };
       }
+      const decodedJwt = jwt3.default.decode(jwtToken);
       res.json({
-        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-        environment: PAYSPRINT_ENV_VAL,
-        encryption: encryptionActual,
-        request_url: fullUrl,
-        request_headers: {
-          "Content-Type": "application/json",
-          "Authorisedkey": PAYSPRINT_AUTH_KEY2 ? PAYSPRINT_AUTH_KEY2.substring(0, 8) + "..." : "(not set)",
-          "Token": jwtToken.substring(0, 20) + "..."
+        debug_report: {
+          step1_jwt: {
+            payload: jwtPayload,
+            decoded: decodedJwt,
+            token_preview: jwtToken.substring(0, 30) + "..."
+          },
+          step2_payload_before_encryption: requestBody,
+          step3_encryption: {
+            algorithm: encryptionActual,
+            encrypted_length: encryptedOutput.length || 0,
+            encrypted_preview: encryptedOutput ? encryptedOutput.substring(0, 40) + "..." : "N/A"
+          },
+          step4_headers: {
+            "Token": jwtToken.substring(0, 20) + "...",
+            "Content-Type": "application/json",
+            "Authorisedkey": "NOT included (LIVE IP BASED)"
+          },
+          step5_request_body: bodyStr,
+          step6_endpoint: fullUrl,
+          step7_proxy: proxyUsed ? PAYSPRINT_PROXY_URL3 : "direct",
+          step8_response: {
+            http_status: httpStatus,
+            body: parsedResponse
+          }
         },
-        request_body: requestBody,
-        request_body_sent: bodyStr,
-        jwt_payload: jwtPayload,
-        http_status: response.status,
-        response: parsedResponse,
         curl_command: curlCommand
       });
     } catch (error) {
@@ -1067,13 +2192,373 @@ async function registerRoutes(app2) {
       res.status(500).json({ error: "Paysprint raw test failed", details: String(error) });
     }
   });
+  let cachedBankList = null;
+  const BANK_CACHE_TTL = 24 * 60 * 60 * 1e3;
+  app2.get("/api/aeps/banks", authMiddleware, async (_req, res) => {
+    try {
+      if (cachedBankList && Date.now() - cachedBankList.cachedAt < BANK_CACHE_TTL) {
+        return res.json({ success: true, banks: cachedBankList.banks });
+      }
+      const result = await getAepsBankList();
+      if (result.status && result.data) {
+        cachedBankList = { banks: result.data, cachedAt: Date.now() };
+        res.json({ success: true, banks: result.data });
+      } else {
+        res.json({ success: false, error: result.message, banks: [] });
+      }
+    } catch (error) {
+      console.error("AEPS bank list error:", error);
+      if (cachedBankList) {
+        return res.json({ success: true, banks: cachedBankList.banks });
+      }
+      res.status(500).json({ error: "Failed to fetch bank list" });
+    }
+  });
+  app2.get("/api/aeps/merchant", authMiddleware, async (req, res) => {
+    try {
+      const merchant = await storage.getAepsMerchant(req.userId);
+      if (!merchant) {
+        return res.json({ merchant: null, onboarded: false });
+      }
+      const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      const dailyAuth = await storage.getAepsDailyAuth(req.userId, today);
+      res.json({
+        merchant,
+        onboarded: merchant.kycStatus === "COMPLETED",
+        dailyAuthenticated: dailyAuth?.authenticated || false
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch merchant info" });
+    }
+  });
+  app2.post("/api/aeps/onboard", authMiddleware, async (req, res) => {
+    try {
+      const { merchantCode } = req.body;
+      if (!merchantCode) {
+        return res.status(400).json({ error: "Merchant code is required" });
+      }
+      const user = await storage.getUser(req.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      const result = await getOnboardingUrl({
+        merchantCode,
+        mobile: user.phone
+      });
+      if (result.status && result.data?.redirecturl) {
+        const merchant = await storage.getAepsMerchant(req.userId);
+        if (!merchant) {
+          await storage.createAepsMerchant(req.userId, merchantCode, "bank2");
+        } else {
+          await storage.updateAepsMerchant(req.userId, { merchantCode, kycStatus: "PENDING" });
+        }
+        res.json({ success: true, redirectUrl: result.data.redirecturl });
+      } else {
+        res.json({ success: false, error: result.message });
+      }
+    } catch (error) {
+      console.error("AEPS onboard error:", error);
+      res.status(500).json({ error: "Failed to onboard" });
+    }
+  });
+  app2.post("/api/aeps/onboard/complete", authMiddleware, async (req, res) => {
+    try {
+      const { merchantCode } = req.body;
+      const existing = await storage.getAepsMerchant(req.userId);
+      if (!existing) return res.status(404).json({ error: "Merchant not found. Start onboarding first." });
+      if (existing.kycStatus === "COMPLETED") {
+        return res.json({ success: true, kycStatus: "COMPLETED" });
+      }
+      const user = await storage.getUser(req.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      const mCode = merchantCode || existing.merchantCode;
+      const verifyResult = await getOnboardingUrl({
+        merchantCode: mCode,
+        mobile: user.phone
+      });
+      if (verifyResult.status && verifyResult.response_code === 1) {
+        const updates = { kycStatus: "COMPLETED" };
+        if (merchantCode) updates.merchantCode = merchantCode;
+        const merchant = await storage.updateAepsMerchant(req.userId, updates);
+        res.json({ success: true, kycStatus: "COMPLETED" });
+      } else {
+        res.json({ success: false, kycStatus: "PENDING", message: "KYC verification not yet complete. Please complete the onboarding process first." });
+      }
+    } catch (error) {
+      console.error("AEPS onboard complete error:", error);
+      res.status(500).json({ error: "Onboarding verification failed" });
+    }
+  });
+  app2.get("/api/aeps/transaction/:id/status", authMiddleware, async (req, res) => {
+    try {
+      const tx = await storage.getAepsTransaction(req.params.id);
+      if (!tx) return res.status(404).json({ error: "Transaction not found" });
+      if (tx.userId !== req.userId) return res.status(403).json({ error: "Unauthorized" });
+      if (tx.status === "AEPS_PROCESSING" && tx.referenceNo) {
+        try {
+          const liveStatus = await checkAepsTransactionStatus({
+            referenceno: tx.referenceNo
+          });
+          if (liveStatus.status && liveStatus.data) {
+            const newStatus = liveStatus.response_code === 1 ? "AEPS_SUCCESS" : "AEPS_FAILED";
+            await storage.updateAepsTransaction(tx.id, {
+              status: newStatus,
+              message: liveStatus.message
+            });
+            tx.status = newStatus;
+            tx.message = liveStatus.message;
+          }
+        } catch {
+        }
+      }
+      res.json({ transaction: tx });
+    } catch (error) {
+      console.error("AEPS transaction status error:", error);
+      res.status(500).json({ error: "Failed to get transaction status" });
+    }
+  });
+  app2.post("/api/aeps/2fa/register", authMiddleware, async (req, res) => {
+    try {
+      const result = await twoFactorRegistration(req.body);
+      res.json({ success: result.status, message: result.message, data: result.data });
+    } catch (error) {
+      console.error("AEPS 2FA register error:", error);
+      res.status(500).json({ error: "2FA registration failed" });
+    }
+  });
+  app2.post("/api/aeps/2fa/authenticate", authMiddleware, async (req, res) => {
+    try {
+      const { aadhaarNumber, data: biometricData, latitude, longitude } = req.body;
+      if (!biometricData) {
+        return res.status(400).json({ error: "Biometric data is required for 2FA authentication" });
+      }
+      const user = await storage.getUser(req.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      const merchant = await storage.getAepsMerchant(req.userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "Complete merchant onboarding first" });
+      }
+      const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+      const referenceNo = `2FA${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+      const fullPayload = {
+        accessmodetype: "site",
+        adhaarnumber: aadhaarNumber || "",
+        mobilenumber: user.phone,
+        latitude: latitude || "0.0",
+        longitude: longitude || "0.0",
+        referenceno: referenceNo,
+        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID3,
+        data: biometricData,
+        ipaddress: (req.ip || "127.0.0.1").replace("::ffff:", ""),
+        timestamp,
+        is_iris: "NO"
+      };
+      const result = await twoFactorAuthentication(fullPayload);
+      if (result.status) {
+        const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+        await storage.setAepsDailyAuth(req.userId, today);
+      }
+      res.json({ success: result.status, message: result.message, data: result.data });
+    } catch (error) {
+      console.error("AEPS 2FA auth error:", error);
+      res.status(500).json({ error: "2FA authentication failed" });
+    }
+  });
+  app2.post("/api/aeps/transaction", authMiddleware, async (req, res) => {
+    try {
+      const parsed = aepsTransactionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+      const { type, aadhaarNumber, customerMobile, bankIin, bankName, amount, latitude, longitude, fingerprintData, pipe } = parsed.data;
+      const user = await storage.getUser(req.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      const merchant = await storage.getAepsMerchant(req.userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "AEPS merchant onboarding not completed. Please complete KYC first." });
+      }
+      const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+      const todayAuth = await storage.getAepsDailyAuth(req.userId, today);
+      if (!todayAuth || !todayAuth.authenticated) {
+        return res.status(403).json({ error: "Daily 2FA authentication required. Please authenticate before proceeding." });
+      }
+      if (!fingerprintData) {
+        return res.status(400).json({ error: "Biometric data is required for AEPS transactions." });
+      }
+      const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+      const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
+      const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+      const aepsTx = await storage.createAepsTransaction({
+        userId: req.userId,
+        type,
+        aadhaarMasked: maskedAadhaar,
+        customerMobile,
+        bankName,
+        bankIin,
+        amount: amount || 0,
+        status: "AEPS_PROCESSING",
+        referenceNo
+      });
+      const commonParams = {
+        latitude,
+        longitude,
+        mobilenumber: user.phone,
+        referenceno: referenceNo,
+        ipaddress: (req.ip || "127.0.0.1").replace("::ffff:", ""),
+        adhaarnumber: aadhaarNumber,
+        accessmodetype: "site",
+        nationalbankidentification: bankIin,
+        requestremarks: `${type} via RupyaSetu`,
+        data: fingerprintData,
+        pipe: pipe || "bank2",
+        timestamp,
+        transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
+        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID3,
+        is_iris: "NO"
+      };
+      let result;
+      switch (type) {
+        case "BALANCE_ENQUIRY":
+          result = await balanceEnquiry(commonParams);
+          break;
+        case "MINI_STATEMENT":
+          result = await miniStatement(commonParams);
+          break;
+        case "CASH_WITHDRAWAL":
+          if (!amount || amount <= 0) {
+            await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Amount is required for cash withdrawal" });
+            return res.status(400).json({ error: "Amount is required for cash withdrawal" });
+          }
+          result = await cashWithdrawal({ ...commonParams, amount });
+          break;
+        case "AADHAAR_PAY":
+          if (!amount || amount <= 0) {
+            await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Amount is required for Aadhaar pay" });
+            return res.status(400).json({ error: "Amount is required for Aadhaar pay" });
+          }
+          result = await aadhaarPay({ ...commonParams, amount });
+          break;
+        case "CASH_DEPOSIT":
+          if (!amount || amount <= 0) {
+            await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Amount is required for cash deposit" });
+            return res.status(400).json({ error: "Amount is required for cash deposit" });
+          }
+          result = await cashDeposit({ ...commonParams, amount });
+          break;
+        default:
+          await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Invalid transaction type" });
+          return res.status(400).json({ error: "Invalid transaction type" });
+      }
+      const updateData = {};
+      if (result.status) {
+        updateData.status = "AEPS_SUCCESS";
+        updateData.paysprintRefId = result.bankrrn || result.txnid || result.data?.ackno || "";
+        if (result.balanceamount) updateData.balance = result.balanceamount;
+        if (result.ministatement) updateData.miniStatement = JSON.stringify(result.ministatement);
+        updateData.message = result.message;
+      } else {
+        updateData.status = "AEPS_FAILED";
+        updateData.message = result.message;
+      }
+      const updatedTx = await storage.updateAepsTransaction(aepsTx.id, updateData);
+      res.json({
+        success: result.status,
+        transaction: updatedTx,
+        message: result.message,
+        balance: result.balanceamount,
+        miniStatement: result.ministatement,
+        referenceNo: result.bankrrn || referenceNo
+      });
+    } catch (error) {
+      console.error("AEPS transaction error:", error);
+      res.status(500).json({ error: "AEPS transaction failed" });
+    }
+  });
+  const PAYSPRINT_PARTNER_ID3 = process.env.PAYSPRINT_PARTNER_ID || "";
+  app2.get("/api/aeps/transactions", authMiddleware, async (req, res) => {
+    try {
+      const transactions = await storage.getUserAepsTransactions(req.userId);
+      res.json({ transactions });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch AEPS transactions" });
+    }
+  });
+  app2.get("/api/admin/aeps-transactions", adminAuthMiddleware, async (_req, res) => {
+    try {
+      const allTx = await storage.getAllAepsTransactions();
+      const enriched = await Promise.all(
+        allTx.map(async (tx) => {
+          const user = await storage.getUser(tx.userId);
+          return { ...tx, userPhone: user?.phone || "Unknown" };
+        })
+      );
+      res.json({ transactions: enriched });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch AEPS transactions" });
+    }
+  });
+  app2.get("/api/admin/aeps-api-logs", adminAuthMiddleware, async (req, res) => {
+    try {
+      const endpoint = req.query.endpoint;
+      const successParam = req.query.success;
+      const fromDate = req.query.fromDate;
+      const toDate = req.query.toDate;
+      const rawLimit = req.query.limit ? parseInt(req.query.limit) : 50;
+      const rawOffset = req.query.offset ? parseInt(req.query.offset) : 0;
+      const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 200);
+      const offset = Math.max(isNaN(rawOffset) ? 0 : rawOffset, 0);
+      const filters = { limit, offset };
+      if (endpoint) filters.endpoint = endpoint;
+      if (successParam === "true") filters.success = true;
+      if (successParam === "false") filters.success = false;
+      if (fromDate) filters.fromDate = fromDate;
+      if (toDate) filters.toDate = toDate;
+      const result = await storage.getAepsApiLogs(filters);
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to fetch AEPS API logs:", error);
+      res.status(500).json({ error: "Failed to fetch AEPS API logs" });
+    }
+  });
   app2.get("/api/admin/server-info", adminAuthMiddleware, async (_req, res) => {
     try {
       const ipRes = await fetch("https://api.ipify.org?format=json");
       const ipData = await ipRes.json();
-      res.json({ outbound_ip: ipData.ip, env: process.env.PAYSPRINT_ENV, base_url: process.env.PAYSPRINT_BASE_URL });
+      let proxyIp = "N/A";
+      const proxyUrl = process.env.PAYSPRINT_PROXY_URL || "";
+      if (proxyUrl) {
+        try {
+          const proxyIpRes = await fetch(proxyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: "https://checkip.amazonaws.com", headers: {}, payload: {} })
+          });
+          const proxyIpData = await proxyIpRes.json();
+          proxyIp = proxyIpData.body?.trim() || "unknown";
+        } catch {
+          proxyIp = "error";
+        }
+      }
+      res.json({
+        server_outbound_ip: ipData.ip,
+        proxy_outbound_ip: proxyIp,
+        proxy_url: proxyUrl || "not configured",
+        env: process.env.PAYSPRINT_ENV,
+        base_url: process.env.PAYSPRINT_BASE_URL
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to check IP", details: String(error) });
+    }
+  });
+  app2.get("/api/admin/aeps-report", adminAuthMiddleware, async (_req, res) => {
+    try {
+      const pdfBuffer = await generateAepsReport();
+      const filename = `RupyaSetu_AEPS_Report_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", pdfBuffer.length);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("AEPS report generation error:", error);
+      res.status(500).json({ error: "Failed to generate AEPS report" });
     }
   });
   const httpServer = createServer(app2);

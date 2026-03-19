@@ -56,6 +56,18 @@ function RootLayoutNav() {
         name="about"
         options={{ headerShown: false, animation: "slide_from_right" }}
       />
+      <Stack.Screen
+        name="aeps/index"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="aeps/transaction"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="aeps/result"
+        options={{ headerShown: false, animation: "fade" }}
+      />
     </Stack>
   );
 }

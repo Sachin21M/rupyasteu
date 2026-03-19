@@ -5,7 +5,8 @@ import { generateJwtToken, verifyJwtToken } from "./utils/encryption";
 import { validateUtr, validatePhone, validateAmount } from "./utils/validators";
 import { generateOtp, sendSmsAlert } from "./utils/smsalert";
 import { initiateRecharge, checkRechargeStatus, getOperatorInfo } from "./services/paysprint";
-import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema } from "../shared/schema";
+import * as aepsService from "./services/aeps";
+import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema, aepsTransactionSchema } from "../shared/schema";
 
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "MANUAL";
 const PAYEE_UPI_ID = process.env.PAYEE_UPI_ID || "rupyasetu@upi";
@@ -673,6 +674,227 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("[PAYSPRINT RAW TEST] Error:", error);
       res.status(500).json({ error: "Paysprint raw test failed", details: String(error) });
+    }
+  });
+
+  app.get("/api/aeps/banks", authMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const result = await aepsService.getAepsBankList();
+      if (result.status && result.data) {
+        res.json({ success: true, banks: result.data });
+      } else {
+        res.json({ success: false, error: result.message, banks: [] });
+      }
+    } catch (error) {
+      console.error("AEPS bank list error:", error);
+      res.status(500).json({ error: "Failed to fetch bank list" });
+    }
+  });
+
+  app.get("/api/aeps/merchant", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant) {
+        return res.json({ merchant: null, onboarded: false });
+      }
+      const today = new Date().toISOString().split("T")[0];
+      const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);
+      res.json({
+        merchant,
+        onboarded: merchant.kycStatus === "COMPLETED",
+        dailyAuthenticated: dailyAuth?.authenticated || false,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch merchant info" });
+    }
+  });
+
+  app.post("/api/aeps/onboard", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { merchantCode } = req.body;
+      if (!merchantCode) {
+        return res.status(400).json({ error: "Merchant code is required" });
+      }
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const result = await aepsService.getOnboardingUrl({
+        merchantCode,
+        mobile: user.phone,
+      });
+
+      if (result.status && result.data?.redirecturl) {
+        const merchant = await storage.getAepsMerchant((req as any).userId);
+        if (!merchant) {
+          await storage.createAepsMerchant((req as any).userId, merchantCode, "bank2");
+        } else {
+          await storage.updateAepsMerchant((req as any).userId, { merchantCode, kycStatus: "COMPLETED" });
+        }
+        res.json({ success: true, redirectUrl: result.data.redirecturl });
+      } else {
+        res.json({ success: false, error: result.message });
+      }
+    } catch (error) {
+      console.error("AEPS onboard error:", error);
+      res.status(500).json({ error: "Failed to onboard" });
+    }
+  });
+
+  app.post("/api/aeps/2fa/register", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const result = await aepsService.twoFactorRegistration(req.body);
+      res.json({ success: result.status, message: result.message, data: result.data });
+    } catch (error) {
+      console.error("AEPS 2FA register error:", error);
+      res.status(500).json({ error: "2FA registration failed" });
+    }
+  });
+
+  app.post("/api/aeps/2fa/authenticate", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const result = await aepsService.twoFactorAuthentication(req.body);
+      if (result.status) {
+        const today = new Date().toISOString().split("T")[0];
+        await storage.setAepsDailyAuth((req as any).userId, today);
+      }
+      res.json({ success: result.status, message: result.message, data: result.data });
+    } catch (error) {
+      console.error("AEPS 2FA auth error:", error);
+      res.status(500).json({ error: "2FA authentication failed" });
+    }
+  });
+
+  app.post("/api/aeps/transaction", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const parsed = aepsTransactionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+
+      const { type, aadhaarNumber, customerMobile, bankIin, bankName, amount, latitude, longitude, fingerprintData, pipe } = parsed.data;
+
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+      const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
+      const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+
+      const aepsTx = await storage.createAepsTransaction({
+        userId: (req as any).userId,
+        type,
+        aadhaarMasked: maskedAadhaar,
+        customerMobile,
+        bankName,
+        bankIin,
+        amount: amount || 0,
+        status: "AEPS_PROCESSING",
+        referenceNo,
+      });
+
+      const commonParams = {
+        latitude,
+        longitude,
+        mobilenumber: user.phone,
+        referenceno: referenceNo,
+        ipaddress: (req.ip || "127.0.0.1").replace("::ffff:", ""),
+        adhaarnumber: aadhaarNumber,
+        accessmodetype: "site",
+        nationalbankidentification: bankIin,
+        requestremarks: `${type} via RupyaSetu`,
+        data: fingerprintData || "<PidData><Resp errCode=\"0\" /><DeviceInfo /><Skey>SIMULATED</Skey><Data>SIMULATED_FINGERPRINT</Data></PidData>",
+        pipe: pipe || "bank2",
+        timestamp,
+        transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
+        submerchantid: PAYSPRINT_PARTNER_ID,
+        is_iris: "NO",
+      };
+
+      let result;
+      switch (type) {
+        case "BALANCE_ENQUIRY":
+          result = await aepsService.balanceEnquiry(commonParams);
+          break;
+        case "MINI_STATEMENT":
+          result = await aepsService.miniStatement(commonParams);
+          break;
+        case "CASH_WITHDRAWAL":
+          if (!amount || amount <= 0) {
+            await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Amount is required for cash withdrawal" });
+            return res.status(400).json({ error: "Amount is required for cash withdrawal" });
+          }
+          result = await aepsService.cashWithdrawal({ ...commonParams, amount });
+          break;
+        case "AADHAAR_PAY":
+          if (!amount || amount <= 0) {
+            await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Amount is required for Aadhaar pay" });
+            return res.status(400).json({ error: "Amount is required for Aadhaar pay" });
+          }
+          result = await aepsService.aadhaarPay({ ...commonParams, amount });
+          break;
+        case "CASH_DEPOSIT":
+          if (!amount || amount <= 0) {
+            await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Amount is required for cash deposit" });
+            return res.status(400).json({ error: "Amount is required for cash deposit" });
+          }
+          result = await aepsService.cashDeposit({ ...commonParams, amount });
+          break;
+        default:
+          await storage.updateAepsTransaction(aepsTx.id, { status: "AEPS_FAILED", message: "Invalid transaction type" });
+          return res.status(400).json({ error: "Invalid transaction type" });
+      }
+
+      const updateData: Record<string, any> = {};
+      if (result.status) {
+        updateData.status = "AEPS_SUCCESS";
+        updateData.paysprintRefId = result.bankrrn || result.txnid || result.data?.ackno || "";
+        if (result.balanceamount) updateData.balance = result.balanceamount;
+        if (result.ministatement) updateData.miniStatement = JSON.stringify(result.ministatement);
+        updateData.message = result.message;
+      } else {
+        updateData.status = "AEPS_FAILED";
+        updateData.message = result.message;
+      }
+
+      const updatedTx = await storage.updateAepsTransaction(aepsTx.id, updateData);
+
+      res.json({
+        success: result.status,
+        transaction: updatedTx,
+        message: result.message,
+        balance: result.balanceamount,
+        miniStatement: result.ministatement,
+        referenceNo: result.bankrrn || referenceNo,
+      });
+    } catch (error) {
+      console.error("AEPS transaction error:", error);
+      res.status(500).json({ error: "AEPS transaction failed" });
+    }
+  });
+
+  const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
+
+  app.get("/api/aeps/transactions", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const transactions = await storage.getUserAepsTransactions((req as any).userId);
+      res.json({ transactions });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch AEPS transactions" });
+    }
+  });
+
+  app.get("/api/admin/aeps-transactions", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const allTx = await storage.getAllAepsTransactions();
+      const enriched = await Promise.all(
+        allTx.map(async (tx) => {
+          const user = await storage.getUser(tx.userId);
+          return { ...tx, userPhone: user?.phone || "Unknown" };
+        })
+      );
+      res.json({ transactions: enriched });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch AEPS transactions" });
     }
   });
 

@@ -1,4 +1,4 @@
-import type { User, OtpRecord, Transaction, Operator, Plan } from "../shared/schema";
+import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction } from "../shared/schema";
 import { randomUUID } from "crypto";
 import pg from "pg";
 
@@ -10,6 +10,57 @@ const pool = new pg.Pool({
 pool.query("SELECT 1")
   .then(() => console.log("Connected to PostgreSQL successfully"))
   .catch((err) => console.error("PostgreSQL connection error:", err.message));
+
+async function initAepsTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_merchants (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        merchant_code VARCHAR(64) NOT NULL DEFAULT '',
+        kyc_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+        bank_pipes TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_daily_auth (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        auth_date VARCHAR(10) NOT NULL,
+        authenticated BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, auth_date)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aeps_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        type VARCHAR(30) NOT NULL,
+        aadhaar_masked VARCHAR(16) NOT NULL,
+        customer_mobile VARCHAR(15) NOT NULL,
+        bank_name VARCHAR(100) NOT NULL,
+        bank_iin VARCHAR(20) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        status VARCHAR(30) NOT NULL DEFAULT 'AEPS_PENDING',
+        reference_no VARCHAR(64) NOT NULL,
+        paysprint_ref_id VARCHAR(100),
+        balance VARCHAR(50),
+        mini_statement TEXT,
+        message TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log("AEPS tables initialized successfully");
+  } catch (err: any) {
+    console.error("Failed to create AEPS tables:", err.message);
+  }
+}
+
+initAepsTables();
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -32,6 +83,19 @@ export interface IStorage {
   getUserTransactions(userId: string): Promise<Transaction[]>;
   getAllTransactions(): Promise<Transaction[]>;
   findTransactionByUtr(utr: string): Promise<Transaction | undefined>;
+
+  getAepsMerchant(userId: string): Promise<AepsMerchant | undefined>;
+  createAepsMerchant(userId: string, merchantCode: string, bankPipes: string): Promise<AepsMerchant>;
+  updateAepsMerchant(userId: string, data: Partial<AepsMerchant>): Promise<AepsMerchant | undefined>;
+
+  getAepsDailyAuth(userId: string, date: string): Promise<AepsDailyAuth | undefined>;
+  setAepsDailyAuth(userId: string, date: string): Promise<AepsDailyAuth>;
+
+  createAepsTransaction(data: Omit<AepsTransaction, "id" | "createdAt" | "updatedAt">): Promise<AepsTransaction>;
+  getAepsTransaction(id: string): Promise<AepsTransaction | undefined>;
+  updateAepsTransaction(id: string, data: Partial<AepsTransaction>): Promise<AepsTransaction | undefined>;
+  getUserAepsTransactions(userId: string): Promise<AepsTransaction[]>;
+  getAllAepsTransactions(): Promise<AepsTransaction[]>;
 }
 
 const OPERATORS: Operator[] = [
@@ -53,33 +117,25 @@ const PLANS: Plan[] = [
   { id: "jio-4", operatorId: "jio", amount: 666, validity: "84 days", description: "1.5GB/day + Unlimited Calls", data: "1.5GB/day", talktime: "Unlimited", category: "Data" },
   { id: "jio-5", operatorId: "jio", amount: 999, validity: "84 days", description: "2.5GB/day + Unlimited Calls", data: "2.5GB/day", talktime: "Unlimited", category: "Popular" },
   { id: "jio-6", operatorId: "jio", amount: 2999, validity: "365 days", description: "2.5GB/day + Unlimited Calls", data: "2.5GB/day", talktime: "Unlimited", category: "Annual" },
-
   { id: "airtel-1", operatorId: "airtel", amount: 265, validity: "28 days", description: "1GB/day + Unlimited Calls", data: "1GB/day", talktime: "Unlimited", category: "Popular" },
   { id: "airtel-2", operatorId: "airtel", amount: 299, validity: "28 days", description: "1.5GB/day + Unlimited Calls", data: "1.5GB/day", talktime: "Unlimited", category: "Popular" },
   { id: "airtel-3", operatorId: "airtel", amount: 479, validity: "56 days", description: "1.5GB/day + Unlimited Calls", data: "1.5GB/day", talktime: "Unlimited", category: "Data" },
   { id: "airtel-4", operatorId: "airtel", amount: 719, validity: "84 days", description: "1.5GB/day + Unlimited Calls", data: "1.5GB/day", talktime: "Unlimited", category: "Data" },
   { id: "airtel-5", operatorId: "airtel", amount: 2999, validity: "365 days", description: "2.5GB/day + Unlimited Calls", data: "2.5GB/day", talktime: "Unlimited", category: "Annual" },
-
   { id: "vi-1", operatorId: "vi", amount: 249, validity: "28 days", description: "1GB/day + Unlimited Calls", data: "1GB/day", talktime: "Unlimited", category: "Popular" },
   { id: "vi-2", operatorId: "vi", amount: 299, validity: "28 days", description: "1.5GB/day + Unlimited Calls", data: "1.5GB/day", talktime: "Unlimited", category: "Popular" },
   { id: "vi-3", operatorId: "vi", amount: 449, validity: "56 days", description: "1GB/day + Unlimited Calls", data: "1GB/day", talktime: "Unlimited", category: "Data" },
-
   { id: "bsnl-1", operatorId: "bsnl", amount: 197, validity: "30 days", description: "2GB/day + Unlimited Calls", data: "2GB/day", talktime: "Unlimited", category: "Popular" },
   { id: "bsnl-2", operatorId: "bsnl", amount: 397, validity: "60 days", description: "2GB/day + Unlimited Calls", data: "2GB/day", talktime: "Unlimited", category: "Data" },
-
   { id: "tatasky-1", operatorId: "tatasky", amount: 220, validity: "1 Month", description: "Hindi Basic HD", category: "Basic" },
   { id: "tatasky-2", operatorId: "tatasky", amount: 350, validity: "1 Month", description: "Hindi Smart HD", category: "Popular" },
   { id: "tatasky-3", operatorId: "tatasky", amount: 550, validity: "1 Month", description: "Hindi Premium HD", category: "Premium" },
-
   { id: "dishtv-1", operatorId: "dishtv", amount: 199, validity: "1 Month", description: "South Jumbo Family", category: "Basic" },
   { id: "dishtv-2", operatorId: "dishtv", amount: 325, validity: "1 Month", description: "DishNXT HD", category: "Popular" },
-
   { id: "d2h-1", operatorId: "d2h", amount: 250, validity: "1 Month", description: "Gold HD", category: "Popular" },
   { id: "d2h-2", operatorId: "d2h", amount: 400, validity: "1 Month", description: "Diamond HD", category: "Premium" },
-
   { id: "sundirect-1", operatorId: "sundirect", amount: 180, validity: "1 Month", description: "Value Pack", category: "Basic" },
   { id: "sundirect-2", operatorId: "sundirect", amount: 320, validity: "1 Month", description: "Premium Pack", category: "Premium" },
-
   { id: "airteldth-1", operatorId: "airteldth", amount: 258, validity: "1 Month", description: "Value Lite HD", category: "Basic" },
   { id: "airteldth-2", operatorId: "airteldth", amount: 410, validity: "1 Month", description: "Premium HD", category: "Popular" },
 ];
@@ -108,6 +164,49 @@ function rowToTransaction(row: any): Transaction {
     rechargeStatus: row.recharge_status,
     utr: row.utr || undefined,
     paysprintRefId: row.paysprint_ref_id || undefined,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  };
+}
+
+function rowToAepsMerchant(row: any): AepsMerchant {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    merchantCode: row.merchant_code,
+    kycStatus: row.kyc_status,
+    bankPipes: row.bank_pipes,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  };
+}
+
+function rowToAepsDailyAuth(row: any): AepsDailyAuth {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    authDate: row.auth_date,
+    authenticated: row.authenticated,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+  };
+}
+
+function rowToAepsTransaction(row: any): AepsTransaction {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    aadhaarMasked: row.aadhaar_masked,
+    customerMobile: row.customer_mobile,
+    bankName: row.bank_name,
+    bankIin: row.bank_iin,
+    amount: parseFloat(row.amount),
+    status: row.status,
+    referenceNo: row.reference_no,
+    paysprintRefId: row.paysprint_ref_id || undefined,
+    balance: row.balance || undefined,
+    miniStatement: row.mini_statement || undefined,
+    message: row.message || undefined,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
   };
@@ -259,6 +358,112 @@ export class PgStorage implements IStorage {
   async findTransactionByUtr(utr: string): Promise<Transaction | undefined> {
     const result = await pool.query("SELECT * FROM transactions WHERE utr = $1", [utr]);
     return result.rows[0] ? rowToTransaction(result.rows[0]) : undefined;
+  }
+
+  async getAepsMerchant(userId: string): Promise<AepsMerchant | undefined> {
+    const result = await pool.query("SELECT * FROM aeps_merchants WHERE user_id = $1", [userId]);
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
+  }
+
+  async createAepsMerchant(userId: string, merchantCode: string, bankPipes: string): Promise<AepsMerchant> {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_merchants (id, user_id, merchant_code, kyc_status, bank_pipes)
+       VALUES ($1, $2, $3, 'COMPLETED', $4) RETURNING *`,
+      [id, userId, merchantCode, bankPipes]
+    );
+    return rowToAepsMerchant(result.rows[0]);
+  }
+
+  async updateAepsMerchant(userId: string, data: Partial<AepsMerchant>): Promise<AepsMerchant | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (data.merchantCode !== undefined) { fields.push(`merchant_code = $${idx++}`); values.push(data.merchantCode); }
+    if (data.kycStatus !== undefined) { fields.push(`kyc_status = $${idx++}`); values.push(data.kycStatus); }
+    if (data.bankPipes !== undefined) { fields.push(`bank_pipes = $${idx++}`); values.push(data.bankPipes); }
+
+    if (fields.length === 0) return this.getAepsMerchant(userId);
+
+    fields.push(`updated_at = NOW()`);
+    values.push(userId);
+    const result = await pool.query(
+      `UPDATE aeps_merchants SET ${fields.join(", ")} WHERE user_id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
+  }
+
+  async getAepsDailyAuth(userId: string, date: string): Promise<AepsDailyAuth | undefined> {
+    const result = await pool.query(
+      "SELECT * FROM aeps_daily_auth WHERE user_id = $1 AND auth_date = $2",
+      [userId, date]
+    );
+    return result.rows[0] ? rowToAepsDailyAuth(result.rows[0]) : undefined;
+  }
+
+  async setAepsDailyAuth(userId: string, date: string): Promise<AepsDailyAuth> {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_daily_auth (id, user_id, auth_date, authenticated)
+       VALUES ($1, $2, $3, TRUE)
+       ON CONFLICT (user_id, auth_date) DO UPDATE SET authenticated = TRUE
+       RETURNING *`,
+      [id, userId, date]
+    );
+    return rowToAepsDailyAuth(result.rows[0]);
+  }
+
+  async createAepsTransaction(data: Omit<AepsTransaction, "id" | "createdAt" | "updatedAt">): Promise<AepsTransaction> {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO aeps_transactions (id, user_id, type, aadhaar_masked, customer_mobile, bank_name, bank_iin, amount, status, reference_no, paysprint_ref_id, balance, mini_statement, message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING *`,
+      [id, data.userId, data.type, data.aadhaarMasked, data.customerMobile, data.bankName, data.bankIin, data.amount, data.status, data.referenceNo, data.paysprintRefId || null, data.balance || null, data.miniStatement || null, data.message || null]
+    );
+    return rowToAepsTransaction(result.rows[0]);
+  }
+
+  async getAepsTransaction(id: string): Promise<AepsTransaction | undefined> {
+    const result = await pool.query("SELECT * FROM aeps_transactions WHERE id = $1", [id]);
+    return result.rows[0] ? rowToAepsTransaction(result.rows[0]) : undefined;
+  }
+
+  async updateAepsTransaction(id: string, data: Partial<AepsTransaction>): Promise<AepsTransaction | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
+    if (data.paysprintRefId !== undefined) { fields.push(`paysprint_ref_id = $${idx++}`); values.push(data.paysprintRefId); }
+    if (data.balance !== undefined) { fields.push(`balance = $${idx++}`); values.push(data.balance); }
+    if (data.miniStatement !== undefined) { fields.push(`mini_statement = $${idx++}`); values.push(data.miniStatement); }
+    if (data.message !== undefined) { fields.push(`message = $${idx++}`); values.push(data.message); }
+
+    if (fields.length === 0) return this.getAepsTransaction(id);
+
+    fields.push(`updated_at = NOW()`);
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE aeps_transactions SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToAepsTransaction(result.rows[0]) : undefined;
+  }
+
+  async getUserAepsTransactions(userId: string): Promise<AepsTransaction[]> {
+    const result = await pool.query(
+      "SELECT * FROM aeps_transactions WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    return result.rows.map(rowToAepsTransaction);
+  }
+
+  async getAllAepsTransactions(): Promise<AepsTransaction[]> {
+    const result = await pool.query("SELECT * FROM aeps_transactions ORDER BY created_at DESC");
+    return result.rows.map(rowToAepsTransaction);
   }
 }
 

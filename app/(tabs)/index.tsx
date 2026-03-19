@@ -113,9 +113,9 @@ export default function HomeScreen() {
 
       <View style={styles.bannerCard}>
         <View style={styles.bannerContent}>
-          <Text style={styles.bannerTitle}>Quick Recharge</Text>
+          <Text style={styles.bannerTitle}>RupyaSetu Services</Text>
           <Text style={styles.bannerSubtitle}>
-            Recharge your mobile or DTH instantly with UPI
+            Recharge, banking & payments — all in one place
           </Text>
         </View>
         <View style={styles.bannerIcon}>
@@ -124,22 +124,75 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Services</Text>
+        <Text style={styles.sectionTitle}>Recharge</Text>
       </View>
 
-      <View style={styles.servicesGrid}>
+      <View style={styles.servicesRow}>
         <ServiceCard
           icon={<Ionicons name="phone-portrait" size={24} color={Colors.primary} />}
-          label="Mobile Recharge"
+          label="Mobile"
           color={Colors.primary}
           onPress={() => router.push("/recharge/mobile")}
         />
         <ServiceCard
           icon={<MaterialCommunityIcons name="satellite-uplink" size={24} color={Colors.pending} />}
-          label="DTH Recharge"
+          label="DTH"
           color={Colors.pending}
           onPress={() => router.push("/recharge/dth")}
         />
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>AEPS Banking</Text>
+        <View style={styles.newBadge}>
+          <Text style={styles.newBadgeText}>NEW</Text>
+        </View>
+      </View>
+
+      <View style={styles.servicesRow}>
+        <ServiceCard
+          icon={<Ionicons name="wallet" size={24} color="#2E9E5B" />}
+          label="Balance"
+          color="#2E9E5B"
+          onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "BALANCE_ENQUIRY", label: "Balance Enquiry", requiresAmount: "0" } })}
+        />
+        <ServiceCard
+          icon={<Ionicons name="cash" size={24} color="#F59E0B" />}
+          label="Withdraw"
+          color="#F59E0B"
+          onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "CASH_WITHDRAWAL", label: "Cash Withdrawal", requiresAmount: "1" } })}
+        />
+        <ServiceCard
+          icon={<Ionicons name="document-text" size={24} color="#6366F1" />}
+          label="Statement"
+          color="#6366F1"
+          onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "MINI_STATEMENT", label: "Mini Statement", requiresAmount: "0" } })}
+        />
+        <ServiceCard
+          icon={<MaterialCommunityIcons name="contactless-payment" size={24} color="#EF4444" />}
+          label="Aadhaar Pay"
+          color="#EF4444"
+          onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "AADHAAR_PAY", label: "Aadhaar Pay", requiresAmount: "1" } })}
+        />
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.aepsBanner, pressed && { opacity: 0.9 }]}
+        onPress={() => router.push("/aeps")}
+      >
+        <MaterialCommunityIcons name="fingerprint" size={28} color="#fff" />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.aepsBannerTitle}>All AEPS Services</Text>
+          <Text style={styles.aepsBannerSub}>Explore more banking services</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
+      </Pressable>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+      </View>
+
+      <View style={styles.servicesRow}>
         <ServiceCard
           icon={<Ionicons name="time" size={24} color={Colors.accent} />}
           label="History"
@@ -171,7 +224,7 @@ export default function HomeScreen() {
         <View style={styles.emptyContainer}>
           <Ionicons name="receipt-outline" size={48} color={Colors.textTertiary} />
           <Text style={styles.emptyText}>No transactions yet</Text>
-          <Text style={styles.emptySubtext}>Your recharge history will appear here</Text>
+          <Text style={styles.emptySubtext}>Your recharge & AEPS history will appear here</Text>
         </View>
       ) : (
         <View style={styles.txList}>
@@ -258,10 +311,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontFamily: "Inter_600SemiBold",
     color: Colors.text,
   },
@@ -270,20 +323,34 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     color: Colors.primary,
   },
-  servicesGrid: {
+  newBadge: {
+    backgroundColor: Colors.error,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  newBadgeText: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  servicesRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     paddingHorizontal: 16,
-    gap: 12,
-    marginBottom: 28,
+    gap: 10,
+    marginBottom: 20,
   },
   serviceCard: {
-    width: "47%",
+    flex: 1,
+    minWidth: 75,
+    maxWidth: "48%",
     backgroundColor: Colors.surface,
     borderRadius: 16,
-    padding: 20,
+    padding: 16,
     alignItems: "center",
-    gap: 12,
+    gap: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -291,17 +358,38 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   serviceIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
   },
   serviceLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: "Inter_600SemiBold",
     color: Colors.text,
     textAlign: "center",
+  },
+  aepsBanner: {
+    marginHorizontal: 20,
+    borderRadius: 14,
+    padding: 16,
+    backgroundColor: "#1E6F44",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginBottom: 24,
+  },
+  aepsBannerTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
+  },
+  aepsBannerSub: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.7)",
+    marginTop: 2,
   },
   loadingContainer: {
     padding: 40,

@@ -15,6 +15,12 @@ export type PaymentStatus = typeof paymentStatuses[number];
 export const rechargeStatuses = ["RECHARGE_PENDING", "RECHARGE_PROCESSING", "RECHARGE_SUCCESS", "RECHARGE_FAILED"] as const;
 export type RechargeStatus = typeof rechargeStatuses[number];
 
+export const aepsTransactionTypes = ["BALANCE_ENQUIRY", "MINI_STATEMENT", "CASH_WITHDRAWAL", "AADHAAR_PAY", "CASH_DEPOSIT"] as const;
+export type AepsTransactionType = typeof aepsTransactionTypes[number];
+
+export const aepsStatuses = ["AEPS_PENDING", "AEPS_PROCESSING", "AEPS_SUCCESS", "AEPS_FAILED"] as const;
+export type AepsStatus = typeof aepsStatuses[number];
+
 export interface User {
   id: string;
   phone: string;
@@ -65,6 +71,48 @@ export interface Transaction {
   updatedAt: string;
 }
 
+export interface AepsMerchant {
+  id: string;
+  userId: string;
+  merchantCode: string;
+  kycStatus: "PENDING" | "COMPLETED" | "FAILED";
+  bankPipes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AepsDailyAuth {
+  id: string;
+  userId: string;
+  authDate: string;
+  authenticated: boolean;
+  createdAt: string;
+}
+
+export interface AepsTransaction {
+  id: string;
+  userId: string;
+  type: AepsTransactionType;
+  aadhaarMasked: string;
+  customerMobile: string;
+  bankName: string;
+  bankIin: string;
+  amount: number;
+  status: AepsStatus;
+  referenceNo: string;
+  paysprintRefId?: string;
+  balance?: string;
+  miniStatement?: string;
+  message?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AepsBank {
+  iinno: string;
+  bankName: string;
+}
+
 export const sendOtpSchema = z.object({
   phone: phoneSchema,
 });
@@ -85,4 +133,21 @@ export const createRechargeSchema = z.object({
 export const submitUtrSchema = z.object({
   transactionId: z.string().min(1),
   utr: utrSchema,
+});
+
+export const aepsOnboardSchema = z.object({
+  merchantCode: z.string().min(1),
+});
+
+export const aepsTransactionSchema = z.object({
+  type: z.enum(aepsTransactionTypes),
+  aadhaarNumber: z.string().regex(/^\d{12}$/, "Invalid Aadhaar number"),
+  customerMobile: z.string().regex(/^[6-9]\d{9}$/, "Invalid mobile number"),
+  bankIin: z.string().min(1, "Bank is required"),
+  bankName: z.string().min(1, "Bank name is required"),
+  amount: z.number().optional(),
+  latitude: z.string().default("28.6139"),
+  longitude: z.string().default("77.2090"),
+  fingerprintData: z.string().optional(),
+  pipe: z.string().default("bank2"),
 });

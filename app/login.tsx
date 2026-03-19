@@ -91,7 +91,7 @@ export default function LoginScreen() {
               />
             </View>
             <Text style={styles.heroAppName}>RupyaSetu</Text>
-            <Text style={styles.heroSubtitle}>Recharge. Relax. Done.</Text>
+            <Text style={styles.heroSubtitle}>Recharge. Banking. Done.</Text>
 
             <View style={styles.serviceCards}>
               <View style={styles.serviceCard}>
@@ -108,9 +108,9 @@ export default function LoginScreen() {
               </View>
               <View style={styles.serviceCard}>
                 <View style={styles.serviceIconWrap}>
-                  <Ionicons name="flash" size={22} color="#2E9E5B" />
+                  <MaterialCommunityIcons name="fingerprint" size={22} color="#2E9E5B" />
                 </View>
-                <Text style={styles.serviceLabel}>Instant</Text>
+                <Text style={styles.serviceLabel}>AEPS</Text>
               </View>
               <View style={styles.serviceCard}>
                 <View style={styles.serviceIconWrap}>
@@ -130,7 +130,7 @@ export default function LoginScreen() {
             ]}
           >
             <Text style={styles.headline}>
-              India's Fastest Recharge{"\n"}Platform
+              India's Fastest Recharge{"\n"}& Banking Platform
             </Text>
 
             <Text style={styles.subLabel}>Log in or sign up</Text>

@@ -103,3 +103,61 @@ export async function updateUserProfile(name: string) {
   });
   return res.json();
 }
+
+export async function getAepsBanks() {
+  const res = await authFetch("/api/aeps/banks");
+  return res.json();
+}
+
+export async function getAepsMerchant() {
+  const res = await authFetch("/api/aeps/merchant");
+  return res.json();
+}
+
+export async function aepsOnboard(merchantCode: string) {
+  const res = await authFetch("/api/aeps/onboard", {
+    method: "POST",
+    body: JSON.stringify({ merchantCode }),
+  });
+  return res.json();
+}
+
+export async function aeps2faRegister(data: Record<string, unknown>) {
+  const res = await authFetch("/api/aeps/2fa/register", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function aeps2faAuthenticate(data: Record<string, unknown>) {
+  const res = await authFetch("/api/aeps/2fa/authenticate", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function performAepsTransaction(data: {
+  type: string;
+  aadhaarNumber: string;
+  customerMobile: string;
+  bankIin: string;
+  bankName: string;
+  amount?: number;
+  latitude?: string;
+  longitude?: string;
+  fingerprintData?: string;
+  pipe?: string;
+}) {
+  const res = await authFetch("/api/aeps/transaction", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function getAepsTransactions() {
+  const res = await authFetch("/api/aeps/transactions");
+  return res.json();
+}

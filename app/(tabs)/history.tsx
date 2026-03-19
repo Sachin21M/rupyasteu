@@ -11,18 +11,17 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
-import { getTransactions } from "@/lib/api";
-import type { Transaction } from "@/shared/schema";
+import { getTransactions, getAepsTransactions } from "@/lib/api";
+import type { Transaction, AepsTransaction } from "@/shared/schema";
 
-const FILTERS = ["All", "Mobile", "DTH"] as const;
+const FILTERS = ["All", "Recharge", "AEPS"] as const;
 
-function TransactionCard({ tx }: { tx: Transaction }) {
+function RechargeCard({ tx }: { tx: Transaction }) {
   const isSuccess = tx.rechargeStatus === "RECHARGE_SUCCESS";
   const isFailed = tx.rechargeStatus === "RECHARGE_FAILED";
-  const isPending = !isSuccess && !isFailed;
 
   const statusColor = isSuccess ? Colors.success : isFailed ? Colors.error : Colors.warning;
   const statusBg = isSuccess ? Colors.successLight : isFailed ? Colors.errorLight : Colors.warningLight;
@@ -66,28 +65,108 @@ function TransactionCard({ tx }: { tx: Transaction }) {
   );
 }
 
+function AepsCard({ tx }: { tx: AepsTransaction }) {
+  const isSuccess = tx.status === "AEPS_SUCCESS";
+  const isFailed = tx.status === "AEPS_FAILED";
+
+  const statusColor = isSuccess ? Colors.success : isFailed ? Colors.error : Colors.warning;
+  const statusBg = isSuccess ? Colors.successLight : isFailed ? Colors.errorLight : Colors.warningLight;
+  const statusText = isSuccess ? "Success" : isFailed ? "Failed" : "Processing";
+
+  const typeLabels: Record<string, string> = {
+    BALANCE_ENQUIRY: "Balance Enquiry",
+    MINI_STATEMENT: "Mini Statement",
+    CASH_WITHDRAWAL: "Cash Withdrawal",
+    AADHAAR_PAY: "Aadhaar Pay",
+    CASH_DEPOSIT: "Cash Deposit",
+  };
+
+  const typeIcons: Record<string, { name: string; color: string }> = {
+    BALANCE_ENQUIRY: { name: "wallet", color: "#2E9E5B" },
+    MINI_STATEMENT: { name: "document-text", color: "#6366F1" },
+    CASH_WITHDRAWAL: { name: "cash", color: "#F59E0B" },
+    AADHAAR_PAY: { name: "finger-print", color: "#EF4444" },
+    CASH_DEPOSIT: { name: "arrow-down-circle", color: "#2563EB" },
+  };
+
+  const icon = typeIcons[tx.type] || { name: "finger-print", color: Colors.primary };
+  const date = new Date(tx.createdAt);
+  const formattedDate = `${date.getDate()} ${date.toLocaleDateString("en-IN", { month: "short" })}, ${date.getFullYear()}`;
+  const formattedTime = date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <View style={styles.txCard}>
+      <View style={styles.txCardTop}>
+        <View style={[styles.txTypeIcon, { backgroundColor: icon.color + "15" }]}>
+          <Ionicons name={icon.name as any} size={20} color={icon.color} />
+        </View>
+        <View style={styles.txCardInfo}>
+          <Text style={styles.txCardOperator}>{typeLabels[tx.type] || tx.type}</Text>
+          <Text style={styles.txCardNumber}>{tx.bankName}</Text>
+        </View>
+        <View style={styles.txCardRight}>
+          {tx.amount > 0 && <Text style={styles.txCardAmount}>₹{tx.amount}</Text>}
+          <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
+            <Text style={[styles.statusBadgeText, { color: statusColor }]}>{statusText}</Text>
+          </View>
+        </View>
+      </View>
+      <View style={styles.txCardBottom}>
+        <Text style={styles.txCardDate}>{formattedDate} at {formattedTime}</Text>
+        <View style={styles.aepsBadge}>
+          <MaterialCommunityIcons name="fingerprint" size={12} color={Colors.primary} />
+          <Text style={styles.aepsBadgeText}>AEPS</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+type CombinedItem = { sortDate: number } & (
+  | { kind: "recharge"; data: Transaction }
+  | { kind: "aeps"; data: AepsTransaction }
+);
+
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("All");
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data: rechargeData, isLoading: rechargeLoading, refetch: refetchRecharge } = useQuery({
     queryKey: ["transactions"],
     queryFn: getTransactions,
   });
 
-  const allTransactions: Transaction[] = data?.transactions || [];
-  const filteredTransactions = filter === "All"
-    ? allTransactions
-    : allTransactions.filter((tx) =>
-        filter === "Mobile" ? tx.type === "MOBILE" : tx.type === "DTH"
-      );
+  const { data: aepsData, isLoading: aepsLoading, refetch: refetchAeps } = useQuery({
+    queryKey: ["aeps-transactions"],
+    queryFn: getAepsTransactions,
+  });
+
+  const rechargeTransactions: Transaction[] = rechargeData?.transactions || [];
+  const aepsTransactions: AepsTransaction[] = aepsData?.transactions || [];
+
+  const combined: CombinedItem[] = [];
+
+  if (filter === "All" || filter === "Recharge") {
+    rechargeTransactions.forEach((tx) => {
+      combined.push({ kind: "recharge", data: tx, sortDate: new Date(tx.createdAt).getTime() });
+    });
+  }
+  if (filter === "All" || filter === "AEPS") {
+    aepsTransactions.forEach((tx) => {
+      combined.push({ kind: "aeps", data: tx, sortDate: new Date(tx.createdAt).getTime() });
+    });
+  }
+
+  combined.sort((a, b) => b.sortDate - a.sortDate);
+
+  const isLoading = rechargeLoading || aepsLoading;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetchRecharge(), refetchAeps()]);
     setRefreshing(false);
-  }, [refetch]);
+  }, [refetchRecharge, refetchAeps]);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -117,9 +196,13 @@ export default function HistoryScreen() {
         </View>
       ) : (
         <FlatList
-          data={filteredTransactions}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <TransactionCard tx={item} />}
+          data={combined}
+          keyExtractor={(item) => `${item.kind}-${item.data.id}`}
+          renderItem={({ item }) =>
+            item.kind === "recharge"
+              ? <RechargeCard tx={item.data as Transaction} />
+              : <AepsCard tx={item.data as AepsTransaction} />
+          }
           contentContainerStyle={{
             paddingHorizontal: 20,
             paddingBottom: Platform.OS === "web" ? 84 + 34 : 100,
@@ -128,15 +211,15 @@ export default function HistoryScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
           }
-          scrollEnabled={!!filteredTransactions.length}
+          scrollEnabled={!!combined.length}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="receipt-outline" size={56} color={Colors.textTertiary} />
               <Text style={styles.emptyText}>No transactions found</Text>
               <Text style={styles.emptySubtext}>
                 {filter === "All"
-                  ? "Start by making your first recharge"
-                  : `No ${filter.toLowerCase()} recharges yet`}
+                  ? "Start by making your first recharge or AEPS transaction"
+                  : `No ${filter.toLowerCase()} transactions yet`}
               </Text>
             </View>
           }
@@ -281,5 +364,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_500Medium",
     color: Colors.textSecondary,
+  },
+  aepsBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  aepsBadgeText: {
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.primary,
   },
 });

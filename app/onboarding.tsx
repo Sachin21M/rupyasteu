@@ -27,6 +27,12 @@ const slides = [
   },
   {
     id: "2",
+    icon: "finger-print" as const,
+    headline: "AEPS Banking",
+    subtext: "Aadhaar-enabled payments — balance, withdrawal, mini statement & more.",
+  },
+  {
+    id: "3",
     icon: "shield-checkmark" as const,
     headline: "100% Secure",
     subtext: "Your payments and data are protected with advanced security.",

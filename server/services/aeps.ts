@@ -1,0 +1,388 @@
+import jwt from "jsonwebtoken";
+import { encryptPayload } from "../utils/encryption";
+
+const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
+const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
+const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
+const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
+
+const AEPS_TIMEOUT = 180000;
+
+function isProductionEnv(): boolean {
+  return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
+}
+
+function generateUniqueReqId(): string {
+  return Math.floor(Math.random() * 1000000000).toString();
+}
+
+function generatePaysprintJWT(): { token: string; payload: Record<string, unknown> } {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const reqid = generateUniqueReqId();
+  const payload = {
+    timestamp,
+    partnerId: PAYSPRINT_PARTNER_ID,
+    reqid,
+  };
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  return { token, payload };
+}
+
+interface AepsResponse {
+  status: boolean;
+  response_code: number;
+  message: string;
+  data?: any;
+  balanceamount?: string;
+  bankrrn?: string;
+  ministatement?: any[];
+  txnid?: string;
+}
+
+async function makeAepsRequest(
+  endpoint: string,
+  payload: Record<string, unknown>
+): Promise<AepsResponse> {
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  if (!jwtTokenEnv) {
+    console.log("[AEPS SIMULATION] No JWT token configured. Simulating:", endpoint);
+    return simulateAepsResponse(endpoint, payload);
+  }
+
+  const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
+
+  try {
+    const useEncryption = isProductionEnv();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const reqid = generateUniqueReqId();
+
+    const fullPayload: Record<string, unknown> = {
+      partnerId: PAYSPRINT_PARTNER_ID,
+      timestamp,
+      reqid,
+      ...payload,
+    };
+
+    console.log(`[AEPS] Request to ${endpoint}`);
+
+    const jwtResult = generatePaysprintJWT();
+    const jwtToken = jwtResult.token;
+
+    let requestBody: string;
+
+    if (useEncryption) {
+      try {
+        const encrypted = encryptPayload(fullPayload);
+        requestBody = JSON.stringify({ data: encrypted });
+      } catch (encErr) {
+        console.warn("[AEPS] AES encryption FAILED:", encErr);
+        requestBody = JSON.stringify(fullPayload);
+      }
+    } else {
+      requestBody = JSON.stringify(fullPayload);
+    }
+
+    const paysprintHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Token": jwtToken,
+    };
+
+    let rawText: string;
+    let httpStatus: number;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AEPS_TIMEOUT);
+
+    try {
+      if (PAYSPRINT_PROXY_URL) {
+        const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: fullUrl,
+            headers: paysprintHeaders,
+            payload: JSON.parse(requestBody),
+          }),
+          signal: controller.signal,
+        });
+        if (!proxyResponse.ok) {
+          return { status: false, response_code: 502, message: `Proxy error: HTTP ${proxyResponse.status}` };
+        }
+        const proxyResult = await proxyResponse.json() as { status?: number; body?: string };
+        if (typeof proxyResult.status !== "number" || typeof proxyResult.body !== "string") {
+          return { status: false, response_code: 502, message: "Invalid response from proxy" };
+        }
+        httpStatus = proxyResult.status;
+        rawText = proxyResult.body;
+      } else {
+        const response = await fetch(fullUrl, {
+          method: "POST",
+          headers: paysprintHeaders,
+          body: requestBody,
+          signal: controller.signal,
+        });
+        httpStatus = response.status;
+        rawText = await response.text();
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    console.log(`[AEPS] Response from ${endpoint}: HTTP ${httpStatus}`);
+    console.log(`[AEPS] Body: ${rawText.substring(0, 500)}`);
+
+    let jsonText = rawText;
+    const jsonMatch = rawText.match(/\{[^<]*\}$/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[0];
+    }
+
+    let data: AepsResponse;
+    try {
+      data = JSON.parse(jsonText) as AepsResponse;
+    } catch {
+      if (rawText.includes("not available in your region")) {
+        return { status: false, response_code: 403, message: "AEPS API blocked: geographic restriction" };
+      }
+      return { status: false, response_code: 500, message: "Invalid JSON response from Paysprint AEPS" };
+    }
+
+    return data;
+  } catch (error: any) {
+    if (error.name === "AbortError") {
+      return { status: false, response_code: 408, message: "AEPS request timeout (180s)" };
+    }
+    console.error("[AEPS] Network Error:", error);
+    return { status: false, response_code: 500, message: "Failed to connect to AEPS service" };
+  }
+}
+
+function simulateAepsResponse(endpoint: string, payload: Record<string, unknown>): AepsResponse {
+  if (endpoint.includes("banklist")) {
+    return {
+      status: true, response_code: 1, message: "Bank list fetched",
+      data: [
+        { iinno: "607094", bankName: "State Bank of India" },
+        { iinno: "608001", bankName: "Punjab National Bank" },
+        { iinno: "508505", bankName: "Bank of India" },
+        { iinno: "607161", bankName: "Bank of Baroda" },
+        { iinno: "607387", bankName: "Union Bank of India" },
+        { iinno: "607095", bankName: "Canara Bank" },
+        { iinno: "607027", bankName: "Indian Bank" },
+        { iinno: "607105", bankName: "Central Bank of India" },
+        { iinno: "607153", bankName: "IDBI Bank" },
+        { iinno: "607021", bankName: "UCO Bank" },
+      ],
+    };
+  }
+  if (endpoint.includes("balanceenquiry")) {
+    return {
+      status: true, response_code: 1, message: "Balance enquiry successful",
+      balanceamount: "15432.50", bankrrn: `RRN${Date.now()}`,
+    };
+  }
+  if (endpoint.includes("ministatement")) {
+    return {
+      status: true, response_code: 1, message: "Mini statement fetched",
+      balanceamount: "15432.50", bankrrn: `RRN${Date.now()}`,
+      ministatement: [
+        { date: "15/03/2026", txnType: "CR", amount: "5000.00", narration: "NEFT-CREDIT" },
+        { date: "14/03/2026", txnType: "DR", amount: "2000.00", narration: "ATM-WITHDRAWAL" },
+        { date: "13/03/2026", txnType: "CR", amount: "25000.00", narration: "SALARY" },
+      ],
+    };
+  }
+  if (endpoint.includes("cashwithdraw")) {
+    return {
+      status: true, response_code: 1, message: "Cash withdrawal successful",
+      balanceamount: "13432.50", bankrrn: `RRN${Date.now()}`,
+      data: { ackno: `AEPS${Date.now()}` },
+    };
+  }
+  if (endpoint.includes("aadharpay")) {
+    return {
+      status: true, response_code: 1, message: "Aadhaar pay successful",
+      bankrrn: `RRN${Date.now()}`,
+      data: { ackno: `AEPS${Date.now()}` },
+    };
+  }
+  if (endpoint.includes("cashdeposit")) {
+    return {
+      status: true, response_code: 1, message: "Cash deposit successful",
+      bankrrn: `RRN${Date.now()}`,
+      data: { ackno: `AEPS${Date.now()}` },
+    };
+  }
+  if (endpoint.includes("onboard")) {
+    return {
+      status: true, response_code: 1, message: "Onboarding URL generated",
+      data: { redirecturl: "https://api.paysprint.in/onboard/kyc-form" },
+    };
+  }
+  if (endpoint.includes("Twofactorkyc")) {
+    return { status: true, response_code: 1, message: "2FA operation successful" };
+  }
+  return { status: true, response_code: 1, message: "Success" };
+}
+
+export async function getAepsBankList(): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/banklist/index", {});
+}
+
+export async function getOnboardingUrl(params: {
+  merchantCode: string;
+  mobile: string;
+  email?: string;
+  firmName?: string;
+  callbackUrl?: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/onboard/onboard/getonboardurl", {
+    merchantcode: params.merchantCode,
+    mobile: params.mobile,
+    email: params.email || "",
+    firm: params.firmName || "RupyaSetu",
+    callback: params.callbackUrl || "",
+  });
+}
+
+export async function twoFactorRegistration(params: {
+  accessmodetype: string;
+  adhaarnumber: string;
+  mobilenumber: string;
+  latitude: string;
+  longitude: string;
+  referenceno: string;
+  submerchantid: string;
+  data: string;
+  ipaddress: string;
+  timestamp: string;
+  is_iris: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/registration", params);
+}
+
+export async function twoFactorAuthentication(params: {
+  accessmodetype: string;
+  adhaarnumber: string;
+  mobilenumber: string;
+  latitude: string;
+  longitude: string;
+  referenceno: string;
+  submerchantid: string;
+  data: string;
+  ipaddress: string;
+  timestamp: string;
+  is_iris: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/authentication", params);
+}
+
+export async function balanceEnquiry(params: {
+  latitude: string;
+  longitude: string;
+  mobilenumber: string;
+  referenceno: string;
+  ipaddress: string;
+  adhaarnumber: string;
+  accessmodetype: string;
+  nationalbankidentification: string;
+  requestremarks: string;
+  data: string;
+  pipe: string;
+  timestamp: string;
+  transactiontype: string;
+  submerchantid: string;
+  is_iris: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/balanceenquiry/index", params);
+}
+
+export async function miniStatement(params: {
+  latitude: string;
+  longitude: string;
+  mobilenumber: string;
+  referenceno: string;
+  ipaddress: string;
+  adhaarnumber: string;
+  accessmodetype: string;
+  nationalbankidentification: string;
+  requestremarks: string;
+  data: string;
+  pipe: string;
+  timestamp: string;
+  transactiontype: string;
+  submerchantid: string;
+  is_iris: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/ministatement/index", params);
+}
+
+export async function cashWithdrawal(params: {
+  latitude: string;
+  longitude: string;
+  mobilenumber: string;
+  referenceno: string;
+  ipaddress: string;
+  adhaarnumber: string;
+  accessmodetype: string;
+  nationalbankidentification: string;
+  requestremarks: string;
+  data: string;
+  pipe: string;
+  timestamp: string;
+  transactiontype: string;
+  submerchantid: string;
+  is_iris: string;
+  amount: number;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/v3/cashwithdraw/index", params);
+}
+
+export async function aadhaarPay(params: {
+  latitude: string;
+  longitude: string;
+  mobilenumber: string;
+  referenceno: string;
+  ipaddress: string;
+  adhaarnumber: string;
+  accessmodetype: string;
+  nationalbankidentification: string;
+  requestremarks: string;
+  data: string;
+  pipe: string;
+  timestamp: string;
+  transactiontype: string;
+  submerchantid: string;
+  is_iris: string;
+  amount: number;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/aadharpay/index", params);
+}
+
+export async function cashDeposit(params: {
+  latitude: string;
+  longitude: string;
+  mobilenumber: string;
+  referenceno: string;
+  ipaddress: string;
+  adhaarnumber: string;
+  accessmodetype: string;
+  nationalbankidentification: string;
+  requestremarks: string;
+  data: string;
+  pipe: string;
+  timestamp: string;
+  transactiontype: string;
+  submerchantid: string;
+  is_iris: string;
+  amount: number;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/cashdeposit/index", params);
+}
+
+export async function checkAepsTransactionStatus(params: {
+  referenceno: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/cashwithdraw/status", params);
+}

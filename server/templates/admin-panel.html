@@ -324,7 +324,7 @@
     <div class="table-header">
       <h2>AEPS API Logs</h2>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <select id="logEndpointFilter" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
+        <select id="logEndpointFilter" onchange="apiLogsPage=0;loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
           <option value="">All Endpoints</option>
           <option value="balanceenquiry">Balance Enquiry</option>
           <option value="cashwithdraw">Cash Withdrawal</option>
@@ -334,13 +334,13 @@
           <option value="banklist">Bank List</option>
           <option value="Twofactorkyc">2FA KYC</option>
         </select>
-        <select id="logSuccessFilter" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
+        <select id="logSuccessFilter" onchange="apiLogsPage=0;loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
           <option value="">All Status</option>
           <option value="true">Success</option>
           <option value="false">Failed</option>
         </select>
-        <input type="date" id="logFromDate" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;" />
-        <input type="date" id="logToDate" onchange="loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;" />
+        <input type="date" id="logFromDate" onchange="apiLogsPage=0;loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;" />
+        <input type="date" id="logToDate" onchange="apiLogsPage=0;loadApiLogs()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;" />
         <button class="refresh-btn" onclick="loadApiLogs()">&#x21bb; Refresh</button>
         <button class="refresh-btn" onclick="exportApiLogs()" style="background:#2563eb;color:#fff;">Export CSV</button>
       </div>
@@ -974,14 +974,46 @@ function copyLogDetail(logId) {
   });
 }
 
-function exportApiLogs() {
-  if (apiLogsData.length === 0) {
+async function exportApiLogs() {
+  if (apiLogsTotal === 0) {
     alert('No logs to export');
     return;
   }
 
+  const endpoint = document.getElementById('logEndpointFilter').value;
+  const success = document.getElementById('logSuccessFilter').value;
+  const fromDate = document.getElementById('logFromDate').value;
+  const toDate = document.getElementById('logToDate').value;
+
+  let allLogs = [];
+  let offset = 0;
+  const batchSize = 200;
+
+  while (offset < apiLogsTotal) {
+    const params = new URLSearchParams();
+    if (endpoint) params.set('endpoint', endpoint);
+    if (success) params.set('success', success);
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    params.set('limit', String(batchSize));
+    params.set('offset', String(offset));
+
+    try {
+      const res = await fetch('/api/admin/aeps-api-logs?' + params.toString(), {
+        headers: { 'Authorization': 'Bearer ' + adminToken },
+      });
+      if (res.status === 401) { handleLogout(); return; }
+      const data = await res.json();
+      allLogs = allLogs.concat(data.logs || []);
+      offset += batchSize;
+    } catch {
+      alert('Failed to fetch all logs for export');
+      return;
+    }
+  }
+
   let csv = 'ID,Timestamp,Endpoint,Method,HTTP Status,Success,Duration (ms),Error\n';
-  apiLogsData.forEach(log => {
+  allLogs.forEach(log => {
     csv += `"${log.id}","${log.createdAt}","${log.endpoint}","${log.method}",${log.httpStatus},${log.success},${log.durationMs},"${(log.errorMessage || '').replace(/"/g, '""')}"\n`;
   });
 

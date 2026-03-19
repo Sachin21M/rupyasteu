@@ -57,6 +57,14 @@ const AEPS_SERVICES: ServiceType[] = [
     color: "#EF4444",
     requiresAmount: true,
   },
+  {
+    id: "CASH_DEPOSIT",
+    icon: <Ionicons name="arrow-down-circle" size={28} color="#10B981" />,
+    label: "Cash Deposit",
+    description: "Deposit cash to Aadhaar-linked account",
+    color: "#10B981",
+    requiresAmount: true,
+  },
 ];
 
 export default function AepsServicesScreen() {

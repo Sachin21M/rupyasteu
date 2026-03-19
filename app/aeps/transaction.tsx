@@ -14,8 +14,13 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsBanks, performAepsTransaction } from "@/lib/api";
+import { getAepsBanks, getAepsMerchant, performAepsTransaction } from "@/lib/api";
 import type { AepsBank } from "@/shared/schema";
+
+type MerchantStatus = {
+  kycStatus: string;
+  dailyAuthDone: boolean;
+} | null;
 
 export default function AepsTransactionScreen() {
   const insets = useSafeAreaInsets();
@@ -33,13 +38,32 @@ export default function AepsTransactionScreen() {
   const [bankSearch, setBankSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [banksLoading, setBanksLoading] = useState(true);
+  const [biometricCaptured, setBiometricCaptured] = useState(false);
+  const [biometricData, setBiometricData] = useState("");
+  const [merchantStatus, setMerchantStatus] = useState<MerchantStatus>(null);
+  const [checkingStatus, setCheckingStatus] = useState(true);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
   const bottomPadding = Platform.OS === "web" ? 34 : insets.bottom;
 
   useEffect(() => {
     loadBanks();
+    checkMerchantStatus();
   }, []);
+
+  async function checkMerchantStatus() {
+    try {
+      const result = await getAepsMerchant();
+      setMerchantStatus({
+        kycStatus: result.merchant?.kycStatus || "NOT_STARTED",
+        dailyAuthDone: result.dailyAuthenticated || false,
+      });
+    } catch {
+      setMerchantStatus({ kycStatus: "NOT_STARTED", dailyAuthDone: false });
+    } finally {
+      setCheckingStatus(false);
+    }
+  }
 
   async function loadBanks() {
     try {
@@ -60,7 +84,22 @@ export default function AepsTransactionScreen() {
     }
   }
 
-  const isValid = aadhaar.length === 12 && /^[6-9]\d{9}$/.test(mobile) && selectedBank && (!requiresAmount || (parseInt(amount) > 0));
+  function handleCaptureBiometric() {
+    if (Platform.OS === "web") {
+      const simulated = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS100" mc="MIIEGDCCAwCgAwIBAgIEA" dc="2f196bbc-e2f8-4018-87a9-9b58eb" /><Skey ci="20250101">CAPTURED_KEY</Skey><Hmac>CAPTURED_HMAC</Hmac><Data type="X">CAPTURED_BIOMETRIC_DATA</Data></PidData>`;
+      setBiometricData(simulated);
+      setBiometricCaptured(true);
+      Alert.alert("Biometric Captured", "Simulated biometric data captured for web testing. In production, a UIDAI-certified RD device would capture real fingerprint/iris data.");
+    } else {
+      Alert.alert(
+        "Connect Biometric Device",
+        "Please connect a UIDAI-certified fingerprint/iris scanner (RD Service) to capture biometric data.",
+        [{ text: "OK" }]
+      );
+    }
+  }
+
+  const isValid = aadhaar.length === 12 && /^[6-9]\d{9}$/.test(mobile) && selectedBank && (!requiresAmount || (parseInt(amount) > 0)) && biometricCaptured;
 
   async function handleSubmit() {
     if (!isValid || !selectedBank) return;
@@ -73,6 +112,7 @@ export default function AepsTransactionScreen() {
         bankIin: selectedBank.iinno,
         bankName: selectedBank.bankName,
         amount: requiresAmount ? parseInt(amount) : undefined,
+        fingerprintData: biometricData,
       });
 
       router.replace({
@@ -150,6 +190,72 @@ export default function AepsTransactionScreen() {
             ))}
           </ScrollView>
         )}
+      </View>
+    );
+  }
+
+  if (checkingStatus) {
+    return (
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ marginTop: 16, fontFamily: "Inter_500Medium", color: Colors.textSecondary }}>Checking AEPS status...</Text>
+      </View>
+    );
+  }
+
+  const kycNotComplete = merchantStatus && merchantStatus.kycStatus !== "COMPLETED";
+  const authNotDone = merchantStatus && !merchantStatus.dailyAuthDone;
+
+  if (kycNotComplete) {
+    return (
+      <View style={[styles.container, { paddingTop: topPadding + 12 }]}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={Colors.text} />
+          </Pressable>
+          <Text style={styles.headerTitle}>{txLabel}</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.gateCard}>
+          <MaterialCommunityIcons name="shield-alert" size={48} color="#F59E0B" />
+          <Text style={styles.gateTitle}>Merchant Onboarding Required</Text>
+          <Text style={styles.gateSub}>
+            You need to complete AEPS merchant onboarding (KYC) before performing transactions. Please visit the AEPS Services page to begin onboarding.
+          </Text>
+          <Pressable
+            style={styles.gateBtn}
+            onPress={() => router.replace("/aeps")}
+          >
+            <Text style={styles.gateBtnText}>Go to AEPS Services</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (authNotDone) {
+    return (
+      <View style={[styles.container, { paddingTop: topPadding + 12 }]}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={Colors.text} />
+          </Pressable>
+          <Text style={styles.headerTitle}>{txLabel}</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.gateCard}>
+          <MaterialCommunityIcons name="fingerprint" size={48} color="#6366F1" />
+          <Text style={styles.gateTitle}>Daily Authentication Required</Text>
+          <Text style={styles.gateSub}>
+            You must complete daily 2FA biometric authentication before performing AEPS transactions. Please visit the AEPS Services page to authenticate.
+          </Text>
+          <Pressable
+            style={[styles.gateBtn, { backgroundColor: "#6366F1" }]}
+            onPress={() => router.replace("/aeps")}
+          >
+            <Text style={styles.gateBtnText}>Go to AEPS Services</Text>
+          </Pressable>
+        </View>
       </View>
     );
   }
@@ -237,14 +343,33 @@ export default function AepsTransactionScreen() {
           </View>
         )}
 
-        <View style={styles.biometricNote}>
-          <MaterialCommunityIcons name="fingerprint" size={24} color={Colors.primary} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.biometricNoteTitle}>Biometric Verification</Text>
-            <Text style={styles.biometricNoteSub}>
-              In production, a UIDAI-certified fingerprint/iris device captures biometric data for authentication
-            </Text>
-          </View>
+        <View style={styles.biometricSection}>
+          <Text style={styles.fieldLabel}>Biometric Verification</Text>
+          <Pressable
+            style={[styles.biometricBtn, biometricCaptured && styles.biometricBtnCaptured]}
+            onPress={handleCaptureBiometric}
+          >
+            <MaterialCommunityIcons
+              name="fingerprint"
+              size={32}
+              color={biometricCaptured ? Colors.success : Colors.primary}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.biometricBtnTitle, biometricCaptured && { color: Colors.success }]}>
+                {biometricCaptured ? "Biometric Captured" : "Capture Biometric"}
+              </Text>
+              <Text style={styles.biometricBtnSub}>
+                {biometricCaptured
+                  ? "Fingerprint data ready for authentication"
+                  : "Tap to capture fingerprint via RD device"}
+              </Text>
+            </View>
+            {biometricCaptured ? (
+              <Ionicons name="checkmark-circle" size={24} color={Colors.success} />
+            ) : (
+              <Ionicons name="finger-print" size={24} color={Colors.primary} />
+            )}
+          </Pressable>
         </View>
 
         <Pressable
@@ -336,21 +461,32 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     color: Colors.textTertiary,
   },
-  biometricNote: {
+  biometricSection: {
+    gap: 8,
+    marginTop: 4,
+  },
+  biometricBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
     backgroundColor: Colors.primaryLight,
     borderRadius: 14,
     padding: 16,
-    marginTop: 4,
+    borderWidth: 2,
+    borderColor: "transparent",
+    borderStyle: "dashed",
   },
-  biometricNoteTitle: {
-    fontSize: 14,
+  biometricBtnCaptured: {
+    backgroundColor: Colors.successLight + "30",
+    borderColor: Colors.success,
+    borderStyle: "solid",
+  },
+  biometricBtnTitle: {
+    fontSize: 15,
     fontFamily: "Inter_600SemiBold",
     color: Colors.text,
   },
-  biometricNoteSub: {
+  biometricBtnSub: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
@@ -422,5 +558,40 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.textTertiary,
     marginTop: 2,
+  },
+  gateCard: {
+    margin: 20,
+    padding: 28,
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    alignItems: "center",
+    gap: 14,
+  },
+  gateTitle: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    textAlign: "center",
+  },
+  gateSub: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  gateBtn: {
+    height: 48,
+    backgroundColor: "#F59E0B",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    marginTop: 8,
+  },
+  gateBtnText: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
   },
 });

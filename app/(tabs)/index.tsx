@@ -176,6 +176,18 @@ export default function HomeScreen() {
         />
       </View>
 
+      <View style={styles.servicesRow}>
+        <ServiceCard
+          icon={<Ionicons name="arrow-down-circle" size={24} color="#10B981" />}
+          label="Deposit"
+          color="#10B981"
+          onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "CASH_DEPOSIT", label: "Cash Deposit", requiresAmount: "1" } })}
+        />
+        <View style={{ flex: 1, minWidth: 70 }} />
+        <View style={{ flex: 1, minWidth: 70 }} />
+        <View style={{ flex: 1, minWidth: 70 }} />
+      </View>
+
       <Pressable
         style={({ pressed }) => [styles.aepsBanner, pressed && { opacity: 0.9 }]}
         onPress={() => router.push("/aeps")}

@@ -72,13 +72,8 @@ async function makeAepsRequest(
     let requestBody: string;
 
     if (useEncryption) {
-      try {
-        const encrypted = encryptPayload(fullPayload);
-        requestBody = JSON.stringify({ data: encrypted });
-      } catch (encErr) {
-        console.warn("[AEPS] AES encryption FAILED:", encErr);
-        requestBody = JSON.stringify(fullPayload);
-      }
+      const encrypted = encryptPayload(fullPayload);
+      requestBody = JSON.stringify({ data: encrypted });
     } else {
       requestBody = JSON.stringify(fullPayload);
     }

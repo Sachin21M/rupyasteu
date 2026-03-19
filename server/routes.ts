@@ -728,7 +728,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!merchant) {
           await storage.createAepsMerchant((req as any).userId, merchantCode, "bank2");
         } else {
-          await storage.updateAepsMerchant((req as any).userId, { merchantCode, kycStatus: "COMPLETED" });
+          await storage.updateAepsMerchant((req as any).userId, { merchantCode, kycStatus: "PENDING" });
         }
         res.json({ success: true, redirectUrl: result.data.redirecturl });
       } else {
@@ -737,6 +737,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("AEPS onboard error:", error);
       res.status(500).json({ error: "Failed to onboard" });
+    }
+  });
+
+  app.post("/api/aeps/onboard/callback", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { status } = req.body;
+      const kycStatus = status === "success" ? "COMPLETED" : "FAILED";
+      const merchant = await storage.updateAepsMerchant((req as any).userId, { kycStatus });
+      if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+      res.json({ success: kycStatus === "COMPLETED", kycStatus });
+    } catch (error) {
+      console.error("AEPS onboard callback error:", error);
+      res.status(500).json({ error: "Callback processing failed" });
+    }
+  });
+
+  app.get("/api/aeps/transaction/:id/status", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const tx = await storage.getAepsTransaction(req.params.id);
+      if (!tx) return res.status(404).json({ error: "Transaction not found" });
+      if (tx.userId !== (req as any).userId) return res.status(403).json({ error: "Unauthorized" });
+      res.json({ transaction: tx });
+    } catch (error) {
+      console.error("AEPS transaction status error:", error);
+      res.status(500).json({ error: "Failed to get transaction status" });
     }
   });
 
@@ -781,7 +806,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "AEPS merchant onboarding not completed. Please complete KYC first." });
       }
 
-      const todayAuth = await storage.getAepsDailyAuth((req as any).userId);
+      const today = new Date().toISOString().slice(0, 10);
+      const todayAuth = await storage.getAepsDailyAuth((req as any).userId, today);
       if (!todayAuth || !todayAuth.authenticated) {
         return res.status(403).json({ error: "Daily 2FA authentication required. Please authenticate before proceeding." });
       }

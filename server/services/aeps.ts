@@ -89,7 +89,11 @@ async function logAepsApiCall(
     try {
       const parsed = JSON.parse(responseBody);
       maskedResponse = JSON.stringify(maskSensitiveFields(parsed));
-    } catch {}
+    } catch {
+      maskedResponse = typeof responseBody === "string"
+        ? responseBody.replace(/\b\d{12}\b/g, (m) => "XXXX-XXXX-" + m.slice(-4))
+        : responseBody;
+    }
     await storage.createAepsApiLog({
       endpoint,
       method: "POST",

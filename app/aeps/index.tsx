@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
+  Linking,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -108,14 +109,15 @@ export default function AepsServicesScreen() {
     try {
       const result = await aepsOnboard(merchantCode.trim());
       if (result.success && result.redirectUrl) {
-        Alert.alert(
-          "Complete KYC",
-          "You will be redirected to complete your KYC verification. After completing, tap 'I have completed KYC' below.",
-          [
-            { text: "Open KYC Page", onPress: () => {} },
-          ]
-        );
         setKycStatus("PENDING");
+        try {
+          await Linking.openURL(result.redirectUrl);
+        } catch {
+          Alert.alert(
+            "Complete KYC",
+            "Please open this URL to complete verification:\n\n" + result.redirectUrl + "\n\nAfter completing, tap 'I Completed KYC' below."
+          );
+        }
       } else {
         Alert.alert("Error", result.error || "Failed to start onboarding");
       }
@@ -147,22 +149,19 @@ export default function AepsServicesScreen() {
   async function handleDailyAuth() {
     setAuthLoading(true);
     try {
-      const biometricXml = Platform.OS === "web"
-        ? `<PidData><Resp errCode="0" fCount="1" fType="2" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" /><Skey ci="20250101">AUTH_KEY</Skey><Data type="X">AUTH_DATA</Data></PidData>`
-        : "";
-
-      if (!biometricXml) {
-        Alert.alert("Biometric Required", "Please connect a UIDAI-certified fingerprint/iris scanner.");
+      let biometricXml = "";
+      if (Platform.OS === "web") {
+        biometricXml = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS100" mc="MIIEGDCCAwCgAwIBAgIEA" dc="2f196bbc-e2f8-4018-87a9-9b58eb" /><Skey ci="20250101">AUTH_SKEY</Skey><Hmac>AUTH_HMAC</Hmac><Data type="X">AUTH_BIOMETRIC_DATA</Data></PidData>`;
+      } else {
+        Alert.alert("Biometric Required", "Please connect a UIDAI-certified fingerprint/iris scanner to perform daily authentication.");
         setAuthLoading(false);
         return;
       }
 
       const result = await aeps2faAuthenticate({
-        accessmodetype: "site",
+        data: biometricXml,
         latitude: "0.0",
         longitude: "0.0",
-        data: biometricXml,
-        pipe: "bank2",
       });
       if (result.success) {
         setDailyAuthenticated(true);

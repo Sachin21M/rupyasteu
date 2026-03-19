@@ -752,19 +752,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/onboard/complete", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { status, merchantCode } = req.body;
-      if (status !== "success") {
-        const merchant = await storage.updateAepsMerchant((req as any).userId, { kycStatus: "FAILED" });
-        return res.json({ success: false, kycStatus: "FAILED" });
+      const { merchantCode } = req.body;
+      const existing = await storage.getAepsMerchant((req as any).userId);
+      if (!existing) return res.status(404).json({ error: "Merchant not found. Start onboarding first." });
+      if (existing.kycStatus === "COMPLETED") {
+        return res.json({ success: true, kycStatus: "COMPLETED" });
       }
-      const updates: Record<string, string> = { kycStatus: "COMPLETED" };
-      if (merchantCode) updates.merchantCode = merchantCode;
-      const merchant = await storage.updateAepsMerchant((req as any).userId, updates);
-      if (!merchant) return res.status(404).json({ error: "Merchant not found" });
-      res.json({ success: true, kycStatus: "COMPLETED" });
+
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      const mCode = merchantCode || existing.merchantCode;
+      const verifyResult = await aepsService.getOnboardingUrl({
+        merchantCode: mCode,
+        mobile: user.phone,
+      });
+
+      if (verifyResult.status && verifyResult.response_code === 1) {
+        const updates: Record<string, string> = { kycStatus: "COMPLETED" };
+        if (merchantCode) updates.merchantCode = merchantCode;
+        const merchant = await storage.updateAepsMerchant((req as any).userId, updates);
+        res.json({ success: true, kycStatus: "COMPLETED" });
+      } else {
+        res.json({ success: false, kycStatus: "PENDING", message: "KYC verification not yet complete. Please complete the onboarding process first." });
+      }
     } catch (error) {
       console.error("AEPS onboard complete error:", error);
-      res.status(500).json({ error: "Onboarding completion failed" });
+      res.status(500).json({ error: "Onboarding verification failed" });
     }
   });
 
@@ -784,7 +797,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             await storage.updateAepsTransaction(tx.id, {
               status: newStatus,
               message: liveStatus.message,
-              apiResponse: JSON.stringify(liveStatus),
             });
             tx.status = newStatus;
             tx.message = liveStatus.message;
@@ -811,7 +823,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/2fa/authenticate", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const result = await aepsService.twoFactorAuthentication(req.body);
+      const { aadhaarNumber, data: biometricData, latitude, longitude } = req.body;
+      if (!biometricData) {
+        return res.status(400).json({ error: "Biometric data is required for 2FA authentication" });
+      }
+
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "Complete merchant onboarding first" });
+      }
+
+      const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+      const referenceNo = `2FA${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+
+      const fullPayload = {
+        accessmodetype: "site",
+        adhaarnumber: aadhaarNumber || "",
+        mobilenumber: user.phone,
+        latitude: latitude || "0.0",
+        longitude: longitude || "0.0",
+        referenceno: referenceNo,
+        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        data: biometricData,
+        ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
+        timestamp,
+        is_iris: "NO",
+      };
+
+      const result = await aepsService.twoFactorAuthentication(fullPayload);
       if (result.status) {
         const today = new Date().toISOString().split("T")[0];
         await storage.setAepsDailyAuth((req as any).userId, today);
@@ -880,7 +922,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
-        submerchantid: PAYSPRINT_PARTNER_ID,
+        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
         is_iris: "NO",
       };
 

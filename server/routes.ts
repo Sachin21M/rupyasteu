@@ -776,6 +776,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "AEPS merchant onboarding not completed. Please complete KYC first." });
+      }
+
+      const todayAuth = await storage.getAepsDailyAuth((req as any).userId);
+      if (!todayAuth || !todayAuth.authenticated) {
+        return res.status(403).json({ error: "Daily 2FA authentication required. Please authenticate before proceeding." });
+      }
+
+      if (!fingerprintData) {
+        return res.status(400).json({ error: "Biometric data is required for AEPS transactions." });
+      }
+
       const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
       const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
       const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -802,7 +816,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         accessmodetype: "site",
         nationalbankidentification: bankIin,
         requestremarks: `${type} via RupyaSetu`,
-        data: fingerprintData || "<PidData><Resp errCode=\"0\" /><DeviceInfo /><Skey>SIMULATED</Skey><Data>SIMULATED_FINGERPRINT</Data></PidData>",
+        data: fingerprintData,
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",

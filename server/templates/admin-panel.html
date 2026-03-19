@@ -292,6 +292,34 @@
   </div>
 </div>
 
+  <div class="table-section" id="aepsSection" style="display:none;">
+    <div class="table-header">
+      <h2>AEPS Transactions</h2>
+      <button class="refresh-btn" onclick="loadAepsTransactions()">&#x21bb; Refresh AEPS</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>User Phone</th>
+            <th>Type</th>
+            <th>Bank</th>
+            <th>Aadhaar</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Reference</th>
+          </tr>
+        </thead>
+        <tbody id="aepsTableBody">
+        </tbody>
+      </table>
+      <div class="empty-state" id="aepsEmptyState" style="display:none;">
+        <p>No AEPS transactions found</p>
+      </div>
+    </div>
+  </div>
+
   <div class="paysprint-section">
     <div class="paysprint-card">
       <h2>Paysprint API Test</h2>
@@ -396,7 +424,9 @@ document.getElementById('password').addEventListener('keydown', (e) => {
 function showAdmin() {
   document.getElementById('loginView').style.display = 'none';
   document.getElementById('adminView').style.display = 'block';
+  document.getElementById('aepsSection').style.display = 'block';
   loadTransactions();
+  loadAepsTransactions();
   startAutoRefresh();
 }
 
@@ -405,6 +435,7 @@ function handleLogout() {
   localStorage.removeItem('rupyasetu_admin_token');
   document.getElementById('loginView').style.display = 'flex';
   document.getElementById('adminView').style.display = 'none';
+  document.getElementById('aepsSection').style.display = 'none';
   stopAutoRefresh();
 }
 
@@ -696,6 +727,52 @@ async function testPaysprint(action) {
   }
 }
 
+async function loadAepsTransactions() {
+  try {
+    const res = await fetch('/api/admin/aeps-transactions', {
+      headers: { 'Authorization': 'Bearer ' + adminToken },
+    });
+    if (res.status === 401) { handleLogout(); return; }
+    const data = await res.json();
+    const txs = data.transactions || [];
+    const tbody = document.getElementById('aepsTableBody');
+    const empty = document.getElementById('aepsEmptyState');
+
+    if (txs.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = txs.map(tx => {
+      const typeLabels = {
+        BALANCE_ENQUIRY: 'Balance',
+        MINI_STATEMENT: 'Statement',
+        CASH_WITHDRAWAL: 'Withdrawal',
+        AADHAAR_PAY: 'Aadhaar Pay',
+        CASH_DEPOSIT: 'Deposit',
+      };
+      let statusCls = 'pending';
+      let statusLabel = tx.status.replace('AEPS_', '');
+      if (tx.status === 'AEPS_SUCCESS') statusCls = 'success';
+      if (tx.status === 'AEPS_FAILED') statusCls = 'failed';
+      if (tx.status === 'AEPS_PROCESSING') statusCls = 'processing';
+      return `<tr>
+        <td>${esc(formatDate(tx.createdAt))}</td>
+        <td>${esc(tx.userPhone || '—')}</td>
+        <td>${esc(typeLabels[tx.type] || tx.type)}</td>
+        <td>${esc(tx.bankName)}</td>
+        <td>${esc(tx.aadhaarMasked)}</td>
+        <td><strong>${tx.amount > 0 ? '₹' + esc(String(tx.amount)) : '—'}</strong></td>
+        <td><span class="pill ${statusCls}">${statusLabel}</span></td>
+        <td style="font-size:12px">${esc(tx.referenceNo || '—')}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load AEPS transactions:', err);
+  }
+}
+
 function copyRawLog() {
   const logEl = document.getElementById('rawLog');
   navigator.clipboard.writeText(logEl.textContent).then(() => {
@@ -713,6 +790,8 @@ function startAutoRefresh() {
     document.getElementById('countdown').textContent = countdownValue;
     if (countdownValue <= 0) {
       loadTransactions();
+      loadAepsTransactions();
+      countdownValue = 30;
     }
   }, 1000);
 }

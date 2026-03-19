@@ -104,14 +104,22 @@ export async function updateUserProfile(name: string) {
   return res.json();
 }
 
+async function handleAepsResponse(res: Response) {
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
 export async function getAepsBanks() {
   const res = await authFetch("/api/aeps/banks");
-  return res.json();
+  return handleAepsResponse(res);
 }
 
 export async function getAepsMerchant() {
   const res = await authFetch("/api/aeps/merchant");
-  return res.json();
+  return handleAepsResponse(res);
 }
 
 export async function aepsOnboard(merchantCode: string) {
@@ -119,7 +127,7 @@ export async function aepsOnboard(merchantCode: string) {
     method: "POST",
     body: JSON.stringify({ merchantCode }),
   });
-  return res.json();
+  return handleAepsResponse(res);
 }
 
 export async function aeps2faRegister(data: Record<string, unknown>) {
@@ -127,7 +135,7 @@ export async function aeps2faRegister(data: Record<string, unknown>) {
     method: "POST",
     body: JSON.stringify(data),
   });
-  return res.json();
+  return handleAepsResponse(res);
 }
 
 export async function aeps2faAuthenticate(data: Record<string, unknown>) {
@@ -135,7 +143,7 @@ export async function aeps2faAuthenticate(data: Record<string, unknown>) {
     method: "POST",
     body: JSON.stringify(data),
   });
-  return res.json();
+  return handleAepsResponse(res);
 }
 
 export async function performAepsTransaction(data: {
@@ -154,10 +162,10 @@ export async function performAepsTransaction(data: {
     method: "POST",
     body: JSON.stringify(data),
   });
-  return res.json();
+  return handleAepsResponse(res);
 }
 
 export async function getAepsTransactions() {
   const res = await authFetch("/api/aeps/transactions");
-  return res.json();
+  return handleAepsResponse(res);
 }

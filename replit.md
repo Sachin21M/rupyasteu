@@ -1,7 +1,7 @@
-# RupyaSetu - Mobile & DTH Recharge App
+# RupyaSetu - Mobile & DTH Recharge + AEPS Banking App
 
 ## Overview
-RupyaSetu is a fintech mobile recharge application built with Expo (React Native) and Express backend. It supports mobile prepaid and DTH recharge with UPI payment integration.
+RupyaSetu is a fintech mobile application built with Expo (React Native) and Express backend. It supports mobile prepaid recharge, DTH recharge with UPI payment integration, and AEPS (Aadhaar Enabled Payment System) banking services.
 
 ## Tech Stack
 - **Frontend**: React Native (Expo Router) + TypeScript
@@ -24,13 +24,17 @@ app/                    # Expo Router screens
   otp.tsx               # OTP verification
   (tabs)/               # Main tab navigation
     _layout.tsx         # Tab bar (Home, History, Profile)
-    index.tsx           # Home dashboard
-    history.tsx         # Transaction history
+    index.tsx           # Home dashboard (Recharge + AEPS sections)
+    history.tsx         # Transaction history (Recharge + AEPS combined)
     profile.tsx         # User profile
   recharge/
     mobile.tsx          # Mobile recharge (operator + number)
     dth.tsx             # DTH recharge (provider + subscriber ID)
     plans.tsx           # Plan selection
+  aeps/
+    index.tsx           # AEPS service selection screen
+    transaction.tsx     # AEPS transaction form (Aadhaar, bank, biometric)
+    result.tsx          # AEPS transaction result display
   payment/
     utr.tsx             # UTR capture (Manual Payment Mode)
     status.tsx          # Transaction status
@@ -39,20 +43,22 @@ contexts/
 constants/
   colors.ts             # Theme colors
 lib/
-  api.ts                # Frontend API client
+  api.ts                # Frontend API client (recharge + AEPS functions)
   query-client.ts       # React Query setup
 server/
   index.ts              # Express server
-  routes.ts             # API routes (auth, recharge, transactions)
-  storage.ts            # PostgreSQL data storage
-  controllers/          # (reserved for future)
+  routes.ts             # API routes (auth, recharge, transactions, AEPS)
+  storage.ts            # PostgreSQL data storage (users, transactions, AEPS tables)
   services/
-    paysprint.ts        # Paysprint API integration (LIVE — AES encrypted, IP BASED auth)
+    paysprint.ts        # Paysprint recharge API integration (LIVE — AES encrypted, IP BASED auth)
+    aeps.ts             # Paysprint AEPS API integration (balance, withdrawal, mini statement, Aadhaar pay)
   utils/
     encryption.ts       # AES encryption, JWT helpers
     validators.ts       # Input validation (UTR, phone, amount)
+  templates/
+    admin-panel.html    # Admin panel with recharge + AEPS transaction views
 shared/
-  schema.ts             # Shared types and Zod schemas
+  schema.ts             # Shared types and Zod schemas (Recharge + AEPS types)
 ```
 
 ## Key Features
@@ -64,7 +70,38 @@ shared/
 6. Web-based Admin Panel at `/admin` for transaction management
 7. Transaction history with status tracking
 8. Paysprint API integration (LIVE environment — AES encrypted, IP BASED auth)
-9. Privacy, Help & Support, About screens
+9. **AEPS Banking** — Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay
+10. AEPS merchant onboarding and daily 2FA authentication
+11. Privacy, Help & Support, About screens
+
+## AEPS (Aadhaar Enabled Payment System)
+### Services
+- **Balance Enquiry**: Check Aadhaar-linked bank account balance
+- **Cash Withdrawal**: Withdraw cash using Aadhaar + biometric
+- **Mini Statement**: View recent bank transactions
+- **Aadhaar Pay**: Make payments using Aadhaar authentication
+
+### Database Tables
+- `aeps_merchants` — Stores merchant KYC status and bank pipe configuration
+- `aeps_daily_auth` — Tracks daily 2FA authentication per user
+- `aeps_transactions` — Records all AEPS transaction history
+
+### API Endpoints
+- `GET /api/aeps/banks` — Get list of AEPS-supported banks
+- `GET /api/aeps/merchant` — Get merchant onboarding/auth status
+- `POST /api/aeps/onboard` — Initiate merchant onboarding
+- `POST /api/aeps/2fa/register` — 2FA registration
+- `POST /api/aeps/2fa/authenticate` — Daily 2FA authentication
+- `POST /api/aeps/transaction` — Execute AEPS transaction
+- `GET /api/aeps/transactions` — Get user's AEPS transaction history
+- `GET /api/admin/aeps-transactions` — Admin: get all AEPS transactions
+
+### Technical Notes
+- AEPS uses 180-second timeout for all API calls
+- Biometric data: XML string from UIDAI-certified RD device (fingerprint/iris)
+- Bank pipe values: bank2, bank3, bank5, bank6 for LIVE (bank1 = UAT only)
+- 2FA: One-time registration + daily authentication required before transactions
+- Runs in simulation mode when JWT token not configured
 
 ## Environment Variables
 - `PAYMENT_MODE` - MANUAL or GATEWAY (default: MANUAL)
@@ -73,6 +110,7 @@ shared/
 - `PAYSPRINT_AUTHORIZED_KEY` - Paysprint auth key
 - `PAYSPRINT_AES_KEY` - AES encryption key
 - `PAYSPRINT_AES_IV` - AES IV
+- `PAYSPRINT_PARTNER_ID` - Paysprint partner/user ID
 - `PAYSPRINT_ENV` - UAT or PRODUCTION
 - `PAYSPRINT_PROXY_URL` - AWS Lambda proxy URL in Mumbai for bypassing Paysprint geo-restriction
 - `PAYSPRINT_BASE_URL` - Paysprint API base URL (default: https://api.paysprint.in/api/v1)
@@ -101,31 +139,27 @@ shared/
 ## Admin Panel
 - URL: `/admin` (served from `server/templates/admin-panel.html`)
 - Login: username/password (env vars ADMIN_USERNAME / ADMIN_PASSWORD)
-- Features: dashboard stats, transaction table with filters (All/Pending/Approved/Rejected), approve/reject buttons, auto-refresh every 30s
-- Admin API: POST `/api/admin/login`, GET `/api/admin/transactions`, POST `/api/admin/transactions/:id/approve`, POST `/api/admin/transactions/:id/reject`
+- Features: dashboard stats, recharge transaction table, AEPS transaction table, approve/reject buttons, auto-refresh every 30s
+- Admin API: POST `/api/admin/login`, GET `/api/admin/transactions`, GET `/api/admin/aeps-transactions`, POST `/api/admin/transactions/:id/approve`, POST `/api/admin/transactions/:id/reject`
 
 ## Paysprint Integration Notes
 - Official docs: https://pay-sprint.readme.io/reference/authentication-1
 - **Environment: LIVE (PRODUCTION)** — switched from SIT/UAT
 - LIVE Base URL: `https://api.paysprint.in/api/v1` (no `service-api/` prefix for LIVE)
-- SIT Base URL was: `https://sit.paysprint.in/service-api/api/v1`
 - JWT payload: `{ timestamp (seconds), partnerId (from PAYSPRINT_PARTNER_ID env var), reqid (unique integer) }`
 - JWT signing: Use raw base64 JWT Token string as HS256 secret (NOT decoded/Buffer)
-- **partnerId**: Must be the Paysprint-assigned user ID from `PAYSPRINT_PARTNER_ID` env var (e.g. `PS006853...`), NOT a custom name
+- **partnerId**: Must be the Paysprint-assigned user ID from `PAYSPRINT_PARTNER_ID` env var
 - Payload format: AES-128-CBC encrypted for PRODUCTION (`{"data":"<encrypted>"}`) — plain JSON for SIT/UAT
 - **AES encryption**: AES-128-CBC with 16-byte key and 16-byte IV from env vars, Base64 output
-- Request body wrapper: `{ "data": "<encrypted_base64>" }`
 - Request header: `Token: <jwt>` (NOT `Authorization: Bearer`)
-- Operator codes: Numeric IDs (14=Jio, 4=Airtel, 33=VI, 8=BSNL, 10=MTNL, 34=Idea)
-- **LIVE account version: IP BASED** — Authorisedkey header must NOT be sent (causes "Invalid Ip" error)
-- For SIT/UAT (IP + Authorised Key based), Authorisedkey IS sent
-- **Geo-restriction**: LIVE API blocks non-Indian IPs via AWS ELB
-- **Solution**: Hostinger proxy in India (static IP `88.222.246.128`) routes Paysprint API calls
+- **LIVE account version: IP BASED** — Authorisedkey header must NOT be sent
+- **Geo-restriction**: LIVE API blocks non-Indian IPs — proxy used
 - Proxy URL: stored in `PAYSPRINT_PROXY_URL` env var
-- The proxy IP must be whitelisted in Paysprint dashboard
 - Paysprint runs in simulation mode when JWT token not configured
-- **Current status**: Authentication WORKING — balance API responds correctly (returns service hours info). Service maintenance window: 23:00–05:30 IST.
+- **Current status**: Authentication WORKING — balance API responds correctly
 
 ## Notes
 - Payment mode is configurable via PAYMENT_MODE env var
 - Code structured for easy gateway integration later
+- AEPS runs in simulation mode when no JWT token is configured
+- Demo login: 7067018549 → OTP 123456

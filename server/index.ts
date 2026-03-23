@@ -221,22 +221,22 @@ function configureExpoAndLanding(app: express.Application) {
 
   if (isDev) {
     const { createProxyMiddleware } = require("http-proxy-middleware");
+    const devProxy = createProxyMiddleware({
+      target: "http://localhost:8081",
+      changeOrigin: true,
+      ws: true,
+      logLevel: "warn",
+      onError: (_err: Error, _req: Request, res: Response) => {
+        if (!res.headersSent) {
+          res.status(502).send("Expo dev server not ready yet. Please wait...");
+        }
+      },
+    });
     app.use((req: Request, res: Response, next: NextFunction) => {
       if (reservedPaths.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
         return next();
       }
-      const proxy = createProxyMiddleware({
-        target: "http://localhost:8081",
-        changeOrigin: true,
-        ws: true,
-        logLevel: "warn",
-        onError: (_err: Error, _req: Request, res: Response) => {
-          if (!res.headersSent) {
-            res.status(502).send("Expo dev server not ready yet. Please wait...");
-          }
-        },
-      });
-      return proxy(req, res, next);
+      return devProxy(req, res, next);
     });
     log("Dev mode: Proxying web requests to Expo dev server on port 8081 (excluding /api, /admin, /download, /manifest)");
   } else if (hasWebBuild) {

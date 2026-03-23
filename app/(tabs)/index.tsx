@@ -16,7 +16,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-import { getTransactions } from "@/lib/api";
+import { getTransactions, getWallet } from "@/lib/api";
 import type { Transaction } from "@/shared/schema";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -86,14 +86,20 @@ export default function HomeScreen() {
     queryFn: getTransactions,
   });
 
+  const { data: walletData, refetch: refetchWallet } = useQuery({
+    queryKey: ["/api/wallet"],
+    queryFn: getWallet,
+  });
+
+  const walletBalance = walletData?.wallet?.balance || 0;
   const transactions: Transaction[] = data?.transactions || [];
   const recentTx = transactions.slice(0, 5);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), refetchWallet()]);
     setRefreshing(false);
-  }, [refetch]);
+  }, [refetch, refetchWallet]);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -127,6 +133,25 @@ export default function HomeScreen() {
           <Ionicons name="flash" size={36} color="rgba(255,255,255,0.9)" />
         </View>
       </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.walletBar, pressed && { opacity: 0.85 }]}
+        onPress={() => router.push("/wallet")}
+      >
+        <View style={styles.walletBarLeft}>
+          <View style={styles.walletBarIcon}>
+            <Ionicons name="wallet" size={18} color={Colors.primary} />
+          </View>
+          <View>
+            <Text style={styles.walletBarLabel}>Wallet Balance</Text>
+            <Text style={styles.walletBarAmount}>₹{walletBalance.toFixed(2)}</Text>
+          </View>
+        </View>
+        <View style={styles.walletBarRight}>
+          <Text style={styles.walletBarAction}>Add Money</Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
+        </View>
+      </Pressable>
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Recharge</Text>
@@ -321,6 +346,51 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginLeft: 16,
+  },
+  walletBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+    marginHorizontal: 16,
+    marginBottom: 20,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.primary + "25",
+  },
+  walletBarLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  walletBarIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  walletBarLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+  },
+  walletBarAmount: {
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+  },
+  walletBarRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  walletBarAction: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.primary,
   },
   sectionHeader: {
     flexDirection: "row",

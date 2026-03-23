@@ -1,4 +1,4 @@
-import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction, AepsApiLog } from "../shared/schema";
+import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction, AepsApiLog, VendorWallet, WalletTransaction, CommissionConfig } from "../shared/schema";
 import { randomUUID } from "crypto";
 import pg from "pg";
 
@@ -87,9 +87,51 @@ async function initAepsTables() {
     for (const q of alterQueries) {
       try { await pool.query(q); } catch {}
     }
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vendor_wallets (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL UNIQUE,
+        balance DECIMAL(12,2) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        balance_before DECIMAL(12,2) NOT NULL DEFAULT 0,
+        balance_after DECIMAL(12,2) NOT NULL DEFAULT 0,
+        reference VARCHAR(100) NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+        utr VARCHAR(30),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wallet_commission_config (
+        service_type VARCHAR(30) PRIMARY KEY,
+        commission_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        commission_type VARCHAR(15) NOT NULL DEFAULT 'FIXED'
+      )
+    `);
+    await pool.query(`
+      INSERT INTO wallet_commission_config (service_type, commission_amount, commission_type)
+      VALUES
+        ('BALANCE_ENQUIRY', 5, 'FIXED'),
+        ('CASH_WITHDRAWAL', 10, 'FIXED'),
+        ('MINI_STATEMENT', 5, 'FIXED'),
+        ('AADHAAR_PAY', 10, 'FIXED'),
+        ('CASH_DEPOSIT', 10, 'FIXED')
+      ON CONFLICT (service_type) DO NOTHING
+    `);
     console.log("AEPS tables initialized successfully");
+    console.log("Wallet tables initialized successfully");
   } catch (err: any) {
-    console.error("Failed to create AEPS tables:", err.message);
+    console.error("Failed to create tables:", err.message);
   }
 }
 
@@ -136,6 +178,18 @@ export interface IStorage {
 
   createAepsApiLog(data: Omit<AepsApiLog, "id" | "createdAt">): Promise<AepsApiLog>;
   getAepsApiLogs(filters?: { endpoint?: string; success?: boolean; fromDate?: string; toDate?: string; limit?: number; offset?: number }): Promise<{ logs: AepsApiLog[]; total: number }>;
+
+  getWallet(userId: string): Promise<VendorWallet | undefined>;
+  getOrCreateWallet(userId: string): Promise<VendorWallet>;
+  getAllWallets(): Promise<(VendorWallet & { phone?: string; name?: string })[]>;
+  updateWalletBalance(userId: string, amount: number): Promise<VendorWallet>;
+  createWalletTransaction(data: Omit<WalletTransaction, "id" | "createdAt">): Promise<WalletTransaction>;
+  getWalletTransaction(id: string): Promise<WalletTransaction | undefined>;
+  updateWalletTransaction(id: string, data: Partial<WalletTransaction>): Promise<WalletTransaction | undefined>;
+  getUserWalletTransactions(userId: string): Promise<WalletTransaction[]>;
+  getPendingWalletRecharges(): Promise<(WalletTransaction & { phone?: string })[]>;
+  getCommissionConfig(): Promise<CommissionConfig[]>;
+  updateCommissionConfig(serviceType: string, amount: number, type: "FIXED" | "PERCENTAGE"): Promise<CommissionConfig>;
 }
 
 const OPERATORS: Operator[] = [
@@ -581,6 +635,148 @@ export class PgStorage implements IStorage {
 
     return { logs: result.rows.map(rowToAepsApiLog), total };
   }
+
+  async getWallet(userId: string): Promise<VendorWallet | undefined> {
+    const result = await pool.query("SELECT * FROM vendor_wallets WHERE user_id = $1", [userId]);
+    return result.rows[0] ? rowToWallet(result.rows[0]) : undefined;
+  }
+
+  async getOrCreateWallet(userId: string): Promise<VendorWallet> {
+    const existing = await this.getWallet(userId);
+    if (existing) return existing;
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO vendor_wallets (id, user_id, balance) VALUES ($1, $2, 0)
+       ON CONFLICT (user_id) DO NOTHING RETURNING *`,
+      [id, userId]
+    );
+    if (result.rows[0]) return rowToWallet(result.rows[0]);
+    return (await this.getWallet(userId))!;
+  }
+
+  async getAllWallets(): Promise<(VendorWallet & { phone?: string; name?: string })[]> {
+    const result = await pool.query(
+      `SELECT w.*, u.phone, u.name FROM vendor_wallets w
+       LEFT JOIN users u ON w.user_id = u.id
+       ORDER BY w.updated_at DESC`
+    );
+    return result.rows.map((row: any) => ({
+      ...rowToWallet(row),
+      phone: row.phone || undefined,
+      name: row.name || undefined,
+    }));
+  }
+
+  async updateWalletBalance(userId: string, amount: number): Promise<VendorWallet> {
+    const result = await pool.query(
+      `UPDATE vendor_wallets SET balance = balance + $1, updated_at = NOW()
+       WHERE user_id = $2 RETURNING *`,
+      [amount, userId]
+    );
+    return rowToWallet(result.rows[0]);
+  }
+
+  async createWalletTransaction(data: Omit<WalletTransaction, "id" | "createdAt">): Promise<WalletTransaction> {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, reference, description, status, utr)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [id, data.userId, data.type, data.amount, data.balanceBefore, data.balanceAfter, data.reference, data.description, data.status, data.utr || null]
+    );
+    return rowToWalletTransaction(result.rows[0]);
+  }
+
+  async getWalletTransaction(id: string): Promise<WalletTransaction | undefined> {
+    const result = await pool.query("SELECT * FROM wallet_transactions WHERE id = $1", [id]);
+    return result.rows[0] ? rowToWalletTransaction(result.rows[0]) : undefined;
+  }
+
+  async updateWalletTransaction(id: string, data: Partial<WalletTransaction>): Promise<WalletTransaction | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+    if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
+    if (data.balanceAfter !== undefined) { fields.push(`balance_after = $${idx++}`); values.push(data.balanceAfter); }
+    if (data.utr !== undefined) { fields.push(`utr = $${idx++}`); values.push(data.utr); }
+    if (fields.length === 0) return this.getWalletTransaction(id);
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE wallet_transactions SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToWalletTransaction(result.rows[0]) : undefined;
+  }
+
+  async getUserWalletTransactions(userId: string): Promise<WalletTransaction[]> {
+    const result = await pool.query(
+      "SELECT * FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    return result.rows.map(rowToWalletTransaction);
+  }
+
+  async getPendingWalletRecharges(): Promise<(WalletTransaction & { phone?: string })[]> {
+    const result = await pool.query(
+      `SELECT wt.*, u.phone FROM wallet_transactions wt
+       LEFT JOIN users u ON wt.user_id = u.id
+       WHERE wt.type = 'RECHARGE' AND wt.status = 'PENDING'
+       ORDER BY wt.created_at DESC`
+    );
+    return result.rows.map((row: any) => ({
+      ...rowToWalletTransaction(row),
+      phone: row.phone || undefined,
+    }));
+  }
+
+  async getCommissionConfig(): Promise<CommissionConfig[]> {
+    const result = await pool.query("SELECT * FROM wallet_commission_config ORDER BY service_type");
+    return result.rows.map(rowToCommissionConfig);
+  }
+
+  async updateCommissionConfig(serviceType: string, amount: number, type: "FIXED" | "PERCENTAGE"): Promise<CommissionConfig> {
+    const result = await pool.query(
+      `INSERT INTO wallet_commission_config (service_type, commission_amount, commission_type)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (service_type) DO UPDATE SET commission_amount = $2, commission_type = $3
+       RETURNING *`,
+      [serviceType, amount, type]
+    );
+    return rowToCommissionConfig(result.rows[0]);
+  }
+}
+
+function rowToWallet(row: any): VendorWallet {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    balance: parseFloat(row.balance),
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  };
+}
+
+function rowToWalletTransaction(row: any): WalletTransaction {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    amount: parseFloat(row.amount),
+    balanceBefore: parseFloat(row.balance_before),
+    balanceAfter: parseFloat(row.balance_after),
+    reference: row.reference,
+    description: row.description,
+    status: row.status,
+    utr: row.utr || undefined,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+  };
+}
+
+function rowToCommissionConfig(row: any): CommissionConfig {
+  return {
+    serviceType: row.service_type,
+    commissionAmount: parseFloat(row.commission_amount),
+    commissionType: row.commission_type,
+  };
 }
 
 function rowToAepsApiLog(row: any): AepsApiLog {

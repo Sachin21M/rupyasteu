@@ -897,6 +897,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Biometric data is required for AEPS transactions." });
       }
 
+      const wallet = await storage.getOrCreateWallet((req as any).userId);
+      const commissionConfigs = await storage.getCommissionConfig();
+      const commissionConfig = commissionConfigs.find(c => c.serviceType === type);
+      const commissionAmount = commissionConfig ? commissionConfig.commissionAmount : 0;
+      const txAmount = amount || 0;
+      const totalDeduction = commissionAmount;
+
+      if (wallet.balance < totalDeduction) {
+        return res.status(400).json({
+          error: `Insufficient wallet balance. Required: ₹${totalDeduction} (Commission: ₹${commissionAmount}). Current balance: ₹${wallet.balance}`,
+          walletBalance: wallet.balance,
+          requiredAmount: totalDeduction,
+          commissionAmount,
+        });
+      }
+
       const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
       const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
       const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -966,12 +982,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const updateData: Record<string, any> = {};
+      let walletDeducted = false;
       if (result.status) {
         updateData.status = "AEPS_SUCCESS";
         updateData.paysprintRefId = result.bankrrn || result.txnid || result.data?.ackno || "";
         if (result.balanceamount) updateData.balance = result.balanceamount;
         if (result.ministatement) updateData.miniStatement = JSON.stringify(result.ministatement);
         updateData.message = result.message;
+
+        if (commissionAmount > 0) {
+          const currentWallet = await storage.getOrCreateWallet((req as any).userId);
+          const newBalance = currentWallet.balance - commissionAmount;
+          await storage.updateWalletBalance((req as any).userId, -commissionAmount);
+          await storage.createWalletTransaction({
+            userId: (req as any).userId,
+            type: "COMMISSION",
+            amount: commissionAmount,
+            balanceBefore: currentWallet.balance,
+            balanceAfter: newBalance,
+            reference: referenceNo,
+            description: `Commission for ${type.replace(/_/g, ' ')} - Ref: ${referenceNo}`,
+            status: "COMPLETED",
+          });
+          walletDeducted = true;
+        }
       } else {
         updateData.status = "AEPS_FAILED";
         updateData.message = result.message;
@@ -986,6 +1020,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         balance: result.balanceamount,
         miniStatement: result.ministatement,
         referenceNo: result.bankrrn || referenceNo,
+        walletDeducted,
+        commissionCharged: walletDeducted ? commissionAmount : 0,
       });
     } catch (error) {
       console.error("AEPS transaction error:", error);
@@ -1106,6 +1142,154 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Failed to delete merchant:", error);
       res.status(500).json({ error: "Failed to delete merchant" });
+    }
+  });
+
+  app.get("/api/wallet", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const wallet = await storage.getOrCreateWallet(userId);
+      const transactions = await storage.getUserWalletTransactions(userId);
+      res.json({ wallet, transactions });
+    } catch (error) {
+      console.error("Failed to fetch wallet:", error);
+      res.status(500).json({ error: "Failed to fetch wallet" });
+    }
+  });
+
+  app.post("/api/wallet/recharge", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { amount, utr } = req.body;
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+      if (!utr || !validateUtr(utr)) {
+        return res.status(400).json({ error: "Invalid UTR number" });
+      }
+      const wallet = await storage.getOrCreateWallet(userId);
+      const walletTx = await storage.createWalletTransaction({
+        userId,
+        type: "RECHARGE",
+        amount,
+        balanceBefore: wallet.balance,
+        balanceAfter: wallet.balance,
+        reference: `WR-${Date.now().toString(36).toUpperCase()}`,
+        description: `Wallet recharge of ₹${amount}`,
+        status: "PENDING",
+        utr,
+      });
+      res.json({
+        success: true,
+        transaction: walletTx,
+        payeeUpiId: PAYEE_UPI_ID,
+        message: "Recharge request submitted. Pending admin approval.",
+      });
+    } catch (error) {
+      console.error("Failed to request wallet recharge:", error);
+      res.status(500).json({ error: "Failed to request wallet recharge" });
+    }
+  });
+
+  app.get("/api/wallet/commission", authMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const config = await storage.getCommissionConfig();
+      res.json({ commission: config });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission config" });
+    }
+  });
+
+  app.get("/api/admin/wallets", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const wallets = await storage.getAllWallets();
+      const pendingRecharges = await storage.getPendingWalletRecharges();
+      res.json({ wallets, pendingRecharges });
+    } catch (error) {
+      console.error("Failed to fetch wallets:", error);
+      res.status(500).json({ error: "Failed to fetch wallets" });
+    }
+  });
+
+  app.post("/api/admin/wallets/:txId/approve", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { txId } = req.params;
+      const { action } = req.body;
+      const walletTx = await storage.getWalletTransaction(txId);
+      if (!walletTx) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+      if (walletTx.status !== "PENDING") {
+        return res.status(400).json({ error: "Transaction already processed" });
+      }
+      if (action === "approve") {
+        const wallet = await storage.getOrCreateWallet(walletTx.userId);
+        const newBalance = wallet.balance + walletTx.amount;
+        await storage.updateWalletBalance(walletTx.userId, walletTx.amount);
+        await storage.updateWalletTransaction(txId, { status: "APPROVED", balanceAfter: newBalance });
+        res.json({ success: true, message: `Approved ₹${walletTx.amount} recharge`, newBalance });
+      } else if (action === "reject") {
+        await storage.updateWalletTransaction(txId, { status: "REJECTED" });
+        res.json({ success: true, message: "Recharge rejected" });
+      } else {
+        res.status(400).json({ error: "Invalid action. Use 'approve' or 'reject'" });
+      }
+    } catch (error) {
+      console.error("Failed to process wallet recharge:", error);
+      res.status(500).json({ error: "Failed to process wallet recharge" });
+    }
+  });
+
+  app.post("/api/admin/wallets/:userId/adjust", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { amount, description } = req.body;
+      if (!amount || typeof amount !== "number") {
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+      const wallet = await storage.getOrCreateWallet(userId);
+      const newBalance = wallet.balance + amount;
+      if (newBalance < 0) {
+        return res.status(400).json({ error: "Insufficient balance for this adjustment" });
+      }
+      await storage.updateWalletBalance(userId, amount);
+      await storage.createWalletTransaction({
+        userId,
+        type: "ADJUSTMENT",
+        amount: Math.abs(amount),
+        balanceBefore: wallet.balance,
+        balanceAfter: newBalance,
+        reference: `ADJ-${Date.now().toString(36).toUpperCase()}`,
+        description: description || `Admin adjustment of ₹${amount}`,
+        status: "COMPLETED",
+      });
+      res.json({ success: true, newBalance, message: `Balance adjusted by ₹${amount}` });
+    } catch (error) {
+      console.error("Failed to adjust wallet:", error);
+      res.status(500).json({ error: "Failed to adjust wallet" });
+    }
+  });
+
+  app.get("/api/admin/commission", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const config = await storage.getCommissionConfig();
+      res.json({ commission: config });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission config" });
+    }
+  });
+
+  app.post("/api/admin/commission", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { serviceType, commissionAmount, commissionType } = req.body;
+      if (!serviceType || commissionAmount === undefined || !commissionType) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      const config = await storage.updateCommissionConfig(serviceType, commissionAmount, commissionType);
+      res.json({ success: true, config });
+    } catch (error) {
+      console.error("Failed to update commission:", error);
+      res.status(500).json({ error: "Failed to update commission" });
     }
   });
 

@@ -57,6 +57,10 @@ function RootLayoutNav() {
         options={{ headerShown: false, animation: "slide_from_right" }}
       />
       <Stack.Screen
+        name="wallet/index"
+        options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
         name="aeps/index"
         options={{ headerShown: false, animation: "slide_from_right" }}
       />

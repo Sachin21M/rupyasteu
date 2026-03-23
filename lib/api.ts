@@ -182,3 +182,21 @@ export async function getAepsTransactions() {
   const res = await authFetch("/api/aeps/transactions");
   return handleAepsResponse(res);
 }
+
+export async function getWallet() {
+  const res = await authFetch("/api/wallet");
+  return handleAepsResponse(res);
+}
+
+export async function requestWalletRecharge(amount: number, utr: string) {
+  const res = await authFetch("/api/wallet/recharge", {
+    method: "POST",
+    body: JSON.stringify({ amount, utr }),
+  });
+  return handleAepsResponse(res);
+}
+
+export async function getCommissionConfig() {
+  const res = await authFetch("/api/wallet/commission");
+  return handleAepsResponse(res);
+}

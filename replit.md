@@ -74,7 +74,8 @@ shared/
 9. **AEPS Banking** — Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay, Cash Deposit
 10. AEPS merchant onboarding and daily 2FA authentication
 11. **Automated Merchant Registration** — Admin can create merchants from admin panel with auto-generated codes (RS-XXXXXX format), Paysprint onboarding API integration, KYC status management
-12. Privacy, Help & Support, About screens
+12. **Vendor Wallet System** — Balance tracking, UPI recharge with admin approval, commission auto-deduction per AEPS transaction, admin wallet management
+13. Privacy, Help & Support, About screens
 
 ## AEPS (Aadhaar Enabled Payment System)
 ### Services
@@ -101,6 +102,21 @@ shared/
 - `POST /api/admin/merchants` — Admin: create merchant (auto-generates RS-XXXXXX code)
 - `PATCH /api/admin/merchants/:id` — Admin: approve/reject merchant KYC
 - `DELETE /api/admin/merchants/:id` — Admin: delete merchant
+
+### Wallet API Endpoints
+- `GET /api/wallet` — Get user's wallet balance + transaction history
+- `POST /api/wallet/recharge` — Request wallet recharge (amount + UTR, pending admin approval)
+- `GET /api/wallet/commission` — Get commission rates per AEPS service type
+- `GET /api/admin/wallets` — Admin: list all wallets + pending recharges
+- `POST /api/admin/wallets/:txId/approve` — Admin: approve/reject wallet recharge
+- `POST /api/admin/wallets/:userId/adjust` — Admin: manual balance adjustment
+- `GET /api/admin/commission` — Admin: view commission config
+- `POST /api/admin/commission` — Admin: update commission config
+
+### Wallet Database Tables
+- `vendor_wallets` — Per-user wallet (id, user_id UNIQUE, balance, timestamps)
+- `wallet_transactions` — All wallet movements (recharge, debit, credit, commission, adjustment)
+- `wallet_commission_config` — Commission per AEPS service type (FIXED or PERCENTAGE)
 
 ### Technical Notes
 - AEPS uses 180-second timeout for all API calls

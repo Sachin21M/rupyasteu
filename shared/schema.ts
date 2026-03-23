@@ -130,6 +130,40 @@ export interface AepsApiLog {
   createdAt: string;
 }
 
+export const walletTransactionTypes = ["RECHARGE", "DEBIT", "CREDIT", "COMMISSION", "ADJUSTMENT"] as const;
+export type WalletTransactionType = typeof walletTransactionTypes[number];
+
+export const walletTxStatuses = ["PENDING", "APPROVED", "REJECTED", "COMPLETED"] as const;
+export type WalletTxStatus = typeof walletTxStatuses[number];
+
+export interface VendorWallet {
+  id: string;
+  userId: string;
+  balance: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WalletTransaction {
+  id: string;
+  userId: string;
+  type: WalletTransactionType;
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  reference: string;
+  description: string;
+  status: WalletTxStatus;
+  utr?: string;
+  createdAt: string;
+}
+
+export interface CommissionConfig {
+  serviceType: string;
+  commissionAmount: number;
+  commissionType: "FIXED" | "PERCENTAGE";
+}
+
 export const sendOtpSchema = z.object({
   phone: phoneSchema,
 });

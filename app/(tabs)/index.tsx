@@ -113,7 +113,7 @@ export default function HomeScreen() {
 
       <View style={styles.bannerCard}>
         <View style={styles.bannerContent}>
-          <Text style={styles.bannerTitle}>RupyaSetu Services</Text>
+          <Text style={styles.bannerTitle} numberOfLines={1}>RupyaSetu Services</Text>
           <Text style={styles.bannerSubtitle}>
             Recharge, banking & payments — all in one place
           </Text>

@@ -1,5 +1,11 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
@@ -84,8 +90,12 @@ async function initAepsTables() {
         id VARCHAR(64) PRIMARY KEY,
         user_id VARCHAR(64) NOT NULL,
         merchant_code VARCHAR(64) NOT NULL DEFAULT '',
+        phone VARCHAR(15) NOT NULL DEFAULT '',
+        firm_name VARCHAR(100) NOT NULL DEFAULT '',
         kyc_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
         bank_pipes TEXT NOT NULL DEFAULT '{}',
+        kyc_redirect_url TEXT,
+        created_by VARCHAR(20) DEFAULT 'self',
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
@@ -140,9 +150,63 @@ async function initAepsTables() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_aeps_api_logs_endpoint ON aeps_api_logs(endpoint)
     `);
+    const alterQueries = [
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS phone VARCHAR(15) NOT NULL DEFAULT ''",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS firm_name VARCHAR(100) NOT NULL DEFAULT ''",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS kyc_redirect_url TEXT",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS created_by VARCHAR(20) DEFAULT 'self'"
+    ];
+    for (const q of alterQueries) {
+      try {
+        await pool.query(q);
+      } catch {
+      }
+    }
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vendor_wallets (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL UNIQUE,
+        balance DECIMAL(12,2) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        balance_before DECIMAL(12,2) NOT NULL DEFAULT 0,
+        balance_after DECIMAL(12,2) NOT NULL DEFAULT 0,
+        reference VARCHAR(100) NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+        utr VARCHAR(30),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wallet_commission_config (
+        service_type VARCHAR(30) PRIMARY KEY,
+        commission_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        commission_type VARCHAR(15) NOT NULL DEFAULT 'FIXED'
+      )
+    `);
+    await pool.query(`
+      INSERT INTO wallet_commission_config (service_type, commission_amount, commission_type)
+      VALUES
+        ('BALANCE_ENQUIRY', 5, 'FIXED'),
+        ('CASH_WITHDRAWAL', 10, 'FIXED'),
+        ('MINI_STATEMENT', 5, 'FIXED'),
+        ('AADHAAR_PAY', 10, 'FIXED'),
+        ('CASH_DEPOSIT', 10, 'FIXED')
+      ON CONFLICT (service_type) DO NOTHING
+    `);
     console.log("AEPS tables initialized successfully");
+    console.log("Wallet tables initialized successfully");
   } catch (err) {
-    console.error("Failed to create AEPS tables:", err.message);
+    console.error("Failed to create tables:", err.message);
   }
 }
 initAepsTables();
@@ -218,8 +282,12 @@ function rowToAepsMerchant(row) {
     id: row.id,
     userId: row.user_id,
     merchantCode: row.merchant_code,
+    phone: row.phone || "",
+    firmName: row.firm_name || "",
     kycStatus: row.kyc_status,
     bankPipes: row.bank_pipes,
+    kycRedirectUrl: row.kyc_redirect_url || void 0,
+    createdBy: row.created_by || "self",
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at
   };
@@ -394,12 +462,24 @@ var PgStorage = class {
     const result = await pool.query("SELECT * FROM aeps_merchants WHERE user_id = $1", [userId]);
     return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : void 0;
   }
-  async createAepsMerchant(userId, merchantCode, bankPipes) {
+  async getAepsMerchantByPhone(phone) {
+    const result = await pool.query("SELECT * FROM aeps_merchants WHERE phone = $1", [phone]);
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : void 0;
+  }
+  async getAepsMerchantById(id) {
+    const result = await pool.query("SELECT * FROM aeps_merchants WHERE id = $1", [id]);
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : void 0;
+  }
+  async getAllAepsMerchants() {
+    const result = await pool.query("SELECT * FROM aeps_merchants ORDER BY created_at DESC");
+    return result.rows.map(rowToAepsMerchant);
+  }
+  async createAepsMerchant(userId, merchantCode, bankPipes, extra) {
     const id = randomUUID();
     const result = await pool.query(
-      `INSERT INTO aeps_merchants (id, user_id, merchant_code, kyc_status, bank_pipes)
-       VALUES ($1, $2, $3, 'PENDING', $4) RETURNING *`,
-      [id, userId, merchantCode, bankPipes]
+      `INSERT INTO aeps_merchants (id, user_id, merchant_code, phone, firm_name, kyc_status, bank_pipes, kyc_redirect_url, created_by)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8) RETURNING *`,
+      [id, userId, merchantCode, extra?.phone || "", extra?.firmName || "", bankPipes, extra?.kycRedirectUrl || null, extra?.createdBy || "self"]
     );
     return rowToAepsMerchant(result.rows[0]);
   }
@@ -419,6 +499,18 @@ var PgStorage = class {
       fields.push(`bank_pipes = $${idx++}`);
       values.push(data.bankPipes);
     }
+    if (data.phone !== void 0) {
+      fields.push(`phone = $${idx++}`);
+      values.push(data.phone);
+    }
+    if (data.firmName !== void 0) {
+      fields.push(`firm_name = $${idx++}`);
+      values.push(data.firmName);
+    }
+    if (data.kycRedirectUrl !== void 0) {
+      fields.push(`kyc_redirect_url = $${idx++}`);
+      values.push(data.kycRedirectUrl);
+    }
     if (fields.length === 0) return this.getAepsMerchant(userId);
     fields.push(`updated_at = NOW()`);
     values.push(userId);
@@ -427,6 +519,10 @@ var PgStorage = class {
       values
     );
     return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : void 0;
+  }
+  async deleteAepsMerchant(id) {
+    const result = await pool.query("DELETE FROM aeps_merchants WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
   async getAepsDailyAuth(userId, date) {
     const result = await pool.query(
@@ -546,7 +642,144 @@ var PgStorage = class {
     );
     return { logs: result.rows.map(rowToAepsApiLog), total };
   }
+  async getWallet(userId) {
+    const result = await pool.query("SELECT * FROM vendor_wallets WHERE user_id = $1", [userId]);
+    return result.rows[0] ? rowToWallet(result.rows[0]) : void 0;
+  }
+  async getOrCreateWallet(userId) {
+    const existing = await this.getWallet(userId);
+    if (existing) return existing;
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO vendor_wallets (id, user_id, balance) VALUES ($1, $2, 0)
+       ON CONFLICT (user_id) DO NOTHING RETURNING *`,
+      [id, userId]
+    );
+    if (result.rows[0]) return rowToWallet(result.rows[0]);
+    return await this.getWallet(userId);
+  }
+  async getAllWallets() {
+    const result = await pool.query(
+      `SELECT w.*, u.phone, u.name FROM vendor_wallets w
+       LEFT JOIN users u ON w.user_id = u.id
+       ORDER BY w.updated_at DESC`
+    );
+    return result.rows.map((row) => ({
+      ...rowToWallet(row),
+      phone: row.phone || void 0,
+      name: row.name || void 0
+    }));
+  }
+  async updateWalletBalance(userId, amount) {
+    const result = await pool.query(
+      `UPDATE vendor_wallets SET balance = balance + $1, updated_at = NOW()
+       WHERE user_id = $2 RETURNING *`,
+      [amount, userId]
+    );
+    return rowToWallet(result.rows[0]);
+  }
+  async createWalletTransaction(data) {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO wallet_transactions (id, user_id, type, amount, balance_before, balance_after, reference, description, status, utr)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [id, data.userId, data.type, data.amount, data.balanceBefore, data.balanceAfter, data.reference, data.description, data.status, data.utr || null]
+    );
+    return rowToWalletTransaction(result.rows[0]);
+  }
+  async getWalletTransaction(id) {
+    const result = await pool.query("SELECT * FROM wallet_transactions WHERE id = $1", [id]);
+    return result.rows[0] ? rowToWalletTransaction(result.rows[0]) : void 0;
+  }
+  async updateWalletTransaction(id, data) {
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (data.status !== void 0) {
+      fields.push(`status = $${idx++}`);
+      values.push(data.status);
+    }
+    if (data.balanceAfter !== void 0) {
+      fields.push(`balance_after = $${idx++}`);
+      values.push(data.balanceAfter);
+    }
+    if (data.utr !== void 0) {
+      fields.push(`utr = $${idx++}`);
+      values.push(data.utr);
+    }
+    if (fields.length === 0) return this.getWalletTransaction(id);
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE wallet_transactions SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
+      values
+    );
+    return result.rows[0] ? rowToWalletTransaction(result.rows[0]) : void 0;
+  }
+  async getUserWalletTransactions(userId) {
+    const result = await pool.query(
+      "SELECT * FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    return result.rows.map(rowToWalletTransaction);
+  }
+  async getPendingWalletRecharges() {
+    const result = await pool.query(
+      `SELECT wt.*, u.phone FROM wallet_transactions wt
+       LEFT JOIN users u ON wt.user_id = u.id
+       WHERE wt.type = 'RECHARGE' AND wt.status = 'PENDING'
+       ORDER BY wt.created_at DESC`
+    );
+    return result.rows.map((row) => ({
+      ...rowToWalletTransaction(row),
+      phone: row.phone || void 0
+    }));
+  }
+  async getCommissionConfig() {
+    const result = await pool.query("SELECT * FROM wallet_commission_config ORDER BY service_type");
+    return result.rows.map(rowToCommissionConfig);
+  }
+  async updateCommissionConfig(serviceType, amount, type) {
+    const result = await pool.query(
+      `INSERT INTO wallet_commission_config (service_type, commission_amount, commission_type)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (service_type) DO UPDATE SET commission_amount = $2, commission_type = $3
+       RETURNING *`,
+      [serviceType, amount, type]
+    );
+    return rowToCommissionConfig(result.rows[0]);
+  }
 };
+function rowToWallet(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    balance: parseFloat(row.balance),
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at
+  };
+}
+function rowToWalletTransaction(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    amount: parseFloat(row.amount),
+    balanceBefore: parseFloat(row.balance_before),
+    balanceAfter: parseFloat(row.balance_after),
+    reference: row.reference,
+    description: row.description,
+    status: row.status,
+    utr: row.utr || void 0,
+    createdAt: row.created_at?.toISOString?.() || row.created_at
+  };
+}
+function rowToCommissionConfig(row) {
+  return {
+    serviceType: row.service_type,
+    commissionAmount: parseFloat(row.commission_amount),
+    commissionType: row.commission_type
+  };
+}
 function rowToAepsApiLog(row) {
   return {
     id: row.id,
@@ -1348,7 +1581,9 @@ async function generateAepsReport() {
     const jwtConfigured = !!process.env.PAYSPRINT_JWT_TOKEN;
     const envLabel = jwtConfigured ? `Environment: ${process.env.PAYSPRINT_ENV || "PRODUCTION"} (LIVE API)` : "Environment: SIMULATION MODE (JWT not configured)";
     doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF").text(envLabel, 0, 380, { align: "center", width: doc.page.width });
-    doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF").text(`Total API Calls Logged: ${data.totalLogs}`, 0, 405, { align: "center", width: doc.page.width });
+    const maskedPartner = process.env.PAYSPRINT_PARTNER_ID ? "Partner ID: ***" + (process.env.PAYSPRINT_PARTNER_ID || "").slice(-4) : "Partner ID: Not configured";
+    doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF").text(maskedPartner, 0, 405, { align: "center", width: doc.page.width });
+    doc.fontSize(11).font("Helvetica").fillColor("#FFFFFF").text(`Total API Calls Logged: ${data.totalLogs}`, 0, 430, { align: "center", width: doc.page.width });
     doc.fontSize(10).font("Helvetica").fillColor("#FFFFFF").text("Confidential - For Internal Use Only", 0, 700, { align: "center", width: doc.page.width });
     doc.addPage();
     y = drawHeader(doc, 0);
@@ -1554,6 +1789,12 @@ async function generateAepsReport() {
     for (const [label, desc] of adminItems) {
       y = drawKeyValue(doc, label, desc, 50, y, 450);
     }
+    y = drawSectionTitle(doc, "8. UAT / Biometric Testing Note", y);
+    y = drawKeyValue(doc, "Non-biometric endpoints", "Bank List and Transaction Status \u2014 tested live in this report", 50, y, 450);
+    y = drawKeyValue(doc, "Biometric endpoints", "Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay, Cash Deposit, 2FA KYC \u2014 require UIDAI-certified RD device with real Aadhaar biometric data", 50, y, 450);
+    y = drawKeyValue(doc, "UAT Plan", "Biometric-dependent endpoints will be tested during UAT with the Paysprint team using a certified RD device and live Aadhaar authentication", 50, y, 450);
+    y = drawKeyValue(doc, "Supported Pipes", "bank2, bank3, bank5, bank6 (LIVE); bank1 (UAT only)", 50, y, 450);
+    y += 10;
     doc.fontSize(8).font("Helvetica").fillColor(GRAY_TEXT).text(
       `RupyaSetu AEPS Report | Generated ${new Date(data.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} | Confidential`,
       50,
@@ -2246,9 +2487,13 @@ async function registerRoutes(app2) {
       if (result.status && result.data?.redirecturl) {
         const merchant = await storage.getAepsMerchant(req.userId);
         if (!merchant) {
-          await storage.createAepsMerchant(req.userId, merchantCode, "bank2");
+          await storage.createAepsMerchant(req.userId, merchantCode, "bank2", {
+            phone: user.phone,
+            createdBy: "self",
+            kycRedirectUrl: result.data.redirecturl
+          });
         } else {
-          await storage.updateAepsMerchant(req.userId, { merchantCode, kycStatus: "PENDING" });
+          await storage.updateAepsMerchant(req.userId, { merchantCode, kycStatus: "PENDING", kycRedirectUrl: result.data.redirecturl });
         }
         res.json({ success: true, redirectUrl: result.data.redirecturl });
       } else {
@@ -2383,6 +2628,20 @@ async function registerRoutes(app2) {
       if (!fingerprintData) {
         return res.status(400).json({ error: "Biometric data is required for AEPS transactions." });
       }
+      const wallet = await storage.getOrCreateWallet(req.userId);
+      const commissionConfigs = await storage.getCommissionConfig();
+      const commissionConfig = commissionConfigs.find((c) => c.serviceType === type);
+      const commissionAmount = commissionConfig ? commissionConfig.commissionAmount : 0;
+      const txAmount = amount || 0;
+      const totalDeduction = commissionAmount;
+      if (wallet.balance < totalDeduction) {
+        return res.status(400).json({
+          error: `Insufficient wallet balance. Required: \u20B9${totalDeduction} (Commission: \u20B9${commissionAmount}). Current balance: \u20B9${wallet.balance}`,
+          walletBalance: wallet.balance,
+          requiredAmount: totalDeduction,
+          commissionAmount
+        });
+      }
       const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
       const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
       const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -2448,12 +2707,29 @@ async function registerRoutes(app2) {
           return res.status(400).json({ error: "Invalid transaction type" });
       }
       const updateData = {};
+      let walletDeducted = false;
       if (result.status) {
         updateData.status = "AEPS_SUCCESS";
         updateData.paysprintRefId = result.bankrrn || result.txnid || result.data?.ackno || "";
         if (result.balanceamount) updateData.balance = result.balanceamount;
         if (result.ministatement) updateData.miniStatement = JSON.stringify(result.ministatement);
         updateData.message = result.message;
+        if (commissionAmount > 0) {
+          const currentWallet = await storage.getOrCreateWallet(req.userId);
+          const newBalance = currentWallet.balance - commissionAmount;
+          await storage.updateWalletBalance(req.userId, -commissionAmount);
+          await storage.createWalletTransaction({
+            userId: req.userId,
+            type: "COMMISSION",
+            amount: commissionAmount,
+            balanceBefore: currentWallet.balance,
+            balanceAfter: newBalance,
+            reference: referenceNo,
+            description: `Commission for ${type.replace(/_/g, " ")} - Ref: ${referenceNo}`,
+            status: "COMPLETED"
+          });
+          walletDeducted = true;
+        }
       } else {
         updateData.status = "AEPS_FAILED";
         updateData.message = result.message;
@@ -2465,7 +2741,9 @@ async function registerRoutes(app2) {
         message: result.message,
         balance: result.balanceamount,
         miniStatement: result.ministatement,
-        referenceNo: result.bankrrn || referenceNo
+        referenceNo: result.bankrrn || referenceNo,
+        walletDeducted,
+        commissionCharged: walletDeducted ? commissionAmount : 0
       });
     } catch (error) {
       console.error("AEPS transaction error:", error);
@@ -2479,6 +2757,238 @@ async function registerRoutes(app2) {
       res.json({ transactions });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch AEPS transactions" });
+    }
+  });
+  app2.get("/api/admin/merchants", adminAuthMiddleware, async (_req, res) => {
+    try {
+      const merchants = await storage.getAllAepsMerchants();
+      const enriched = await Promise.all(
+        merchants.map(async (m) => {
+          const user = await storage.getUser(m.userId);
+          return { ...m, userPhone: user?.phone || m.phone || "Unknown", userName: user?.name || "" };
+        })
+      );
+      res.json({ merchants: enriched });
+    } catch (error) {
+      console.error("Failed to fetch merchants:", error);
+      res.status(500).json({ error: "Failed to fetch merchants" });
+    }
+  });
+  app2.post("/api/admin/merchants", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { phone, firmName } = req.body;
+      if (!phone || !firmName) {
+        return res.status(400).json({ error: "Phone and firm name are required" });
+      }
+      const phoneClean = phone.replace(/\D/g, "").slice(-10);
+      if (!/^[6-9]\d{9}$/.test(phoneClean)) {
+        return res.status(400).json({ error: "Invalid Indian mobile number" });
+      }
+      const existing = await storage.getAepsMerchantByPhone(phoneClean);
+      if (existing) {
+        return res.status(409).json({ error: "A merchant with this phone number already exists" });
+      }
+      let user = await storage.getUserByPhone(phoneClean);
+      if (!user) {
+        user = await storage.createUser(phoneClean);
+      }
+      const existingByUser = await storage.getAepsMerchant(user.id);
+      if (existingByUser) {
+        return res.status(409).json({ error: "This user is already registered as a merchant" });
+      }
+      const merchantCode = "RS-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      let kycRedirectUrl = "";
+      try {
+        const onboardResult = await getOnboardingUrl({
+          merchantCode,
+          mobile: phoneClean,
+          email: "",
+          firm: firmName
+        });
+        if (onboardResult.status && onboardResult.data?.redirecturl) {
+          kycRedirectUrl = onboardResult.data.redirecturl;
+        }
+      } catch (err) {
+        console.error("Paysprint onboarding call failed:", err.message);
+      }
+      const merchant = await storage.createAepsMerchant(user.id, merchantCode, "bank2", {
+        phone: phoneClean,
+        firmName,
+        kycRedirectUrl,
+        createdBy: "admin"
+      });
+      res.json({ success: true, merchant });
+    } catch (error) {
+      console.error("Failed to create merchant:", error);
+      res.status(500).json({ error: "Failed to create merchant" });
+    }
+  });
+  app2.patch("/api/admin/merchants/:id", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { kycStatus } = req.body;
+      const merchant = await storage.getAepsMerchantById(id);
+      if (!merchant) {
+        return res.status(404).json({ error: "Merchant not found" });
+      }
+      const updated = await storage.updateAepsMerchant(merchant.userId, { kycStatus });
+      res.json({ success: true, merchant: updated });
+    } catch (error) {
+      console.error("Failed to update merchant:", error);
+      res.status(500).json({ error: "Failed to update merchant" });
+    }
+  });
+  app2.delete("/api/admin/merchants/:id", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = await storage.deleteAepsMerchant(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Merchant not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Failed to delete merchant:", error);
+      res.status(500).json({ error: "Failed to delete merchant" });
+    }
+  });
+  app2.get("/api/wallet", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.userId;
+      const wallet = await storage.getOrCreateWallet(userId);
+      const transactions = await storage.getUserWalletTransactions(userId);
+      res.json({ wallet, transactions });
+    } catch (error) {
+      console.error("Failed to fetch wallet:", error);
+      res.status(500).json({ error: "Failed to fetch wallet" });
+    }
+  });
+  app2.post("/api/wallet/recharge", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.userId;
+      const { amount, utr } = req.body;
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+      if (!utr || !validateUtr(utr)) {
+        return res.status(400).json({ error: "Invalid UTR number" });
+      }
+      const wallet = await storage.getOrCreateWallet(userId);
+      const walletTx = await storage.createWalletTransaction({
+        userId,
+        type: "RECHARGE",
+        amount,
+        balanceBefore: wallet.balance,
+        balanceAfter: wallet.balance,
+        reference: `WR-${Date.now().toString(36).toUpperCase()}`,
+        description: `Wallet recharge of \u20B9${amount}`,
+        status: "PENDING",
+        utr
+      });
+      res.json({
+        success: true,
+        transaction: walletTx,
+        payeeUpiId: PAYEE_UPI_ID,
+        message: "Recharge request submitted. Pending admin approval."
+      });
+    } catch (error) {
+      console.error("Failed to request wallet recharge:", error);
+      res.status(500).json({ error: "Failed to request wallet recharge" });
+    }
+  });
+  app2.get("/api/wallet/commission", authMiddleware, async (_req, res) => {
+    try {
+      const config = await storage.getCommissionConfig();
+      res.json({ commission: config });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission config" });
+    }
+  });
+  app2.get("/api/admin/wallets", adminAuthMiddleware, async (_req, res) => {
+    try {
+      const wallets = await storage.getAllWallets();
+      const pendingRecharges = await storage.getPendingWalletRecharges();
+      res.json({ wallets, pendingRecharges });
+    } catch (error) {
+      console.error("Failed to fetch wallets:", error);
+      res.status(500).json({ error: "Failed to fetch wallets" });
+    }
+  });
+  app2.post("/api/admin/wallets/:txId/approve", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { txId } = req.params;
+      const { action } = req.body;
+      const walletTx = await storage.getWalletTransaction(txId);
+      if (!walletTx) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+      if (walletTx.status !== "PENDING") {
+        return res.status(400).json({ error: "Transaction already processed" });
+      }
+      if (action === "approve") {
+        const wallet = await storage.getOrCreateWallet(walletTx.userId);
+        const newBalance = wallet.balance + walletTx.amount;
+        await storage.updateWalletBalance(walletTx.userId, walletTx.amount);
+        await storage.updateWalletTransaction(txId, { status: "APPROVED", balanceAfter: newBalance });
+        res.json({ success: true, message: `Approved \u20B9${walletTx.amount} recharge`, newBalance });
+      } else if (action === "reject") {
+        await storage.updateWalletTransaction(txId, { status: "REJECTED" });
+        res.json({ success: true, message: "Recharge rejected" });
+      } else {
+        res.status(400).json({ error: "Invalid action. Use 'approve' or 'reject'" });
+      }
+    } catch (error) {
+      console.error("Failed to process wallet recharge:", error);
+      res.status(500).json({ error: "Failed to process wallet recharge" });
+    }
+  });
+  app2.post("/api/admin/wallets/:userId/adjust", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { amount, description } = req.body;
+      if (!amount || typeof amount !== "number") {
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+      const wallet = await storage.getOrCreateWallet(userId);
+      const newBalance = wallet.balance + amount;
+      if (newBalance < 0) {
+        return res.status(400).json({ error: "Insufficient balance for this adjustment" });
+      }
+      await storage.updateWalletBalance(userId, amount);
+      await storage.createWalletTransaction({
+        userId,
+        type: "ADJUSTMENT",
+        amount: Math.abs(amount),
+        balanceBefore: wallet.balance,
+        balanceAfter: newBalance,
+        reference: `ADJ-${Date.now().toString(36).toUpperCase()}`,
+        description: description || `Admin adjustment of \u20B9${amount}`,
+        status: "COMPLETED"
+      });
+      res.json({ success: true, newBalance, message: `Balance adjusted by \u20B9${amount}` });
+    } catch (error) {
+      console.error("Failed to adjust wallet:", error);
+      res.status(500).json({ error: "Failed to adjust wallet" });
+    }
+  });
+  app2.get("/api/admin/commission", adminAuthMiddleware, async (_req, res) => {
+    try {
+      const config = await storage.getCommissionConfig();
+      res.json({ commission: config });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission config" });
+    }
+  });
+  app2.post("/api/admin/commission", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { serviceType, commissionAmount, commissionType } = req.body;
+      if (!serviceType || commissionAmount === void 0 || !commissionType) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      const config = await storage.updateCommissionConfig(serviceType, commissionAmount, commissionType);
+      res.json({ success: true, config });
+    } catch (error) {
+      console.error("Failed to update commission:", error);
+      res.status(500).json({ error: "Failed to update commission" });
     }
   });
   app2.get("/api/admin/aeps-transactions", adminAuthMiddleware, async (_req, res) => {
@@ -2687,7 +3197,11 @@ function configureExpoAndLanding(app2) {
   );
   const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
   const appName = getAppName();
+  const isDev = process.env.NODE_ENV !== "production";
+  const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
+  const hasWebBuild = fs.existsSync(path.join(webBuildDir, "index.html"));
   log("Serving static Expo files with dynamic manifest routing");
+  log(`Web build available: ${hasWebBuild}, Dev mode: ${isDev}`);
   app2.use((req, res, next) => {
     if (req.path.startsWith("/api")) {
       return next();
@@ -2699,14 +3213,7 @@ function configureExpoAndLanding(app2) {
         return res.status(200).send(fs.readFileSync(adminPath, "utf-8"));
       }
     }
-    if (req.path !== "/" && req.path !== "/manifest") {
-      return next();
-    }
-    const platform = req.header("expo-platform");
-    if (platform && (platform === "ios" || platform === "android")) {
-      return serveExpoManifest(platform, res);
-    }
-    if (req.path === "/") {
+    if (req.path === "/download") {
       return serveLandingPage({
         req,
         res,
@@ -2714,11 +3221,54 @@ function configureExpoAndLanding(app2) {
         appName
       });
     }
+    if (req.path === "/" || req.path === "/manifest") {
+      const platform = req.header("expo-platform");
+      if (platform && (platform === "ios" || platform === "android")) {
+        return serveExpoManifest(platform, res);
+      }
+    }
     next();
   });
   app2.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app2.use(express.static(path.resolve(process.cwd(), "static-build")));
-  log("Expo routing: Checking expo-platform header on / and /manifest");
+  if (hasWebBuild) {
+    app2.use(express.static(webBuildDir));
+  }
+  const reservedPaths = ["/api", "/admin", "/download", "/manifest"];
+  if (isDev) {
+    const { createProxyMiddleware } = __require("http-proxy-middleware");
+    const devProxy = createProxyMiddleware({
+      target: "http://localhost:8081",
+      changeOrigin: true,
+      ws: true,
+      logLevel: "warn",
+      onError: (_err, _req, res) => {
+        if (!res.headersSent) {
+          res.status(502).send("Expo dev server not ready yet. Please wait...");
+        }
+      }
+    });
+    app2.use((req, res, next) => {
+      if (reservedPaths.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
+        return next();
+      }
+      return devProxy(req, res, next);
+    });
+    log("Dev mode: Proxying web requests to Expo dev server on port 8081 (excluding /api, /admin, /download, /manifest)");
+  } else if (hasWebBuild) {
+    app2.get("*", (req, res, next) => {
+      if (reservedPaths.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
+        return next();
+      }
+      const filePath = path.join(webBuildDir, req.path);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        return next();
+      }
+      res.sendFile(path.join(webBuildDir, "index.html"));
+    });
+    log("Production: Serving web build with SPA fallback");
+  }
+  log("Expo routing configured");
 }
 function setupErrorHandler(app2) {
   app2.use((err, _req, res, next) => {

@@ -240,7 +240,7 @@ function configureExpoAndLanding(app: express.Application) {
     });
     log("Dev mode: Proxying web requests to Expo dev server on port 8081 (excluding /api, /admin, /download, /manifest)");
   } else if (hasWebBuild) {
-    app.get("*", (req: Request, res: Response, next: NextFunction) => {
+    app.get("/{*path}", (req: Request, res: Response, next: NextFunction) => {
       if (reservedPaths.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
         return next();
       }

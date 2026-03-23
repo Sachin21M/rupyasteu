@@ -169,7 +169,14 @@ function configureExpoAndLanding(app: express.Application) {
     "templates",
     "landing-page.html",
   );
+  const websitePath = path.resolve(
+    process.cwd(),
+    "server",
+    "templates",
+    "website.html",
+  );
   const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
+  const websiteTemplate = fs.readFileSync(websitePath, "utf-8");
   const appName = getAppName();
   const isDev = process.env.NODE_ENV !== "production";
   const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
@@ -205,6 +212,11 @@ function configureExpoAndLanding(app: express.Application) {
       if (platform && (platform === "ios" || platform === "android")) {
         return serveExpoManifest(platform, res);
       }
+    }
+
+    if (req.path === "/") {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(200).send(websiteTemplate);
     }
 
     next();

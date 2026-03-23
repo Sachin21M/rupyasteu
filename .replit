@@ -7,7 +7,7 @@ channel = "stable-24_05"
 [deployment]
 deploymentTarget = "autoscale"
 build = ["sh", "-c", "npm run expo:static:build && npm run server:build"]
-run = ["sh", "-c", "PORT=80 npm run server:prod"]
+run = ["npm", "run", "server:prod"]
 
 [[ports]]
 localPort = 5000
@@ -66,3 +66,5 @@ PAYSPRINT_PROXY_URL = "https://peru-mosquito-831403.hostingersite.com/"
 
 [userenv.production]
 EXPO_PUBLIC_DOMAIN = "rupyasetuadmin.site"
+
+[userenv.development]

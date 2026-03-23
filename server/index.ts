@@ -290,7 +290,8 @@ function setupErrorHandler(app: express.Application) {
 
   setupErrorHandler(app);
 
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const isDeployment = process.env.NODE_ENV === "production" && process.env.REPLIT_DEPLOYMENT === "1";
+  const port = isDeployment ? 80 : parseInt(process.env.PORT || "5000", 10);
   server.listen(
     {
       port,

@@ -496,6 +496,83 @@ function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
   console.log("Manifests updated");
 }
 
+async function buildWebExport(domain) {
+  console.log("Building Expo web export...");
+
+  if (metroProcess) {
+    console.log("Stopping Metro before web export...");
+    metroProcess.kill();
+    metroProcess = null;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  const webDistDir = path.join("static-build", "web");
+  if (fs.existsSync(webDistDir)) {
+    fs.rmSync(webDistDir, { recursive: true });
+  }
+
+  return new Promise((resolve, reject) => {
+    const env = {
+      ...process.env,
+      EXPO_PUBLIC_DOMAIN: domain,
+      NODE_ENV: "production",
+    };
+
+    const exportProcess = spawn(
+      "npx",
+      ["expo", "export", "--platform", "web", "--output-dir", webDistDir, "--clear"],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+        cwd: process.cwd(),
+      },
+    );
+
+    let stderr = "";
+
+    if (exportProcess.stdout) {
+      exportProcess.stdout.on("data", (data) => {
+        const output = data.toString().trim();
+        if (output) console.log(`[Web Export] ${output}`);
+      });
+    }
+    if (exportProcess.stderr) {
+      exportProcess.stderr.on("data", (data) => {
+        const output = data.toString().trim();
+        if (output) {
+          console.error(`[Web Export] ${output}`);
+          stderr += output + "\n";
+        }
+      });
+    }
+
+    exportProcess.on("close", (code) => {
+      if (code !== 0) {
+        console.error(`Web export failed with code ${code}`);
+        reject(new Error(`Web export failed: ${stderr}`));
+        return;
+      }
+
+      if (!fs.existsSync(path.join(webDistDir, "index.html"))) {
+        reject(new Error("Web export succeeded but no index.html found"));
+        return;
+      }
+
+      console.log("Web export complete");
+      resolve();
+    });
+
+    exportProcess.on("error", (err) => {
+      reject(new Error(`Failed to start web export: ${err.message}`));
+    });
+
+    setTimeout(() => {
+      exportProcess.kill();
+      reject(new Error("Web export timed out after 5 minutes"));
+    }, 300000);
+  });
+}
+
 async function main() {
   console.log("Building static Expo Go deployment...");
 
@@ -545,6 +622,9 @@ async function main() {
 
   console.log("Updating manifests and creating landing page...");
   updateManifests(manifests, timestamp, baseUrl, assetsByHash);
+
+  console.log("Native builds complete. Building web export...");
+  await buildWebExport(domain);
 
   console.log("Build complete! Deploy to:", baseUrl);
 

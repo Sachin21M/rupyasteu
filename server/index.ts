@@ -171,8 +171,12 @@ function configureExpoAndLanding(app: express.Application) {
   );
   const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
   const appName = getAppName();
+  const isDev = process.env.NODE_ENV !== "production";
+  const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
+  const hasWebBuild = fs.existsSync(path.join(webBuildDir, "index.html"));
 
   log("Serving static Expo files with dynamic manifest routing");
+  log(`Web build available: ${hasWebBuild}, Dev mode: ${isDev}`);
 
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith("/api")) {
@@ -187,16 +191,7 @@ function configureExpoAndLanding(app: express.Application) {
       }
     }
 
-    if (req.path !== "/" && req.path !== "/manifest") {
-      return next();
-    }
-
-    const platform = req.header("expo-platform");
-    if (platform && (platform === "ios" || platform === "android")) {
-      return serveExpoManifest(platform, res);
-    }
-
-    if (req.path === "/") {
+    if (req.path === "/download") {
       return serveLandingPage({
         req,
         res,
@@ -205,13 +200,45 @@ function configureExpoAndLanding(app: express.Application) {
       });
     }
 
+    if (req.path === "/" || req.path === "/manifest") {
+      const platform = req.header("expo-platform");
+      if (platform && (platform === "ios" || platform === "android")) {
+        return serveExpoManifest(platform, res);
+      }
+    }
+
     next();
   });
 
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 
-  log("Expo routing: Checking expo-platform header on / and /manifest");
+  if (hasWebBuild) {
+    app.use(express.static(webBuildDir));
+  }
+
+  if (!isDev && hasWebBuild) {
+    app.get("*", (req: Request, res: Response, next: NextFunction) => {
+      if (
+        req.path.startsWith("/api") ||
+        req.path === "/admin" ||
+        req.path === "/download" ||
+        req.path === "/manifest"
+      ) {
+        return next();
+      }
+
+      const filePath = path.join(webBuildDir, req.path);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        return next();
+      }
+
+      res.sendFile(path.join(webBuildDir, "index.html"));
+    });
+    log("Production: Serving web build with SPA fallback");
+  }
+
+  log("Expo routing configured");
 }
 
 function setupErrorHandler(app: express.Application) {

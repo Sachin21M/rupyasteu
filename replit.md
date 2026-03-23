@@ -69,6 +69,7 @@ shared/
 4. Manual UTR payment capture (PAYMENT_MODE=MANUAL)
 5. Admin approval flow — UTR submitted → admin approves/rejects → Paysprint recharge triggered on approval
 6. Web-based Admin Panel at `/admin` for transaction management
+6b. **Web App at Root Domain** — Full web app served at root URL in production, landing page moved to `/download`
 7. Transaction history with status tracking
 8. Paysprint API integration (LIVE environment — AES encrypted, IP BASED auth)
 9. **AEPS Banking** — Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay, Cash Deposit

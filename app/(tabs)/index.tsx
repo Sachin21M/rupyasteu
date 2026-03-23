@@ -8,6 +8,7 @@ import {
   Platform,
   RefreshControl,
   ActivityIndicator,
+  Dimensions,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,15 +19,19 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getTransactions } from "@/lib/api";
 import type { Transaction } from "@/shared/schema";
 
-function ServiceCard({ icon, label, color, onPress }: {
+const SCREEN_WIDTH = Dimensions.get("window").width;
+const AEPS_CARD_WIDTH = (SCREEN_WIDTH - 32 - 20) / 3;
+
+function ServiceCard({ icon, label, color, onPress, cardStyle }: {
   icon: React.ReactNode;
   label: string;
   color: string;
   onPress: () => void;
+  cardStyle?: object;
 }) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.serviceCard, pressed && { transform: [{ scale: 0.96 }] }]}
+      style={({ pressed }) => [styles.serviceCard, cardStyle, pressed && { transform: [{ scale: 0.96 }] }]}
       onPress={onPress}
     >
       <View style={[styles.serviceIcon, { backgroundColor: color + "15" }]}>
@@ -149,43 +154,42 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <View style={styles.servicesRow}>
+      <View style={styles.aepsGrid}>
         <ServiceCard
           icon={<Ionicons name="wallet" size={24} color="#2E9E5B" />}
           label="Balance"
           color="#2E9E5B"
+          cardStyle={{ flex: 0, width: AEPS_CARD_WIDTH, minWidth: 0, maxWidth: AEPS_CARD_WIDTH }}
           onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "BALANCE_ENQUIRY", label: "Balance Enquiry", requiresAmount: "0" } })}
         />
         <ServiceCard
           icon={<Ionicons name="cash" size={24} color="#F59E0B" />}
           label="Withdraw"
           color="#F59E0B"
+          cardStyle={{ flex: 0, width: AEPS_CARD_WIDTH, minWidth: 0, maxWidth: AEPS_CARD_WIDTH }}
           onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "CASH_WITHDRAWAL", label: "Cash Withdrawal", requiresAmount: "1" } })}
         />
         <ServiceCard
           icon={<Ionicons name="document-text" size={24} color="#6366F1" />}
           label="Statement"
           color="#6366F1"
+          cardStyle={{ flex: 0, width: AEPS_CARD_WIDTH, minWidth: 0, maxWidth: AEPS_CARD_WIDTH }}
           onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "MINI_STATEMENT", label: "Mini Statement", requiresAmount: "0" } })}
         />
         <ServiceCard
           icon={<MaterialCommunityIcons name="contactless-payment" size={24} color="#EF4444" />}
           label="Aadhaar Pay"
           color="#EF4444"
+          cardStyle={{ flex: 0, width: AEPS_CARD_WIDTH, minWidth: 0, maxWidth: AEPS_CARD_WIDTH }}
           onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "AADHAAR_PAY", label: "Aadhaar Pay", requiresAmount: "1" } })}
         />
-      </View>
-
-      <View style={styles.servicesRow}>
         <ServiceCard
           icon={<Ionicons name="arrow-down-circle" size={24} color="#10B981" />}
           label="Deposit"
           color="#10B981"
+          cardStyle={{ flex: 0, width: AEPS_CARD_WIDTH, minWidth: 0, maxWidth: AEPS_CARD_WIDTH }}
           onPress={() => router.push({ pathname: "/aeps/transaction", params: { type: "CASH_DEPOSIT", label: "Cash Deposit", requiresAmount: "1" } })}
         />
-        <View style={{ flex: 1, minWidth: 70 }} />
-        <View style={{ flex: 1, minWidth: 70 }} />
-        <View style={{ flex: 1, minWidth: 70 }} />
       </View>
 
       <Pressable
@@ -353,6 +357,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 10,
     marginBottom: 20,
+  },
+  aepsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 16,
+    gap: 10,
+    marginBottom: 10,
   },
   serviceCard: {
     flex: 1,

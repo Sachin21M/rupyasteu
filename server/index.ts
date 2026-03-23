@@ -290,8 +290,7 @@ function setupErrorHandler(app: express.Application) {
 
   setupErrorHandler(app);
 
-  const isDeployment = process.env.NODE_ENV === "production" && !!process.env.REPLIT_DEPLOYMENT;
-  const port = isDeployment ? 443 : parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(
     {
       port,

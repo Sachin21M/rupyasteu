@@ -71,9 +71,10 @@ shared/
 6. Web-based Admin Panel at `/admin` for transaction management
 7. Transaction history with status tracking
 8. Paysprint API integration (LIVE environment — AES encrypted, IP BASED auth)
-9. **AEPS Banking** — Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay
+9. **AEPS Banking** — Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay, Cash Deposit
 10. AEPS merchant onboarding and daily 2FA authentication
-11. Privacy, Help & Support, About screens
+11. **Automated Merchant Registration** — Admin can create merchants from admin panel with auto-generated codes (RS-XXXXXX format), Paysprint onboarding API integration, KYC status management
+12. Privacy, Help & Support, About screens
 
 ## AEPS (Aadhaar Enabled Payment System)
 ### Services
@@ -83,7 +84,7 @@ shared/
 - **Aadhaar Pay**: Make payments using Aadhaar authentication
 
 ### Database Tables
-- `aeps_merchants` — Stores merchant KYC status and bank pipe configuration
+- `aeps_merchants` — Stores merchant KYC status, bank pipe config, phone, firm name, merchant code (RS-XXXXXX), KYC redirect URL, created_by (admin/self)
 - `aeps_daily_auth` — Tracks daily 2FA authentication per user
 - `aeps_transactions` — Records all AEPS transaction history
 
@@ -96,6 +97,10 @@ shared/
 - `POST /api/aeps/transaction` — Execute AEPS transaction
 - `GET /api/aeps/transactions` — Get user's AEPS transaction history
 - `GET /api/admin/aeps-transactions` — Admin: get all AEPS transactions
+- `GET /api/admin/merchants` — Admin: list all merchants
+- `POST /api/admin/merchants` — Admin: create merchant (auto-generates RS-XXXXXX code)
+- `PATCH /api/admin/merchants/:id` — Admin: approve/reject merchant KYC
+- `DELETE /api/admin/merchants/:id` — Admin: delete merchant
 
 ### Technical Notes
 - AEPS uses 180-second timeout for all API calls

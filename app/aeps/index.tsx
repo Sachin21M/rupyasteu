@@ -106,6 +106,9 @@ export default function AepsServicesScreen() {
       setOnboarded(result.onboarded || false);
       setDailyAuthenticated(result.dailyAuthenticated || false);
       setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
+      if (result.merchant?.merchantCode) {
+        setMerchantCode(result.merchant.merchantCode);
+      }
     } catch {
       setOnboarded(false);
       setDailyAuthenticated(false);
@@ -252,15 +255,23 @@ export default function AepsServicesScreen() {
             </View>
             {kycStatus !== "COMPLETED" && (
               <>
-                <View style={styles.merchantCodeInput}>
-                  <TextInput
-                    style={styles.mcInput}
-                    placeholder="Enter Merchant Code"
-                    placeholderTextColor={Colors.textTertiary}
-                    value={merchantCode}
-                    onChangeText={setMerchantCode}
-                  />
-                </View>
+                {merchantCode.startsWith("RS-") ? (
+                  <View style={styles.assignedCodeBox}>
+                    <Text style={styles.assignedCodeLabel}>Your Merchant Code</Text>
+                    <Text style={styles.assignedCodeValue}>{merchantCode}</Text>
+                    <Text style={styles.assignedCodeHint}>Assigned by admin. Tap below to continue onboarding.</Text>
+                  </View>
+                ) : (
+                  <View style={styles.merchantCodeInput}>
+                    <TextInput
+                      style={styles.mcInput}
+                      placeholder="Enter Merchant Code"
+                      placeholderTextColor={Colors.textTertiary}
+                      value={merchantCode}
+                      onChangeText={setMerchantCode}
+                    />
+                  </View>
+                )}
                 <View style={{ flexDirection: "row", gap: 10 }}>
                   <Pressable
                     style={[styles.setupBtn, onboardingLoading && { opacity: 0.6 }]}
@@ -507,6 +518,32 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     color: Colors.text,
     height: "100%",
+  },
+  assignedCodeBox: {
+    backgroundColor: "#f0fdf4",
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: "#bbf7d0",
+    alignItems: "center" as const,
+    gap: 4,
+  },
+  assignedCodeLabel: {
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    color: "#166534",
+  },
+  assignedCodeValue: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    color: "#2E9E5B",
+    letterSpacing: 1,
+  },
+  assignedCodeHint: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: "#888",
+    textAlign: "center" as const,
   },
   setupBtn: {
     flex: 1,

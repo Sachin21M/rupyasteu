@@ -737,9 +737,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (result.status && result.data?.redirecturl) {
         const merchant = await storage.getAepsMerchant((req as any).userId);
         if (!merchant) {
-          await storage.createAepsMerchant((req as any).userId, merchantCode, "bank2");
+          await storage.createAepsMerchant((req as any).userId, merchantCode, "bank2", {
+            phone: user.phone,
+            createdBy: "self",
+            kycRedirectUrl: result.data.redirecturl,
+          });
         } else {
-          await storage.updateAepsMerchant((req as any).userId, { merchantCode, kycStatus: "PENDING" });
+          await storage.updateAepsMerchant((req as any).userId, { merchantCode, kycStatus: "PENDING", kycRedirectUrl: result.data.redirecturl });
         }
         res.json({ success: true, redirectUrl: result.data.redirecturl });
       } else {
@@ -997,6 +1001,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ transactions });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch AEPS transactions" });
+    }
+  });
+
+  app.get("/api/admin/merchants", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const merchants = await storage.getAllAepsMerchants();
+      const enriched = await Promise.all(
+        merchants.map(async (m) => {
+          const user = await storage.getUser(m.userId);
+          return { ...m, userPhone: user?.phone || m.phone || "Unknown", userName: user?.name || "" };
+        })
+      );
+      res.json({ merchants: enriched });
+    } catch (error) {
+      console.error("Failed to fetch merchants:", error);
+      res.status(500).json({ error: "Failed to fetch merchants" });
+    }
+  });
+
+  app.post("/api/admin/merchants", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { phone, firmName } = req.body;
+      if (!phone || !firmName) {
+        return res.status(400).json({ error: "Phone and firm name are required" });
+      }
+      const phoneClean = phone.replace(/\D/g, "").slice(-10);
+      if (!/^[6-9]\d{9}$/.test(phoneClean)) {
+        return res.status(400).json({ error: "Invalid Indian mobile number" });
+      }
+
+      const existing = await storage.getAepsMerchantByPhone(phoneClean);
+      if (existing) {
+        return res.status(409).json({ error: "A merchant with this phone number already exists" });
+      }
+
+      let user = await storage.getUserByPhone(phoneClean);
+      if (!user) {
+        user = await storage.createUser(phoneClean);
+      }
+
+      const existingByUser = await storage.getAepsMerchant(user.id);
+      if (existingByUser) {
+        return res.status(409).json({ error: "This user is already registered as a merchant" });
+      }
+
+      const merchantCode = "RS-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+      let kycRedirectUrl = "";
+      try {
+        const onboardResult = await aepsService.getOnboardingUrl({
+          merchantCode,
+          mobile: phoneClean,
+          email: "",
+          firm: firmName,
+        });
+        if (onboardResult.status && onboardResult.data?.redirecturl) {
+          kycRedirectUrl = onboardResult.data.redirecturl;
+        }
+      } catch (err: any) {
+        console.error("Paysprint onboarding call failed:", err.message);
+      }
+
+      const merchant = await storage.createAepsMerchant(user.id, merchantCode, "bank2", {
+        phone: phoneClean,
+        firmName,
+        kycRedirectUrl,
+        createdBy: "admin",
+      });
+
+      res.json({ success: true, merchant });
+    } catch (error) {
+      console.error("Failed to create merchant:", error);
+      res.status(500).json({ error: "Failed to create merchant" });
+    }
+  });
+
+  app.patch("/api/admin/merchants/:id", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { kycStatus } = req.body;
+
+      const merchant = await storage.getAepsMerchantById(id);
+      if (!merchant) {
+        return res.status(404).json({ error: "Merchant not found" });
+      }
+
+      const updated = await storage.updateAepsMerchant(merchant.userId, { kycStatus });
+      res.json({ success: true, merchant: updated });
+    } catch (error) {
+      console.error("Failed to update merchant:", error);
+      res.status(500).json({ error: "Failed to update merchant" });
+    }
+  });
+
+  app.delete("/api/admin/merchants/:id", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const deleted = await storage.deleteAepsMerchant(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Merchant not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Failed to delete merchant:", error);
+      res.status(500).json({ error: "Failed to delete merchant" });
     }
   });
 

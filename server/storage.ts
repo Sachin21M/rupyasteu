@@ -18,8 +18,12 @@ async function initAepsTables() {
         id VARCHAR(64) PRIMARY KEY,
         user_id VARCHAR(64) NOT NULL,
         merchant_code VARCHAR(64) NOT NULL DEFAULT '',
+        phone VARCHAR(15) NOT NULL DEFAULT '',
+        firm_name VARCHAR(100) NOT NULL DEFAULT '',
         kyc_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
         bank_pipes TEXT NOT NULL DEFAULT '{}',
+        kyc_redirect_url TEXT,
+        created_by VARCHAR(20) DEFAULT 'self',
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
@@ -74,6 +78,15 @@ async function initAepsTables() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_aeps_api_logs_endpoint ON aeps_api_logs(endpoint)
     `);
+    const alterQueries = [
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS phone VARCHAR(15) NOT NULL DEFAULT ''",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS firm_name VARCHAR(100) NOT NULL DEFAULT ''",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS kyc_redirect_url TEXT",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS created_by VARCHAR(20) DEFAULT 'self'",
+    ];
+    for (const q of alterQueries) {
+      try { await pool.query(q); } catch {}
+    }
     console.log("AEPS tables initialized successfully");
   } catch (err: any) {
     console.error("Failed to create AEPS tables:", err.message);
@@ -105,8 +118,12 @@ export interface IStorage {
   findTransactionByUtr(utr: string): Promise<Transaction | undefined>;
 
   getAepsMerchant(userId: string): Promise<AepsMerchant | undefined>;
-  createAepsMerchant(userId: string, merchantCode: string, bankPipes: string): Promise<AepsMerchant>;
+  getAepsMerchantByPhone(phone: string): Promise<AepsMerchant | undefined>;
+  getAepsMerchantById(id: string): Promise<AepsMerchant | undefined>;
+  getAllAepsMerchants(): Promise<AepsMerchant[]>;
+  createAepsMerchant(userId: string, merchantCode: string, bankPipes: string, extra?: { phone?: string; firmName?: string; kycRedirectUrl?: string; createdBy?: string }): Promise<AepsMerchant>;
   updateAepsMerchant(userId: string, data: Partial<AepsMerchant>): Promise<AepsMerchant | undefined>;
+  deleteAepsMerchant(id: string): Promise<boolean>;
 
   getAepsDailyAuth(userId: string, date: string): Promise<AepsDailyAuth | undefined>;
   setAepsDailyAuth(userId: string, date: string): Promise<AepsDailyAuth>;
@@ -197,8 +214,12 @@ function rowToAepsMerchant(row: any): AepsMerchant {
     id: row.id,
     userId: row.user_id,
     merchantCode: row.merchant_code,
+    phone: row.phone || '',
+    firmName: row.firm_name || '',
     kycStatus: row.kyc_status,
     bankPipes: row.bank_pipes,
+    kycRedirectUrl: row.kyc_redirect_url || undefined,
+    createdBy: row.created_by || 'self',
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
   };
@@ -388,12 +409,27 @@ export class PgStorage implements IStorage {
     return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
   }
 
-  async createAepsMerchant(userId: string, merchantCode: string, bankPipes: string): Promise<AepsMerchant> {
+  async getAepsMerchantByPhone(phone: string): Promise<AepsMerchant | undefined> {
+    const result = await pool.query("SELECT * FROM aeps_merchants WHERE phone = $1", [phone]);
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
+  }
+
+  async getAepsMerchantById(id: string): Promise<AepsMerchant | undefined> {
+    const result = await pool.query("SELECT * FROM aeps_merchants WHERE id = $1", [id]);
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
+  }
+
+  async getAllAepsMerchants(): Promise<AepsMerchant[]> {
+    const result = await pool.query("SELECT * FROM aeps_merchants ORDER BY created_at DESC");
+    return result.rows.map(rowToAepsMerchant);
+  }
+
+  async createAepsMerchant(userId: string, merchantCode: string, bankPipes: string, extra?: { phone?: string; firmName?: string; kycRedirectUrl?: string; createdBy?: string }): Promise<AepsMerchant> {
     const id = randomUUID();
     const result = await pool.query(
-      `INSERT INTO aeps_merchants (id, user_id, merchant_code, kyc_status, bank_pipes)
-       VALUES ($1, $2, $3, 'PENDING', $4) RETURNING *`,
-      [id, userId, merchantCode, bankPipes]
+      `INSERT INTO aeps_merchants (id, user_id, merchant_code, phone, firm_name, kyc_status, bank_pipes, kyc_redirect_url, created_by)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8) RETURNING *`,
+      [id, userId, merchantCode, extra?.phone || '', extra?.firmName || '', bankPipes, extra?.kycRedirectUrl || null, extra?.createdBy || 'self']
     );
     return rowToAepsMerchant(result.rows[0]);
   }
@@ -406,6 +442,9 @@ export class PgStorage implements IStorage {
     if (data.merchantCode !== undefined) { fields.push(`merchant_code = $${idx++}`); values.push(data.merchantCode); }
     if (data.kycStatus !== undefined) { fields.push(`kyc_status = $${idx++}`); values.push(data.kycStatus); }
     if (data.bankPipes !== undefined) { fields.push(`bank_pipes = $${idx++}`); values.push(data.bankPipes); }
+    if (data.phone !== undefined) { fields.push(`phone = $${idx++}`); values.push(data.phone); }
+    if (data.firmName !== undefined) { fields.push(`firm_name = $${idx++}`); values.push(data.firmName); }
+    if (data.kycRedirectUrl !== undefined) { fields.push(`kyc_redirect_url = $${idx++}`); values.push(data.kycRedirectUrl); }
 
     if (fields.length === 0) return this.getAepsMerchant(userId);
 
@@ -416,6 +455,11 @@ export class PgStorage implements IStorage {
       values
     );
     return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
+  }
+
+  async deleteAepsMerchant(id: string): Promise<boolean> {
+    const result = await pool.query("DELETE FROM aeps_merchants WHERE id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getAepsDailyAuth(userId: string, date: string): Promise<AepsDailyAuth | undefined> {

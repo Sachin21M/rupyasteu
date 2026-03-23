@@ -75,8 +75,12 @@ export interface AepsMerchant {
   id: string;
   userId: string;
   merchantCode: string;
+  phone: string;
+  firmName: string;
   kycStatus: "PENDING" | "COMPLETED" | "FAILED";
   bankPipes: string;
+  kycRedirectUrl?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Refund and Cancellation Policy - RupyaSetu</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="RupyaSetu Refund and Cancellation Policy - Our policies on refunds, cancellations, and failed transactions." />
+  <link rel="icon" href="/assets/images/favicon.png" type="image/png" />
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{--green:#2E9E5B;--green-dark:#247A47;--green-light:#E8F5EE;--dark:#1A1A2E;--gray:#6B7280;--light:#F9FAFB;--white:#FFFFFF}
+    html{scroll-behavior:smooth}
+    body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#333;line-height:1.6;background:var(--white)}
+    .container{max-width:1200px;margin:0 auto;padding:0 24px}
+    nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(255,255,255,0.95);backdrop-filter:blur(12px);border-bottom:1px solid rgba(0,0,0,0.06)}
+    .nav-inner{display:flex;align-items:center;justify-content:space-between;height:70px}
+    .nav-brand{display:flex;align-items:center;gap:12px;text-decoration:none}
+    .nav-brand img{width:42px;height:42px;border-radius:10px}
+    .nav-brand span{font-size:22px;font-weight:700;color:var(--dark)}
+    .nav-brand span em{font-style:normal;color:var(--green)}
+    .nav-links{display:flex;align-items:center;gap:8px}
+    .nav-links a{padding:10px 18px;font-size:15px;font-weight:500;color:var(--gray);text-decoration:none;border-radius:8px;transition:all .2s}
+    .nav-links a:hover{color:var(--green);background:var(--green-light)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;padding:12px 28px;font-size:15px;font-weight:600;border-radius:10px;text-decoration:none;transition:all .25s;cursor:pointer;border:none}
+    .btn-primary{background:var(--green);color:var(--white)}
+    .btn-primary:hover{background:var(--green-dark)}
+    .hamburger{display:none;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:8px}
+    .hamburger span{width:24px;height:2.5px;background:var(--dark);border-radius:2px}
+    .page-header{padding:120px 0 50px;background:linear-gradient(135deg,var(--green-light) 0%,var(--white) 100%);text-align:center}
+    .page-header h1{font-size:38px;font-weight:800;color:var(--dark);margin-bottom:10px}
+    .page-header p{font-size:16px;color:var(--gray)}
+    .legal-content{max-width:800px;margin:0 auto;padding:60px 24px 80px}
+    .legal-content h2{font-size:22px;font-weight:700;color:var(--dark);margin:36px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--green-light)}
+    .legal-content h3{font-size:18px;font-weight:600;color:var(--dark);margin:24px 0 10px}
+    .legal-content p{margin-bottom:14px;color:#444;line-height:1.75}
+    .legal-content ul,.legal-content ol{margin:0 0 14px 24px;color:#444}
+    .legal-content ul li,.legal-content ol li{margin-bottom:8px;line-height:1.7}
+    .legal-content .highlight-box{background:var(--green-light);border-left:4px solid var(--green);padding:18px 22px;border-radius:0 10px 10px 0;margin:20px 0}
+    .legal-content .highlight-box p{margin:0;color:var(--dark);font-weight:500}
+    .legal-content table{width:100%;border-collapse:collapse;margin:16px 0 20px;font-size:15px}
+    .legal-content table th{background:var(--green-light);color:var(--dark);font-weight:600;padding:12px 16px;text-align:left;border-bottom:2px solid var(--green)}
+    .legal-content table td{padding:12px 16px;border-bottom:1px solid #eee}
+    .legal-content table tr:hover{background:var(--light)}
+    footer{padding:50px 0 24px;background:var(--dark);color:rgba(255,255,255,0.7)}
+    .footer-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+    .footer-inner span{font-size:13px}
+    .footer-links a{font-size:13px;color:rgba(255,255,255,0.5);text-decoration:none;margin-left:20px}
+    .footer-links a:hover{color:var(--green)}
+    @media(max-width:768px){
+      .hamburger{display:flex}
+      .nav-links{display:none;position:absolute;top:70px;left:0;right:0;background:var(--white);flex-direction:column;padding:20px;border-bottom:1px solid #eee;box-shadow:0 10px 30px rgba(0,0,0,0.1)}
+      .nav-links.open{display:flex}
+      .page-header{padding:100px 0 40px}
+      .page-header h1{font-size:28px}
+      .legal-content{padding:40px 20px 60px}
+      .legal-content table{font-size:13px}
+      .legal-content table th,.legal-content table td{padding:8px 10px}
+      .footer-inner{flex-direction:column;text-align:center}
+      .footer-links a{margin:0 10px}
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <a href="/" class="nav-brand">
+      <img src="/assets/images/rupyasetu-logo.jpeg" alt="RupyaSetu" />
+      <span>Rupya<em>Setu</em></span>
+    </a>
+    <button class="hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms">Terms</a>
+      <a href="/contact">Contact</a>
+      <a href="/login" class="btn btn-primary" style="padding:9px 24px;font-size:14px;color:#fff">Login</a>
+    </div>
+  </div>
+</nav>
+
+<section class="page-header">
+  <h1>Refund and Cancellation Policy</h1>
+  <p>Last updated: March 2026</p>
+</section>
+
+<div class="legal-content">
+
+  <h2>1. Overview</h2>
+  <p>At RupyaSetu, we strive to ensure every transaction is processed smoothly. This policy outlines the circumstances under which refunds are provided, how cancellations are handled, and the process for requesting a refund.</p>
+
+  <h2>2. Refund Eligibility</h2>
+  <div class="highlight-box">
+    <p>Refunds are applicable only in cases where a transaction has failed or was not processed correctly, and the amount has been deducted from your wallet or bank account.</p>
+  </div>
+
+  <h3>2.1 Eligible for Refund</h3>
+  <ul>
+    <li><strong>Failed Mobile Recharge:</strong> If a recharge payment was deducted but the recharge was not applied to the target mobile number</li>
+    <li><strong>Failed DTH Recharge:</strong> If the DTH recharge amount was deducted but the recharge was not applied to the target DTH account</li>
+    <li><strong>Failed AEPS Transaction:</strong> If an AEPS withdrawal amount was deducted from the customer's bank account but cash was not dispensed, or the transaction was flagged as failed by the banking network</li>
+    <li><strong>Duplicate Transaction:</strong> If the same transaction was processed twice due to a system error</li>
+    <li><strong>Wallet Recharge Discrepancy:</strong> If a UPI payment was successfully made but the wallet was not credited after admin approval</li>
+  </ul>
+
+  <h3>2.2 Not Eligible for Refund</h3>
+  <ul>
+    <li>Successful recharges — once a recharge is confirmed by the operator, it cannot be reversed</li>
+    <li>Incorrect mobile number, DTH account, or bank details provided by the user</li>
+    <li>Transactions that fail due to insufficient wallet balance (no amount is deducted)</li>
+    <li>Commissions earned and credited to the wallet</li>
+    <li>Wallet recharge requests that are rejected by the admin (no deduction occurs)</li>
+    <li>Service charges or convenience fees, if applicable</li>
+  </ul>
+
+  <h2>3. Refund Timeline</h2>
+  <table>
+    <tr><th>Transaction Type</th><th>Refund Timeline</th><th>Refund Method</th></tr>
+    <tr><td>Failed Mobile Recharge</td><td>3-5 business days</td><td>Vendor Wallet Credit</td></tr>
+    <tr><td>Failed DTH Recharge</td><td>3-5 business days</td><td>Vendor Wallet Credit</td></tr>
+    <tr><td>Failed AEPS Transaction</td><td>5-7 business days</td><td>Customer's Bank Account (via banking network)</td></tr>
+    <tr><td>Duplicate Transaction</td><td>3-5 business days</td><td>Vendor Wallet Credit</td></tr>
+    <tr><td>Wallet Credit Issue</td><td>1-2 business days</td><td>Vendor Wallet Credit (after verification)</td></tr>
+  </table>
+  <p><strong>Note:</strong> For AEPS-related refunds, the timeline depends on the customer's bank and the NPCI dispute resolution process, which may take up to 7 business days.</p>
+
+  <h2>4. Cancellation Policy</h2>
+  <h3>4.1 Transaction Cancellation</h3>
+  <p>Due to the instant nature of recharge and AEPS services, transactions <strong>cannot be cancelled</strong> once initiated. Please verify all details (mobile number, operator, amount, Aadhaar number) before confirming a transaction.</p>
+  <h3>4.2 Wallet Recharge Cancellation</h3>
+  <p>Wallet recharge requests (via UPI) that are pending admin approval can be cancelled by contacting support before approval. Once a wallet recharge is approved by the admin, it cannot be reversed.</p>
+  <h3>4.3 Account Cancellation</h3>
+  <p>You may request to close your account at any time. Upon account closure:</p>
+  <ul>
+    <li>Any remaining wallet balance will be refunded to your registered bank account within 15 business days</li>
+    <li>Pending transactions will be processed or refunded before account closure</li>
+    <li>Transaction records will be retained as per our <a href="/privacy-policy" style="color:var(--green)">Privacy Policy</a> data retention requirements</li>
+  </ul>
+
+  <h2>5. How to Request a Refund</h2>
+  <ol>
+    <li><strong>Check Transaction Status:</strong> First, check your transaction history in the app to confirm the transaction has failed</li>
+    <li><strong>Contact Support:</strong> Email us at <a href="mailto:support@rupyasetu.com" style="color:var(--green)">support@rupyasetu.com</a> with the following details:
+      <ul>
+        <li>Your registered phone number</li>
+        <li>Transaction ID or reference number</li>
+        <li>Date and time of the transaction</li>
+        <li>Amount involved</li>
+        <li>Screenshot of the failed transaction (if available)</li>
+      </ul>
+    </li>
+    <li><strong>Verification:</strong> Our team will verify the transaction with our API partner and banking network</li>
+    <li><strong>Resolution:</strong> Once verified, the refund will be processed within the timelines mentioned above</li>
+  </ol>
+
+  <h2>6. Dispute Resolution</h2>
+  <p>If you are not satisfied with the refund resolution, you may escalate the matter:</p>
+  <ol>
+    <li>Email your concern to <a href="mailto:support@rupyasetu.com" style="color:var(--green)">support@rupyasetu.com</a> with "ESCALATION" in the subject line</li>
+    <li>Our senior team will review and respond within 48 hours</li>
+    <li>If still unresolved, you may pursue dispute resolution as outlined in our <a href="/terms" style="color:var(--green)">Terms and Conditions</a></li>
+  </ol>
+
+  <h2>7. Contact for Refund Queries</h2>
+  <p>For any questions regarding refunds or cancellations, reach out to us:</p>
+  <ul>
+    <li><strong>Email:</strong> <a href="mailto:support@rupyasetu.com" style="color:var(--green)">support@rupyasetu.com</a></li>
+    <li><strong>Contact Page:</strong> <a href="/contact" style="color:var(--green)">rupyasetuadmin.site/contact</a></li>
+  </ul>
+
+</div>
+
+<footer>
+  <div class="container footer-inner">
+    <span>&copy; 2026 RupyaSetu. All rights reserved.</span>
+    <div class="footer-links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms">Terms & Conditions</a>
+      <a href="/refund-policy">Refund Policy</a>
+      <a href="/contact">Contact Us</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+window.addEventListener('scroll',function(){var n=document.querySelector('nav');if(window.scrollY>20)n.classList.add('scrolled');else n.classList.remove('scrolled');});
+</script>
+</body>
+</html>

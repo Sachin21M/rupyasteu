@@ -30,10 +30,16 @@ const sections = [
       "Your account is protected with OTP-based authentication. Sessions are secured with JWT tokens that expire after 7 days. You can log out at any time to invalidate your session.",
   },
   {
+    title: "Data Retention",
+    icon: "time-outline",
+    content:
+      "Transaction records are retained for 7 years as required by RBI guidelines and the Prevention of Money Laundering Act. Account data is deleted within 30 days of a deletion request. Aadhaar data for AEPS is never stored — it is encrypted and transmitted directly to banking partners. Device logs are retained for 90 days for security monitoring.",
+  },
+  {
     title: "Your Rights",
     icon: "hand-left-outline",
     content:
-      "You can request deletion of your account and all associated data at any time by contacting our support team. We will process your request within 48 hours.",
+      "You can request deletion of your account and all associated data at any time by contacting our support team. We will process your request within 48 hours. You may also request a copy of your personal data or withdraw consent at any time.",
   },
 ];
 

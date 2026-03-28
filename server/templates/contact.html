@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Contact Us - RupyaSetu</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Contact RupyaSetu - Get in touch with our support team for any queries or assistance." />
+  <link rel="icon" href="/assets/images/favicon.png" type="image/png" />
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{--green:#2E9E5B;--green-dark:#247A47;--green-light:#E8F5EE;--dark:#1A1A2E;--gray:#6B7280;--light:#F9FAFB;--white:#FFFFFF}
+    html{scroll-behavior:smooth}
+    body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#333;line-height:1.6;background:var(--white)}
+    .container{max-width:1200px;margin:0 auto;padding:0 24px}
+    nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(255,255,255,0.95);backdrop-filter:blur(12px);border-bottom:1px solid rgba(0,0,0,0.06)}
+    .nav-inner{display:flex;align-items:center;justify-content:space-between;height:70px}
+    .nav-brand{display:flex;align-items:center;gap:12px;text-decoration:none}
+    .nav-brand img{width:42px;height:42px;border-radius:10px}
+    .nav-brand span{font-size:22px;font-weight:700;color:var(--dark)}
+    .nav-brand span em{font-style:normal;color:var(--green)}
+    .nav-links{display:flex;align-items:center;gap:8px}
+    .nav-links a{padding:10px 18px;font-size:15px;font-weight:500;color:var(--gray);text-decoration:none;border-radius:8px;transition:all .2s}
+    .nav-links a:hover{color:var(--green);background:var(--green-light)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;padding:12px 28px;font-size:15px;font-weight:600;border-radius:10px;text-decoration:none;transition:all .25s;cursor:pointer;border:none}
+    .btn-primary{background:var(--green);color:var(--white)}
+    .btn-primary:hover{background:var(--green-dark)}
+    .hamburger{display:none;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:8px}
+    .hamburger span{width:24px;height:2.5px;background:var(--dark);border-radius:2px}
+    .page-header{padding:120px 0 50px;background:linear-gradient(135deg,var(--green-light) 0%,var(--white) 100%);text-align:center}
+    .page-header h1{font-size:38px;font-weight:800;color:var(--dark);margin-bottom:10px}
+    .page-header p{font-size:16px;color:var(--gray);max-width:500px;margin:0 auto}
+
+    .contact-section{max-width:1000px;margin:0 auto;padding:60px 24px 80px}
+    .contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:50px}
+    .contact-info h2{font-size:24px;font-weight:700;color:var(--dark);margin-bottom:24px}
+    .info-card{display:flex;gap:16px;align-items:flex-start;padding:20px;background:var(--light);border-radius:14px;margin-bottom:16px;transition:all .2s}
+    .info-card:hover{background:var(--green-light)}
+    .info-icon{width:48px;height:48px;border-radius:12px;background:var(--green);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:22px}
+    .info-details h3{font-size:16px;font-weight:600;color:var(--dark);margin-bottom:4px}
+    .info-details p{font-size:14px;color:var(--gray);margin:0}
+    .info-details a{color:var(--green);text-decoration:none;font-weight:500}
+    .info-details a:hover{text-decoration:underline}
+
+    .contact-form h2{font-size:24px;font-weight:700;color:var(--dark);margin-bottom:24px}
+    .form-group{margin-bottom:20px}
+    .form-group label{display:block;font-size:14px;font-weight:600;color:var(--dark);margin-bottom:6px}
+    .form-group input,.form-group textarea,.form-group select{width:100%;padding:12px 16px;border:2px solid #e5e7eb;border-radius:10px;font-size:15px;font-family:inherit;transition:border-color .2s;background:var(--white);color:var(--dark)}
+    .form-group input:focus,.form-group textarea:focus,.form-group select:focus{outline:none;border-color:var(--green)}
+    .form-group textarea{resize:vertical;min-height:120px}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .submit-btn{width:100%;padding:14px;background:var(--green);color:var(--white);font-size:16px;font-weight:600;border:none;border-radius:10px;cursor:pointer;transition:all .25s}
+    .submit-btn:hover{background:var(--green-dark);transform:translateY(-1px);box-shadow:0 6px 20px rgba(46,158,91,0.35)}
+    .form-success{display:none;text-align:center;padding:40px 20px;background:var(--green-light);border-radius:14px}
+    .form-success h3{font-size:20px;font-weight:700;color:var(--green);margin-bottom:8px}
+    .form-success p{color:var(--gray);font-size:15px}
+
+    .business-hours{margin-top:24px;padding:20px;background:var(--green-light);border-radius:14px}
+    .business-hours h3{font-size:16px;font-weight:600;color:var(--dark);margin-bottom:12px}
+    .hours-row{display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#444}
+    .hours-row span:last-child{font-weight:600;color:var(--green)}
+
+    footer{padding:50px 0 24px;background:var(--dark);color:rgba(255,255,255,0.7)}
+    .footer-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+    .footer-inner span{font-size:13px}
+    .footer-links a{font-size:13px;color:rgba(255,255,255,0.5);text-decoration:none;margin-left:20px}
+    .footer-links a:hover{color:var(--green)}
+
+    @media(max-width:768px){
+      .hamburger{display:flex}
+      .nav-links{display:none;position:absolute;top:70px;left:0;right:0;background:var(--white);flex-direction:column;padding:20px;border-bottom:1px solid #eee;box-shadow:0 10px 30px rgba(0,0,0,0.1)}
+      .nav-links.open{display:flex}
+      .page-header{padding:100px 0 40px}
+      .page-header h1{font-size:28px}
+      .contact-section{padding:40px 20px 60px}
+      .contact-grid{grid-template-columns:1fr;gap:40px}
+      .form-row{grid-template-columns:1fr}
+      .footer-inner{flex-direction:column;text-align:center}
+      .footer-links a{margin:0 10px}
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <a href="/" class="nav-brand">
+      <img src="/assets/images/rupyasetu-logo.jpeg" alt="RupyaSetu" />
+      <span>Rupya<em>Setu</em></span>
+    </a>
+    <button class="hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms">Terms</a>
+      <a href="/refund-policy">Refund Policy</a>
+      <a href="/login" class="btn btn-primary" style="padding:9px 24px;font-size:14px;color:#fff">Login</a>
+    </div>
+  </div>
+</nav>
+
+<section class="page-header">
+  <h1>Contact Us</h1>
+  <p>Have questions or need help? We're here for you. Reach out through any of the channels below.</p>
+</section>
+
+<div class="contact-section">
+  <div class="contact-grid">
+    <div class="contact-info">
+      <h2>Get in Touch</h2>
+
+      <div class="info-card">
+        <div class="info-icon">&#9993;</div>
+        <div class="info-details">
+          <h3>Email Support</h3>
+          <p><a href="mailto:support@rupyasetu.com">support@rupyasetu.com</a></p>
+          <p>We respond within 24 hours</p>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-icon">&#128222;</div>
+        <div class="info-details">
+          <h3>Phone Support</h3>
+          <p><a href="tel:+919876543210">+91 98765 43210</a></p>
+          <p>Mon - Sat, 9 AM - 7 PM IST</p>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-icon">&#128172;</div>
+        <div class="info-details">
+          <h3>WhatsApp</h3>
+          <p><a href="https://wa.me/919876543210" target="_blank">+91 98765 43210</a></p>
+          <p>Quick queries and support</p>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="info-icon">&#128205;</div>
+        <div class="info-details">
+          <h3>Office Address</h3>
+          <p>RupyaSetu Technologies<br>India</p>
+        </div>
+      </div>
+
+      <div class="business-hours">
+        <h3>Business Hours</h3>
+        <div class="hours-row"><span>Monday - Friday</span><span>9:00 AM - 7:00 PM</span></div>
+        <div class="hours-row"><span>Saturday</span><span>9:00 AM - 4:00 PM</span></div>
+        <div class="hours-row"><span>Sunday</span><span>Closed</span></div>
+      </div>
+    </div>
+
+    <div class="contact-form-wrap">
+      <h2>Send us a Message</h2>
+      <form id="contactForm" onsubmit="handleSubmit(event)">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="name">Full Name</label>
+            <input type="text" id="name" placeholder="Your full name" required />
+          </div>
+          <div class="form-group">
+            <label for="phone">Phone Number</label>
+            <input type="tel" id="phone" placeholder="+91 XXXXX XXXXX" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="email">Email Address</label>
+          <input type="email" id="email" placeholder="your@email.com" required />
+        </div>
+        <div class="form-group">
+          <label for="subject">Subject</label>
+          <select id="subject" required>
+            <option value="">Select a topic</option>
+            <option value="recharge">Recharge Issue</option>
+            <option value="aeps">AEPS Transaction</option>
+            <option value="wallet">Wallet / Payment</option>
+            <option value="refund">Refund Request</option>
+            <option value="account">Account Issue</option>
+            <option value="onboarding">New Vendor Onboarding</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="message">Message</label>
+          <textarea id="message" placeholder="Describe your issue or question in detail..." required></textarea>
+        </div>
+        <button type="submit" class="submit-btn">Send Message</button>
+      </form>
+      <div class="form-success" id="formSuccess">
+        <h3>Message Sent!</h3>
+        <p>Thank you for reaching out. Our team will get back to you within 24 hours.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="container footer-inner">
+    <span>&copy; 2026 RupyaSetu. All rights reserved.</span>
+    <div class="footer-links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms">Terms & Conditions</a>
+      <a href="/refund-policy">Refund Policy</a>
+      <a href="/contact">Contact Us</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+window.addEventListener('scroll',function(){var n=document.querySelector('nav');if(window.scrollY>20)n.classList.add('scrolled');else n.classList.remove('scrolled');});
+function handleSubmit(e){
+  e.preventDefault();
+  var form=document.getElementById('contactForm');
+  var success=document.getElementById('formSuccess');
+  var name=document.getElementById('name').value;
+  var email=document.getElementById('email').value;
+  var subject=document.getElementById('subject').value;
+  var message=document.getElementById('message').value;
+  var phone=document.getElementById('phone').value;
+  var mailto='mailto:support@rupyasetu.com?subject='+encodeURIComponent('['+subject+'] Contact from '+name)+'&body='+encodeURIComponent('Name: '+name+'\nPhone: '+phone+'\nEmail: '+email+'\n\n'+message);
+  window.location.href=mailto;
+  form.style.display='none';
+  success.style.display='block';
+}
+</script>
+</body>
+</html>

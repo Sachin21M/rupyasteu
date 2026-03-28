@@ -177,6 +177,11 @@ function configureExpoAndLanding(app: express.Application) {
   );
   const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
   const websiteTemplate = fs.readFileSync(websitePath, "utf-8");
+  const templatesDir = path.resolve(process.cwd(), "server", "templates");
+  const privacyPolicyTemplate = fs.readFileSync(path.join(templatesDir, "privacy-policy.html"), "utf-8");
+  const termsTemplate = fs.readFileSync(path.join(templatesDir, "terms.html"), "utf-8");
+  const refundPolicyTemplate = fs.readFileSync(path.join(templatesDir, "refund-policy.html"), "utf-8");
+  const contactTemplate = fs.readFileSync(path.join(templatesDir, "contact.html"), "utf-8");
   const appName = getAppName();
   const isDev = process.env.NODE_ENV !== "production";
   const webBuildDir = path.resolve(process.cwd(), "static-build", "web");
@@ -219,6 +224,17 @@ function configureExpoAndLanding(app: express.Application) {
       return res.status(200).send(websiteTemplate);
     }
 
+    const staticPages: Record<string, string> = {
+      "/privacy-policy": privacyPolicyTemplate,
+      "/terms": termsTemplate,
+      "/refund-policy": refundPolicyTemplate,
+      "/contact": contactTemplate,
+    };
+    if (staticPages[req.path]) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(200).send(staticPages[req.path]);
+    }
+
     next();
   });
 
@@ -229,7 +245,7 @@ function configureExpoAndLanding(app: express.Application) {
     app.use(express.static(webBuildDir));
   }
 
-  const reservedPaths = ["/api", "/admin", "/download", "/manifest"];
+  const reservedPaths = ["/api", "/admin", "/download", "/manifest", "/privacy-policy", "/terms", "/refund-policy", "/contact"];
 
   if (isDev) {
     const { createProxyMiddleware } = require("http-proxy-middleware");

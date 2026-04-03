@@ -199,11 +199,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/ip", async (_req: Request, res: Response) => {
     try {
-      const response = await fetch("https://ifconfig.me/ip");
-      const ip = (await response.text()).trim();
-      res.json({ ip, note: "This is the outbound IP PaySprint must whitelist." });
+      const sources = [
+        "https://api4.ipify.org",
+        "https://ipv4.icanhazip.com",
+        "https://checkip.amazonaws.com",
+      ];
+      let ipv4 = "";
+      for (const url of sources) {
+        try {
+          const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+          const text = (await r.text()).trim();
+          if (/^\d+\.\d+\.\d+\.\d+$/.test(text)) { ipv4 = text; break; }
+        } catch { continue; }
+      }
+      if (!ipv4) throw new Error("No IPv4 found");
+      res.json({ ipv4, note: "Whitelist this IPv4 in PaySprint dashboard." });
     } catch {
-      res.status(500).json({ error: "Could not determine server IP" });
+      res.status(500).json({ error: "Could not determine server IPv4" });
     }
   });
 

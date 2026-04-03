@@ -143,7 +143,7 @@ export default function WalletScreen() {
 
   const quickAmounts = [500, 1000, 2000, 5000];
   const qrValue = buildUpiQrValue(rechargeAmount);
-  const qrSize = Math.min(SCREEN_WIDTH - 96, 220);
+  const qrSize = Math.max(200, Math.min(SCREEN_WIDTH - 96, 220));
 
   if (isLoading) {
     return (

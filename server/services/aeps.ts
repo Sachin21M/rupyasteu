@@ -68,6 +68,7 @@ interface AepsResponse {
   response_code: number;
   message: string;
   data?: any;
+  banklist?: { status: boolean; message: string; data: any[] };
   balanceamount?: string;
   bankrrn?: string;
   ministatement?: any[];

@@ -778,9 +778,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: true, banks: cachedBankList.banks });
       }
       const result = await aepsService.getAepsBankList();
-      if (result.status && result.data) {
-        cachedBankList = { banks: result.data, cachedAt: Date.now() };
-        res.json({ success: true, banks: result.data });
+      const banks = result.banklist?.data || result.data;
+      if (result.status && banks) {
+        cachedBankList = { banks, cachedAt: Date.now() };
+        res.json({ success: true, banks });
       } else {
         res.json({ success: false, error: result.message, banks: [] });
       }

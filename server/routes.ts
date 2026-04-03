@@ -197,6 +197,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/ip", async (_req: Request, res: Response) => {
+    try {
+      const response = await fetch("https://ifconfig.me/ip");
+      const ip = (await response.text()).trim();
+      res.json({ ip, note: "This is the outbound IP PaySprint must whitelist." });
+    } catch {
+      res.status(500).json({ error: "Could not determine server IP" });
+    }
+  });
+
   app.get("/api/user/profile", authMiddleware, async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser((req as any).userId);

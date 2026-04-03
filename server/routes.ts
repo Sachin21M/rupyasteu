@@ -32,13 +32,16 @@ function authMiddleware(req: Request, res: Response, next: NextFunction) {
 async function autoOnboardMerchant(userId: string, phone: string, firmName: string): Promise<void> {
   const existing = await storage.getAepsMerchant(userId);
   if (existing) {
-    if (existing.kycRedirectUrl) return;
+    if (existing.kycRedirectUrl && existing.kycStatus !== "FAILED") return;
     return retryOnboarding(existing, phone, firmName);
   }
 
+  // PaySprint onboarding API: we send merchantcode, PaySprint registers it as sub-merchant ID.
+  // The API does not return a different code — the code we send IS the sub-merchant identifier.
   const merchantCode = "RS-" + Math.random().toString(36).substring(2, 8).toUpperCase();
 
   let kycRedirectUrl = "";
+  let kycStatus: "PENDING" | "FAILED" = "FAILED";
   try {
     const onboardResult = await aepsService.getOnboardingUrl({
       merchantCode,
@@ -48,23 +51,32 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
     });
     if (onboardResult.status && onboardResult.data?.redirecturl) {
       kycRedirectUrl = onboardResult.data.redirecturl;
+      kycStatus = "PENDING";
     }
   } catch (err: any) {
     console.error("Auto-onboard PaySprint API call failed:", err.message);
   }
 
-  if (!kycRedirectUrl) {
-    console.warn(`[Auto-Onboard] PaySprint API did not return KYC URL for ${phone}. Will retry later.`);
-    return;
+  try {
+    await storage.createAepsMerchant(userId, merchantCode, "bank2", {
+      phone,
+      firmName: firmName || "RupyaSetu",
+      kycRedirectUrl: kycRedirectUrl || undefined,
+      createdBy: "auto",
+    });
+    if (kycStatus === "FAILED") {
+      await storage.updateAepsMerchant(userId, { kycStatus: "FAILED" });
+      console.warn(`[Auto-Onboard] Created merchant ${merchantCode} for ${phone} with FAILED status (API unavailable). Will retry.`);
+    } else {
+      console.log(`[Auto-Onboard] Created merchant ${merchantCode} for user ${userId} (${phone})`);
+    }
+  } catch (err: any) {
+    if (err.code === "23505") {
+      console.log(`[Auto-Onboard] Merchant already exists for user ${userId} (concurrent creation)`);
+      return;
+    }
+    throw err;
   }
-
-  await storage.createAepsMerchant(userId, merchantCode, "bank2", {
-    phone,
-    firmName: firmName || "RupyaSetu",
-    kycRedirectUrl,
-    createdBy: "auto",
-  });
-  console.log(`[Auto-Onboard] Created merchant ${merchantCode} for user ${userId} (${phone})`);
 }
 
 async function retryOnboarding(merchant: any, phone: string, firmName: string): Promise<void> {
@@ -78,6 +90,7 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
     if (onboardResult.status && onboardResult.data?.redirecturl) {
       await storage.updateAepsMerchant(merchant.userId, {
         kycRedirectUrl: onboardResult.data.redirecturl,
+        kycStatus: "PENDING",
       });
       console.log(`[Auto-Onboard] Retry succeeded for merchant ${merchant.merchantCode}`);
     }
@@ -775,7 +788,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (err: any) {
           console.error("Auto-onboard backfill failed:", err.message);
         }
-      } else if (merchant && !merchant.kycRedirectUrl && user) {
+      } else if (merchant && (!merchant.kycRedirectUrl || merchant.kycStatus === "FAILED") && user) {
         try {
           await retryOnboarding(merchant, user.phone, user.name || "RupyaSetu");
           merchant = await storage.getAepsMerchant(user.id);

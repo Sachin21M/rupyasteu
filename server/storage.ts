@@ -83,6 +83,7 @@ async function initAepsTables() {
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS firm_name VARCHAR(100) NOT NULL DEFAULT ''",
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS kyc_redirect_url TEXT",
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS created_by VARCHAR(20) DEFAULT 'self'",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_aeps_merchants_user_id ON aeps_merchants(user_id)",
     ];
     for (const q of alterQueries) {
       try { await pool.query(q); } catch {}

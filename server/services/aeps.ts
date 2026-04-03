@@ -40,6 +40,10 @@ const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
 const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
 
+if (!process.env.PAYSPRINT_AUTHORIZED_KEY) {
+  console.warn("[AEPS] WARNING: PAYSPRINT_AUTHORIZED_KEY is not set. Authorisedkey header will be omitted from PaySprint requests.");
+}
+
 const AEPS_TIMEOUT = 180000;
 
 function isProductionEnv(): boolean {

@@ -185,6 +185,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         token,
         user: { id: user.id, phone: user.phone, name: user.name },
       });
+
+      if (user.name) {
+        autoOnboardMerchant(user.id, user.phone, user.name).catch(err =>
+          console.error("Login auto-onboard error:", err.message)
+        );
+      }
     } catch (error) {
       console.error("Verify OTP error:", error);
       res.status(500).json({ error: "Failed to verify OTP" });

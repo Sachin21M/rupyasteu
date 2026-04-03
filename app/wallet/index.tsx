@@ -16,12 +16,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import QRCode from "react-native-qrcode-svg";
 import Colors from "@/constants/colors";
 import { getWallet, requestWalletRecharge, getCommissionConfig } from "@/lib/api";
 import type { WalletTransaction, CommissionConfig } from "@/shared/schema";
 
-const PAYEE_UPI_ID = "charua821@okaxis";
+const PAYEE_UPI_ID = "44789692406@sbi";
+const PAYEE_NAME = "RupyaSetu";
 const SCREEN_WIDTH = Dimensions.get("window").width;
+
+function buildUpiQrValue(amount: string): string {
+  const amt = parseFloat(amount);
+  if (!amt || amt <= 0) return "";
+  return `upi://pay?pa=${PAYEE_UPI_ID}&pn=${encodeURIComponent(PAYEE_NAME)}&am=${amt.toFixed(2)}&cu=INR`;
+}
 
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
@@ -134,6 +142,8 @@ export default function WalletScreen() {
   );
 
   const quickAmounts = [500, 1000, 2000, 5000];
+  const qrValue = buildUpiQrValue(rechargeAmount);
+  const qrSize = Math.min(SCREEN_WIDTH - 96, 220);
 
   if (isLoading) {
     return (
@@ -217,6 +227,33 @@ export default function WalletScreen() {
                       <Text style={[styles.quickBtnText, rechargeAmount === String(amt) && styles.quickBtnTextActive]}>₹{amt}</Text>
                     </TouchableOpacity>
                   ))}
+                </View>
+
+                <View style={styles.qrContainer}>
+                  {qrValue ? (
+                    <>
+                      <Text style={styles.qrLabel}>Scan to Pay via UPI</Text>
+                      <View style={styles.qrWrapper}>
+                        <QRCode
+                          value={qrValue}
+                          size={qrSize}
+                          color="#000"
+                          backgroundColor="#fff"
+                        />
+                      </View>
+                      <Text style={styles.qrAmountLabel}>
+                        ₹{parseFloat(rechargeAmount).toFixed(2)}
+                      </Text>
+                      <Text style={styles.qrHint}>
+                        Open any UPI app → Scan QR → Pay
+                      </Text>
+                    </>
+                  ) : (
+                    <View style={styles.qrPlaceholder}>
+                      <Ionicons name="qr-code-outline" size={48} color={Colors.border} />
+                      <Text style={styles.qrPlaceholderText}>Enter amount to generate QR</Text>
+                    </View>
+                  )}
                 </View>
 
                 <Text style={styles.inputLabel}>UTR Number</Text>
@@ -392,7 +429,7 @@ const styles = StyleSheet.create({
   quickAmounts: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   quickBtn: {
     flex: 1,
@@ -413,6 +450,62 @@ const styles = StyleSheet.create({
   },
   quickBtnTextActive: {
     color: Colors.primary,
+  },
+  qrContainer: {
+    alignItems: "center",
+    marginBottom: 16,
+    paddingVertical: 8,
+  },
+  qrLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.textSecondary,
+    marginBottom: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  qrWrapper: {
+    padding: 12,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  qrAmountLabel: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: Colors.primary,
+    marginTop: 12,
+  },
+  qrHint: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textTertiary,
+    marginTop: 4,
+  },
+  qrPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 220,
+    height: 180,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderStyle: "dashed",
+    backgroundColor: Colors.background,
+    gap: 10,
+  },
+  qrPlaceholderText: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textTertiary,
+    textAlign: "center",
+    paddingHorizontal: 16,
   },
   submitBtn: {
     backgroundColor: Colors.primary,

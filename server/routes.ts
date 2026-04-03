@@ -10,7 +10,7 @@ import { generateAepsReport } from "./services/aeps-report";
 import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema, aepsTransactionSchema } from "../shared/schema";
 
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "MANUAL";
-const PAYEE_UPI_ID = process.env.PAYEE_UPI_ID || "rupyasetu@upi";
+const PAYEE_UPI_ID = process.env.PAYEE_UPI_ID || "44789692406@sbi";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "rupyasetu@2026";
 

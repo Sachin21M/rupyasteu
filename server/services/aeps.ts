@@ -54,8 +54,10 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const payload = {
+    iss: "PAYSPRINT",
     timestamp,
     partnerId: PAYSPRINT_PARTNER_ID,
+    product: "WALLET",
     reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
@@ -150,9 +152,11 @@ async function makeAepsRequest(
       requestBody = JSON.stringify(fullPayload);
     }
 
+    const authorisedKey = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
+      ...(authorisedKey ? { "Authorisedkey": authorisedKey } : {}),
     };
 
     let rawText: string;
@@ -325,6 +329,7 @@ export async function getOnboardingUrl(params: {
   return makeAepsRequest("/service/onboard/onboard/getonboardurl", {
     merchantcode: params.merchantCode,
     mobile: params.mobile,
+    is_new: "0",
     email: params.email || "",
     firm: params.firmName || "RupyaSetu",
     callback: params.callbackUrl || "",

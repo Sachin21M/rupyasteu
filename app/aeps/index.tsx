@@ -256,10 +256,18 @@ export default function AepsServicesScreen() {
                   <View style={styles.assignedCodeBox}>
                     <ActivityIndicator size="small" color={Colors.primary} />
                     <Text style={[styles.assignedCodeHint, { marginTop: 8 }]}>Setting up your merchant account...</Text>
+                    <Pressable
+                      style={[styles.setupBtn, { marginTop: 12 }, onboardingLoading && { opacity: 0.6 }]}
+                      onPress={() => { setLoading(true); checkMerchantStatus(); }}
+                      disabled={onboardingLoading}
+                    >
+                      <Ionicons name="refresh" size={16} color="#fff" />
+                      <Text style={styles.setupBtnText}>Retry Setup</Text>
+                    </Pressable>
                   </View>
                 )}
                 <View style={{ flexDirection: "row", gap: 10 }}>
-                  {kycStatus === "PENDING" && kycRedirectUrl ? (
+                  {merchantCode && kycRedirectUrl ? (
                     <>
                       <Pressable
                         style={[styles.setupBtn, { flex: 1, backgroundColor: Colors.primary }]}
@@ -280,18 +288,18 @@ export default function AepsServicesScreen() {
                         )}
                       </Pressable>
                     </>
-                  ) : merchantCode ? (
+                  ) : merchantCode && !kycRedirectUrl ? (
                     <Pressable
                       style={[styles.setupBtn, onboardingLoading && { opacity: 0.6 }]}
-                      onPress={handleOpenKyc}
-                      disabled={onboardingLoading || !kycRedirectUrl}
+                      onPress={() => { setLoading(true); checkMerchantStatus(); }}
+                      disabled={onboardingLoading}
                     >
                       {onboardingLoading ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
                         <>
-                          <Ionicons name="open-outline" size={16} color="#fff" />
-                          <Text style={styles.setupBtnText}>Start KYC Verification</Text>
+                          <Ionicons name="refresh" size={16} color="#fff" />
+                          <Text style={styles.setupBtnText}>Retry KYC Setup</Text>
                         </>
                       )}
                     </Pressable>

@@ -31,7 +31,10 @@ function authMiddleware(req: Request, res: Response, next: NextFunction) {
 
 async function autoOnboardMerchant(userId: string, phone: string, firmName: string): Promise<void> {
   const existing = await storage.getAepsMerchant(userId);
-  if (existing) return;
+  if (existing) {
+    if (existing.kycRedirectUrl) return;
+    return retryOnboarding(existing, phone, firmName);
+  }
 
   const merchantCode = "RS-" + Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -50,6 +53,11 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
     console.error("Auto-onboard PaySprint API call failed:", err.message);
   }
 
+  if (!kycRedirectUrl) {
+    console.warn(`[Auto-Onboard] PaySprint API did not return KYC URL for ${phone}. Will retry later.`);
+    return;
+  }
+
   await storage.createAepsMerchant(userId, merchantCode, "bank2", {
     phone,
     firmName: firmName || "RupyaSetu",
@@ -57,6 +65,25 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
     createdBy: "auto",
   });
   console.log(`[Auto-Onboard] Created merchant ${merchantCode} for user ${userId} (${phone})`);
+}
+
+async function retryOnboarding(merchant: any, phone: string, firmName: string): Promise<void> {
+  try {
+    const onboardResult = await aepsService.getOnboardingUrl({
+      merchantCode: merchant.merchantCode,
+      mobile: phone,
+      email: "",
+      firmName: firmName || "RupyaSetu",
+    });
+    if (onboardResult.status && onboardResult.data?.redirecturl) {
+      await storage.updateAepsMerchant(merchant.userId, {
+        kycRedirectUrl: onboardResult.data.redirecturl,
+      });
+      console.log(`[Auto-Onboard] Retry succeeded for merchant ${merchant.merchantCode}`);
+    }
+  } catch (err: any) {
+    console.error(`[Auto-Onboard] Retry failed for ${merchant.merchantCode}:`, err.message);
+  }
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -740,19 +767,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/aeps/merchant", authMiddleware, async (req: Request, res: Response) => {
     try {
       let merchant = await storage.getAepsMerchant((req as any).userId);
+      const user = await storage.getUser((req as any).userId);
+      if (!merchant && user) {
+        try {
+          await autoOnboardMerchant(user.id, user.phone, user.name || "RupyaSetu");
+          merchant = await storage.getAepsMerchant(user.id);
+        } catch (err: any) {
+          console.error("Auto-onboard backfill failed:", err.message);
+        }
+      } else if (merchant && !merchant.kycRedirectUrl && user) {
+        try {
+          await retryOnboarding(merchant, user.phone, user.name || "RupyaSetu");
+          merchant = await storage.getAepsMerchant(user.id);
+        } catch (err: any) {
+          console.error("Auto-onboard retry failed:", err.message);
+        }
+      }
       if (!merchant) {
-        const user = await storage.getUser((req as any).userId);
-        if (user) {
-          try {
-            await autoOnboardMerchant(user.id, user.phone, user.name || "RupyaSetu");
-            merchant = await storage.getAepsMerchant(user.id);
-          } catch (err: any) {
-            console.error("Auto-onboard backfill failed:", err.message);
-          }
-        }
-        if (!merchant) {
-          return res.json({ merchant: null, onboarded: false });
-        }
+        return res.json({ merchant: null, onboarded: false });
       }
       const today = new Date().toISOString().split("T")[0];
       const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);

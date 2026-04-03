@@ -8,14 +8,13 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  TextInput,
   Linking,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
+import { getAepsMerchant, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
@@ -78,6 +77,7 @@ export default function AepsServicesScreen() {
   const [dailyAuthenticated, setDailyAuthenticated] = useState(false);
   const [kycStatus, setKycStatus] = useState("NOT_STARTED");
   const [merchantCode, setMerchantCode] = useState("");
+  const [kycRedirectUrl, setKycRedirectUrl] = useState("");
   const [onboardingLoading, setOnboardingLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
@@ -109,6 +109,9 @@ export default function AepsServicesScreen() {
       if (result.merchant?.merchantCode) {
         setMerchantCode(result.merchant.merchantCode);
       }
+      if (result.merchant?.kycRedirectUrl) {
+        setKycRedirectUrl(result.merchant.kycRedirectUrl);
+      }
     } catch {
       setOnboarded(false);
       setDailyAuthenticated(false);
@@ -118,31 +121,19 @@ export default function AepsServicesScreen() {
     }
   }, []);
 
-  async function handleStartOnboarding() {
-    if (!merchantCode.trim()) {
-      Alert.alert("Required", "Please enter your merchant code");
+  async function handleOpenKyc() {
+    const url = kycRedirectUrl;
+    if (!url) {
+      Alert.alert("KYC Not Available", "Your merchant account is being set up. Please try again in a moment.");
       return;
     }
-    setOnboardingLoading(true);
     try {
-      const result = await aepsOnboard(merchantCode.trim());
-      if (result.success && result.redirectUrl) {
-        setKycStatus("PENDING");
-        try {
-          await Linking.openURL(result.redirectUrl);
-        } catch {
-          Alert.alert(
-            "Complete KYC",
-            "Please open this URL to complete verification:\n\n" + result.redirectUrl + "\n\nAfter completing, tap 'I Completed KYC' below."
-          );
-        }
-      } else {
-        Alert.alert("Error", result.error || "Failed to start onboarding");
-      }
-    } catch (err: any) {
-      Alert.alert("Error", err.message || "Onboarding failed");
-    } finally {
-      setOnboardingLoading(false);
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        "Complete KYC",
+        "Please open this URL to complete verification:\n\n" + url + "\n\nAfter completing, tap 'I Completed KYC' below."
+      );
     }
   }
 
@@ -255,37 +246,56 @@ export default function AepsServicesScreen() {
             </View>
             {kycStatus !== "COMPLETED" && (
               <>
-                {merchantCode.startsWith("RS-") ? (
+                {merchantCode ? (
                   <View style={styles.assignedCodeBox}>
                     <Text style={styles.assignedCodeLabel}>Your Merchant Code</Text>
                     <Text style={styles.assignedCodeValue}>{merchantCode}</Text>
-                    <Text style={styles.assignedCodeHint}>Assigned by admin. Tap below to continue onboarding.</Text>
+                    <Text style={styles.assignedCodeHint}>Auto-assigned. Complete KYC verification below to activate AEPS.</Text>
                   </View>
                 ) : (
-                  <View style={styles.merchantCodeInput}>
-                    <TextInput
-                      style={styles.mcInput}
-                      placeholder="Enter Merchant Code"
-                      placeholderTextColor={Colors.textTertiary}
-                      value={merchantCode}
-                      onChangeText={setMerchantCode}
-                    />
+                  <View style={styles.assignedCodeBox}>
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                    <Text style={[styles.assignedCodeHint, { marginTop: 8 }]}>Setting up your merchant account...</Text>
                   </View>
                 )}
                 <View style={{ flexDirection: "row", gap: 10 }}>
-                  <Pressable
-                    style={[styles.setupBtn, onboardingLoading && { opacity: 0.6 }]}
-                    onPress={kycStatus === "PENDING" ? handleCompleteKyc : handleStartOnboarding}
-                    disabled={onboardingLoading}
-                  >
-                    {onboardingLoading ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.setupBtnText}>
-                        {kycStatus === "PENDING" ? "I Completed KYC" : "Start Onboarding"}
-                      </Text>
-                    )}
-                  </Pressable>
+                  {kycStatus === "PENDING" && kycRedirectUrl ? (
+                    <>
+                      <Pressable
+                        style={[styles.setupBtn, { flex: 1, backgroundColor: Colors.primary }]}
+                        onPress={handleOpenKyc}
+                      >
+                        <Ionicons name="open-outline" size={16} color="#fff" />
+                        <Text style={styles.setupBtnText}>Complete KYC</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.setupBtn, { flex: 1, backgroundColor: "#6366F1" }, onboardingLoading && { opacity: 0.6 }]}
+                        onPress={handleCompleteKyc}
+                        disabled={onboardingLoading}
+                      >
+                        {onboardingLoading ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Text style={styles.setupBtnText}>I Completed KYC</Text>
+                        )}
+                      </Pressable>
+                    </>
+                  ) : merchantCode ? (
+                    <Pressable
+                      style={[styles.setupBtn, onboardingLoading && { opacity: 0.6 }]}
+                      onPress={handleOpenKyc}
+                      disabled={onboardingLoading || !kycRedirectUrl}
+                    >
+                      {onboardingLoading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="open-outline" size={16} color="#fff" />
+                          <Text style={styles.setupBtnText}>Start KYC Verification</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  ) : null}
                 </View>
               </>
             )}
@@ -504,20 +514,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
     marginTop: 2,
-  },
-  merchantCodeInput: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 48,
-    justifyContent: "center",
-  },
-  mcInput: {
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-    color: Colors.text,
-    height: "100%",
   },
   assignedCodeBox: {
     backgroundColor: "#f0fdf4",

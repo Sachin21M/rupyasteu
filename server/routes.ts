@@ -29,6 +29,36 @@ function authMiddleware(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+async function autoOnboardMerchant(userId: string, phone: string, firmName: string): Promise<void> {
+  const existing = await storage.getAepsMerchant(userId);
+  if (existing) return;
+
+  const merchantCode = "RS-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  let kycRedirectUrl = "";
+  try {
+    const onboardResult = await aepsService.getOnboardingUrl({
+      merchantCode,
+      mobile: phone,
+      email: "",
+      firmName: firmName || "RupyaSetu",
+    });
+    if (onboardResult.status && onboardResult.data?.redirecturl) {
+      kycRedirectUrl = onboardResult.data.redirecturl;
+    }
+  } catch (err: any) {
+    console.error("Auto-onboard PaySprint API call failed:", err.message);
+  }
+
+  await storage.createAepsMerchant(userId, merchantCode, "bank2", {
+    phone,
+    firmName: firmName || "RupyaSetu",
+    kycRedirectUrl,
+    createdBy: "auto",
+  });
+  console.log(`[Auto-Onboard] Created merchant ${merchantCode} for user ${userId} (${phone})`);
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/send-otp", async (req: Request, res: Response) => {
@@ -136,6 +166,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { name } = req.body;
       const user = await storage.updateUser((req as any).userId, { name });
       if (!user) return res.status(404).json({ error: "User not found" });
+
+      autoOnboardMerchant(user.id, user.phone, name || "RupyaSetu").catch((err) => {
+        console.error("Auto-onboard after profile update failed:", err.message);
+      });
+
       res.json({ user: { id: user.id, phone: user.phone, name: user.name } });
     } catch (error) {
       res.status(500).json({ error: "Failed to update profile" });
@@ -704,9 +739,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/aeps/merchant", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const merchant = await storage.getAepsMerchant((req as any).userId);
+      let merchant = await storage.getAepsMerchant((req as any).userId);
       if (!merchant) {
-        return res.json({ merchant: null, onboarded: false });
+        const user = await storage.getUser((req as any).userId);
+        if (user) {
+          try {
+            await autoOnboardMerchant(user.id, user.phone, user.name || "RupyaSetu");
+            merchant = await storage.getAepsMerchant(user.id);
+          } catch (err: any) {
+            console.error("Auto-onboard backfill failed:", err.message);
+          }
+        }
+        if (!merchant) {
+          return res.json({ merchant: null, onboarded: false });
+        }
       }
       const today = new Date().toISOString().split("T")[0];
       const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);

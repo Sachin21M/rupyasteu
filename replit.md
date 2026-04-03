@@ -74,7 +74,7 @@ shared/
 8. Paysprint API integration (LIVE environment — AES encrypted, IP BASED auth)
 9. **AEPS Banking** — Balance Enquiry, Cash Withdrawal, Mini Statement, Aadhaar Pay, Cash Deposit
 10. AEPS merchant onboarding and daily 2FA authentication
-11. **Automated Merchant Registration** — Admin can create merchants from admin panel with auto-generated codes (RS-XXXXXX format), Paysprint onboarding API integration, KYC status management
+11. **Automatic Sub-Merchant Onboarding** — Merchants are auto-registered with PaySprint when users complete profile setup (name entry). Existing users without merchant records get backfilled on next AEPS page visit. Admin can still manually create merchants. Merchant codes (RS-XXXXXX) auto-generated, `createdBy` field tracks origin: `auto`, `admin`, or `self`
 12. **Vendor Wallet System** — Balance tracking, UPI recharge with admin approval, commission auto-deduction per AEPS transaction, admin wallet management
 13. Privacy, Help & Support, About screens
 

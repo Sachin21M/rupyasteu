@@ -63,6 +63,7 @@ PAYEE_UPI_ID = "charua821@okaxis"
 PAYSPRINT_ENV = "PRODUCTION"
 PAYSPRINT_BASE_URL = "https://api.paysprint.in/api/v1"
 PAYSPRINT_PROXY_URL = "https://peru-mosquito-831403.hostingersite.com/"
+EXPO_PUBLIC_API_URL = "https://rupyasetuapi.site"
 
 [userenv.production]
 EXPO_PUBLIC_DOMAIN = "rupyasetuapi.site"

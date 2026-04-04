@@ -15,10 +15,11 @@ npx esbuild server/index.ts \
 
 echo "Build complete: server_dist/index.js"
 echo ""
-echo "Restarting PM2..."
+echo "Restarting PM2 using ecosystem config..."
 pm2 delete rupyasetu 2>/dev/null || true
-pm2 start node --name rupyasetu -- -r dotenv/config /var/www/rupyasetu/server_dist/index.js
+pm2 start ecosystem.config.js
 pm2 save
 
 echo ""
 echo "Done! Check status with: pm2 status"
+echo "Check logs with: pm2 logs rupyasetu --lines 20"

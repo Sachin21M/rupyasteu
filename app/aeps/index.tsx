@@ -299,7 +299,7 @@ export default function AepsServicesScreen() {
                       ) : (
                         <>
                           <Ionicons name="refresh" size={16} color="#fff" />
-                          <Text style={styles.setupBtnText}>Retry KYC Setup</Text>
+                          <Text style={styles.setupBtnText}>Complete KYC Setup</Text>
                         </>
                       )}
                     </Pressable>

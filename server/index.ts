@@ -1,6 +1,3 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-
 // Load .env file on VPS (no-op on Replit where env vars are injected)
 import * as dotenv from "dotenv";
 dotenv.config();

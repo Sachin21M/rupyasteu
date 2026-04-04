@@ -65,6 +65,6 @@ PAYSPRINT_BASE_URL = "https://api.paysprint.in/api/v1"
 PAYSPRINT_PROXY_URL = "https://peru-mosquito-831403.hostingersite.com/"
 
 [userenv.production]
-EXPO_PUBLIC_DOMAIN = "rupyasetuadmin.site"
+EXPO_PUBLIC_DOMAIN = "rupyasetuapi.site"
 
 [userenv.development]

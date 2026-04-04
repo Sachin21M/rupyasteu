@@ -160,9 +160,11 @@ export interface IStorage {
   getAllTransactions(): Promise<Transaction[]>;
   findTransactionByUtr(utr: string): Promise<Transaction | undefined>;
 
+  getTransactionByReference(refId: string): Promise<Transaction | undefined>;
   getAepsMerchant(userId: string): Promise<AepsMerchant | undefined>;
   getAepsMerchantByPhone(phone: string): Promise<AepsMerchant | undefined>;
   getAepsMerchantById(id: string): Promise<AepsMerchant | undefined>;
+  getAepsMerchantByCode(merchantCode: string): Promise<AepsMerchant | undefined>;
   getAllAepsMerchants(): Promise<AepsMerchant[]>;
   createAepsMerchant(userId: string, merchantCode: string, bankPipes: string, extra?: { phone?: string; firmName?: string; kycRedirectUrl?: string; createdBy?: string }): Promise<AepsMerchant>;
   updateAepsMerchant(userId: string, data: Partial<AepsMerchant>): Promise<AepsMerchant | undefined>;
@@ -421,6 +423,14 @@ export class PgStorage implements IStorage {
     return result.rows[0] ? rowToTransaction(result.rows[0]) : undefined;
   }
 
+  async getTransactionByReference(refId: string): Promise<Transaction | undefined> {
+    const result = await pool.query(
+      "SELECT * FROM transactions WHERE paysprint_ref_id = $1 OR id = $1 LIMIT 1",
+      [refId]
+    );
+    return result.rows[0] ? rowToTransaction(result.rows[0]) : undefined;
+  }
+
   async updateTransaction(id: string, data: Partial<Transaction>): Promise<Transaction | undefined> {
     const fields: string[] = [];
     const values: any[] = [];
@@ -471,6 +481,11 @@ export class PgStorage implements IStorage {
 
   async getAepsMerchantById(id: string): Promise<AepsMerchant | undefined> {
     const result = await pool.query("SELECT * FROM aeps_merchants WHERE id = $1", [id]);
+    return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
+  }
+
+  async getAepsMerchantByCode(merchantCode: string): Promise<AepsMerchant | undefined> {
+    const result = await pool.query("SELECT * FROM aeps_merchants WHERE merchant_code = $1 LIMIT 1", [merchantCode]);
     return result.rows[0] ? rowToAepsMerchant(result.rows[0]) : undefined;
   }
 

@@ -1522,6 +1522,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/paysprint/callback", async (req: Request, res: Response) => {
+    try {
+      const body = req.body;
+      console.log("[PaySprint Recharge Callback]", JSON.stringify(body));
+      if (body.referenceid || body.operatorref) {
+        const txId = body.referenceid || body.operatorref;
+        const tx = await storage.getTransactionByReference(txId);
+        if (tx) {
+          const newStatus = body.status === "SUCCESS" || body.status === "1" ? "COMPLETED" : "FAILED";
+          await storage.updateTransaction(tx.id, {
+            rechargeStatus: newStatus,
+            paysprintRefId: body.rrn || body.refid || tx.paysprintRefId,
+          });
+          console.log(`[PaySprint Recharge Callback] Updated tx ${tx.id} → ${newStatus}`);
+        }
+      }
+      res.status(200).json({ status: true });
+    } catch (error) {
+      console.error("[PaySprint Recharge Callback] Error:", error);
+      res.status(200).json({ status: true });
+    }
+  });
+
+  app.post("/api/paysprint/aeps-callback", async (req: Request, res: Response) => {
+    try {
+      const body = req.body;
+      console.log("[PaySprint AEPS Callback]", JSON.stringify(body));
+      if (body.merchantcode) {
+        const merchant = await storage.getAepsMerchantByCode(body.merchantcode);
+        if (merchant) {
+          const kycStatus = body.status === "SUCCESS" || body.kycstatus === "COMPLETED" ? "COMPLETED" : "PENDING";
+          await storage.updateAepsMerchant(merchant.userId, { kycStatus });
+          console.log(`[PaySprint AEPS Callback] Merchant ${body.merchantcode} KYC → ${kycStatus}`);
+        }
+      }
+      res.status(200).json({ status: true });
+    } catch (error) {
+      console.error("[PaySprint AEPS Callback] Error:", error);
+      res.status(200).json({ status: true });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

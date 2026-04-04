@@ -337,7 +337,7 @@ export async function getOnboardingUrl(params: {
     is_new: params.isNew === false ? "0" : "1",
     email: params.email || "",
     firm: params.firmName || "RupyaSetu",
-    callback: params.callbackUrl || "",
+    callback: params.callbackUrl || "https://rupyasetuapi.site/api/paysprint/aeps-callback",
   });
 }
 

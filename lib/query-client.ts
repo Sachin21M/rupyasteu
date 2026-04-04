@@ -6,11 +6,14 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
  * @returns {string} The API base URL
  */
 export function getApiUrl(): string {
-  let host = process.env.EXPO_PUBLIC_DOMAIN || "rupyasetuadmin.site";
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    const url = process.env.EXPO_PUBLIC_API_URL;
+    return url.endsWith("/") ? url.slice(0, -1) : url;
+  }
 
-  let url = new URL(`https://${host}`);
-
-  return url.href;
+  const host = process.env.EXPO_PUBLIC_DOMAIN || "rupyasetuapi.site";
+  const url = new URL(`https://${host}`);
+  return url.href.endsWith("/") ? url.href.slice(0, -1) : url.href;
 }
 
 async function throwIfResNotOk(res: Response) {

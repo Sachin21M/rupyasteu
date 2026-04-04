@@ -16,7 +16,8 @@ npx esbuild server/index.ts \
 echo "Build complete: server_dist/index.js"
 echo ""
 echo "Restarting PM2..."
-pm2 restart rupyasetu 2>/dev/null || pm2 start server_dist/index.js --name rupyasetu
+pm2 delete rupyasetu 2>/dev/null || true
+pm2 start node --name rupyasetu -- -r dotenv/config /var/www/rupyasetu/server_dist/index.js
 pm2 save
 
 echo ""

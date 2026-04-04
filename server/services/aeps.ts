@@ -329,11 +329,12 @@ export async function getOnboardingUrl(params: {
   email?: string;
   firmName?: string;
   callbackUrl?: string;
+  isNew?: boolean;
 }): Promise<AepsResponse> {
   return makeAepsRequest("/service/onboard/onboard/getonboardurl", {
     merchantcode: params.merchantCode,
     mobile: params.mobile,
-    is_new: "0",
+    is_new: params.isNew === false ? "0" : "1",
     email: params.email || "",
     firm: params.firmName || "RupyaSetu",
     callback: params.callbackUrl || "",

@@ -48,6 +48,7 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
       mobile: phone,
       email: "",
       firmName: firmName || "RupyaSetu",
+      isNew: true,
     });
     if (onboardResult.status && onboardResult.data?.redirecturl) {
       kycRedirectUrl = onboardResult.data.redirecturl;
@@ -81,18 +82,31 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
 
 async function retryOnboarding(merchant: any, phone: string, firmName: string): Promise<void> {
   try {
-    const onboardResult = await aepsService.getOnboardingUrl({
+    let onboardResult = await aepsService.getOnboardingUrl({
       merchantCode: merchant.merchantCode,
       mobile: phone,
       email: "",
       firmName: firmName || "RupyaSetu",
+      isNew: true,
     });
+    if (!onboardResult.status || !onboardResult.data?.redirecturl) {
+      console.log(`[Auto-Onboard] is_new=1 failed (${onboardResult.message}), trying is_new=0...`);
+      onboardResult = await aepsService.getOnboardingUrl({
+        merchantCode: merchant.merchantCode,
+        mobile: phone,
+        email: "",
+        firmName: firmName || "RupyaSetu",
+        isNew: false,
+      });
+    }
     if (onboardResult.status && onboardResult.data?.redirecturl) {
       await storage.updateAepsMerchant(merchant.userId, {
         kycRedirectUrl: onboardResult.data.redirecturl,
         kycStatus: "PENDING",
       });
       console.log(`[Auto-Onboard] Retry succeeded for merchant ${merchant.merchantCode}`);
+    } else {
+      console.warn(`[Auto-Onboard] Retry: no URL returned for ${merchant.merchantCode} — ${onboardResult.message}`);
     }
   } catch (err: any) {
     console.error(`[Auto-Onboard] Retry failed for ${merchant.merchantCode}:`, err.message);
@@ -849,10 +863,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      const result = await aepsService.getOnboardingUrl({
+      let result = await aepsService.getOnboardingUrl({
         merchantCode,
         mobile: user.phone,
+        isNew: true,
       });
+      if (!result.status || !result.data?.redirecturl) {
+        result = await aepsService.getOnboardingUrl({
+          merchantCode,
+          mobile: user.phone,
+          isNew: false,
+        });
+      }
 
       if (result.status && result.data?.redirecturl) {
         const merchant = await storage.getAepsMerchant((req as any).userId);
@@ -1210,7 +1232,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           merchantCode,
           mobile: phoneClean,
           email: "",
-          firm: firmName,
+          firmName: firmName,
+          isNew: true,
         });
         if (onboardResult.status && onboardResult.data?.redirecturl) {
           kycRedirectUrl = onboardResult.data.redirecturl;

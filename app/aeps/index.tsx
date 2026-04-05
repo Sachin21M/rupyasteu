@@ -144,6 +144,15 @@ export default function AepsServicesScreen() {
       const result = await aepsOnboard(merchantCode);
       if (result.success && result.redirectUrl) {
         setKycRedirectUrl(result.redirectUrl);
+      } else if (result.response_code === 12001) {
+        Alert.alert(
+          "Already Registered",
+          "Your merchant account is already registered with PaySprint. If you have completed KYC verification, tap 'Verify Status' to activate AEPS services. If not, please contact support.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Verify Status", onPress: handleCompleteKyc },
+          ]
+        );
       } else {
         Alert.alert(
           "Setup Failed",

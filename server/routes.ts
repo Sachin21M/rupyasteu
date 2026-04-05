@@ -937,7 +937,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         res.json({ success: true, redirectUrl: result.data.redirecturl });
       } else {
-        res.json({ success: false, error: result.message });
+        res.json({ success: false, response_code: result.response_code ?? null, error: result.message });
       }
     } catch (error) {
       console.error("AEPS onboard error:", error);

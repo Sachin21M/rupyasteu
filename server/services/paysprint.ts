@@ -18,13 +18,12 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const payload = {
-    timestamp: timestamp,
-    partnerId: PAYSPRINT_PARTNER_ID,
-    reqid: reqid,
+    timestamp,
+    partnerid: PAYSPRINT_PARTNER_ID,
+    reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  const secretBuffer = Buffer.from(jwtTokenEnv, "base64");
-  const token = jwt.sign(payload, secretBuffer, { algorithm: "HS256" });
+  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
   return { token, payload };
 }
 
@@ -54,9 +53,9 @@ async function makePaysprintRequest(
     const reqid = generateUniqueReqId();
 
     const fullPayload: Record<string, unknown> = {
-      partnerId: PAYSPRINT_PARTNER_ID,
-      timestamp: timestamp,
-      reqid: reqid,
+      partnerid: PAYSPRINT_PARTNER_ID,
+      timestamp,
+      reqid,
       ...payload,
     };
 
@@ -71,7 +70,7 @@ async function makePaysprintRequest(
 
     console.log("[STEP 2] REQUEST PAYLOAD (before encryption):");
     console.log("  ", JSON.stringify(fullPayload));
-    console.log("  partnerId:", fullPayload.partnerId);
+    console.log("  partnerid:", fullPayload.partnerid);
     console.log("  timestamp:", fullPayload.timestamp);
     console.log("  reqid:", fullPayload.reqid);
 

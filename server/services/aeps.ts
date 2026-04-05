@@ -40,10 +40,6 @@ const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
 const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
 const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
 
-if (!process.env.PAYSPRINT_AUTHORIZED_KEY) {
-  console.warn("[AEPS] WARNING: PAYSPRINT_AUTHORIZED_KEY is not set. Authorisedkey header will be omitted from PaySprint requests.");
-}
-
 const AEPS_TIMEOUT = 180000;
 
 function isProductionEnv(): boolean {
@@ -58,15 +54,12 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const payload = {
-    iss: "PAYSPRINT",
     timestamp,
-    partnerId: PAYSPRINT_PARTNER_ID,
-    product: "WALLET",
+    partnerid: PAYSPRINT_PARTNER_ID,
     reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  const secretBuffer = Buffer.from(jwtTokenEnv, "base64");
-  const token = jwt.sign(payload, secretBuffer, { algorithm: "HS256" });
+  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
   return { token, payload };
 }
 
@@ -134,7 +127,7 @@ async function makeAepsRequest(
   const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const fullPayload: Record<string, unknown> = {
-    partnerId: PAYSPRINT_PARTNER_ID,
+    partnerid: PAYSPRINT_PARTNER_ID,
     timestamp,
     reqid,
     ...payload,
@@ -157,11 +150,9 @@ async function makeAepsRequest(
       requestBody = JSON.stringify(fullPayload);
     }
 
-    const authorisedKey = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
-      ...(authorisedKey ? { "Authorisedkey": authorisedKey } : {}),
     };
 
     let rawText: string;

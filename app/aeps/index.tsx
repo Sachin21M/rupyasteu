@@ -14,7 +14,7 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
+import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
@@ -134,6 +134,26 @@ export default function AepsServicesScreen() {
         "Complete KYC",
         "Please open this URL to complete verification:\n\n" + url + "\n\nAfter completing, tap 'I Completed KYC' below."
       );
+    }
+  }
+
+  async function handleRetryOnboard() {
+    if (!merchantCode) return;
+    setOnboardingLoading(true);
+    try {
+      const result = await aepsOnboard(merchantCode);
+      if (result.success && result.redirectUrl) {
+        setKycRedirectUrl(result.redirectUrl);
+      } else {
+        Alert.alert(
+          "Setup Failed",
+          result.error || result.message || "PaySprint could not generate a KYC link. Please try again in a moment."
+        );
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to initiate KYC setup. Please try again.");
+    } finally {
+      setOnboardingLoading(false);
     }
   }
 
@@ -291,7 +311,7 @@ export default function AepsServicesScreen() {
                   ) : merchantCode && !kycRedirectUrl ? (
                     <Pressable
                       style={[styles.setupBtn, onboardingLoading && { opacity: 0.6 }]}
-                      onPress={() => { setLoading(true); checkMerchantStatus(); }}
+                      onPress={handleRetryOnboard}
                       disabled={onboardingLoading}
                     >
                       {onboardingLoading ? (

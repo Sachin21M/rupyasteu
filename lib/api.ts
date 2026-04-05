@@ -223,6 +223,7 @@ export async function requestCommissionWithdrawal(data: {
   accountNumber?: string;
   ifscCode?: string;
   accountName?: string;
+  bankName?: string;
 }) {
   const res = await authFetch("/api/commission/withdraw", {
     method: "POST",

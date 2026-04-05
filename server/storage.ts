@@ -169,12 +169,14 @@ async function initAepsTables() {
         account_number VARCHAR(30),
         ifsc_code VARCHAR(15),
         account_name VARCHAR(100),
+        bank_name VARCHAR(100),
         status VARCHAR(15) NOT NULL DEFAULT 'PENDING',
         admin_note TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    await pool.query(`ALTER TABLE commission_withdrawals ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100)`);
     console.log("AEPS tables initialized successfully");
     console.log("Wallet tables initialized successfully");
     console.log("Commission tables initialized successfully");
@@ -877,9 +879,9 @@ export class PgStorage implements IStorage {
   async createCommissionWithdrawal(data: Omit<CommissionWithdrawal, "id" | "createdAt" | "updatedAt">): Promise<CommissionWithdrawal> {
     const id = randomUUID();
     const result = await pool.query(
-      `INSERT INTO commission_withdrawals (id, user_id, amount, mode, upi_id, account_number, ifsc_code, account_name, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [id, data.userId, data.amount, data.mode, data.upiId || null, data.accountNumber || null, data.ifscCode || null, data.accountName || null, data.status || "PENDING"]
+      `INSERT INTO commission_withdrawals (id, user_id, amount, mode, upi_id, account_number, ifsc_code, account_name, bank_name, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [id, data.userId, data.amount, data.mode, data.upiId || null, data.accountNumber || null, data.ifscCode || null, data.accountName || null, data.bankName || null, data.status || "PENDING"]
     );
     await pool.query(
       `UPDATE commission_wallets SET balance = balance - $1, total_withdrawn = total_withdrawn + $1, updated_at = NOW() WHERE user_id = $2`,
@@ -1032,6 +1034,7 @@ function rowToCommissionWithdrawal(row: any): CommissionWithdrawal {
     accountNumber: row.account_number || undefined,
     ifscCode: row.ifsc_code || undefined,
     accountName: row.account_name || undefined,
+    bankName: row.bank_name || undefined,
     status: row.status,
     adminNote: row.admin_note || undefined,
     createdAt: row.created_at?.toISOString?.() || row.created_at,

@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
+import type { CommissionTransaction, CommissionWithdrawal } from "@/shared/schema";
 import {
   getCommissionBalance,
   getCommissionHistory,
@@ -56,6 +57,7 @@ export default function CommissionScreen() {
   const [accountNumber, setAccountNumber] = useState("");
   const [ifscCode, setIfscCode] = useState("");
   const [accountName, setAccountName] = useState("");
+  const [bankName, setBankName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const { data: walletData, isLoading: walletLoading } = useQuery({
@@ -75,8 +77,17 @@ export default function CommissionScreen() {
   });
 
   const wallet = walletData?.wallet;
-  const transactions = historyData?.transactions || [];
-  const withdrawals = withdrawalData?.withdrawals || [];
+  const transactions: CommissionTransaction[] = historyData?.transactions || [];
+  const withdrawals: CommissionWithdrawal[] = withdrawalData?.withdrawals || [];
+
+  const resetForm = () => {
+    setWithdrawAmount("");
+    setUpiId("");
+    setAccountNumber("");
+    setIfscCode("");
+    setAccountName("");
+    setBankName("");
+  };
 
   const handleWithdraw = useCallback(async () => {
     const amount = parseFloat(withdrawAmount);
@@ -89,8 +100,8 @@ export default function CommissionScreen() {
       return;
     }
     if (withdrawMode === "BANK") {
-      if (!accountNumber.trim() || !ifscCode.trim() || !accountName.trim()) {
-        Alert.alert("Error", "Please fill all bank details");
+      if (!bankName.trim() || !accountName.trim() || !accountNumber.trim() || !ifscCode.trim()) {
+        Alert.alert("Error", "Please fill in all bank details including bank name");
         return;
       }
     }
@@ -103,15 +114,12 @@ export default function CommissionScreen() {
         accountNumber: withdrawMode === "BANK" ? accountNumber.trim() : undefined,
         ifscCode: withdrawMode === "BANK" ? ifscCode.trim().toUpperCase() : undefined,
         accountName: withdrawMode === "BANK" ? accountName.trim() : undefined,
+        bankName: withdrawMode === "BANK" ? bankName.trim() : undefined,
       });
       if (result.success) {
         Alert.alert("Success", "Withdrawal request submitted. Admin will process it within 24 hours.");
         setShowWithdrawModal(false);
-        setWithdrawAmount("");
-        setUpiId("");
-        setAccountNumber("");
-        setIfscCode("");
-        setAccountName("");
+        resetForm();
         queryClient.invalidateQueries({ queryKey: ["/api/commission/balance"] });
         queryClient.invalidateQueries({ queryKey: ["/api/commission/withdrawals"] });
         queryClient.invalidateQueries({ queryKey: ["/api/commission/history"] });
@@ -123,7 +131,7 @@ export default function CommissionScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [withdrawAmount, withdrawMode, upiId, accountNumber, ifscCode, accountName, queryClient]);
+  }, [withdrawAmount, withdrawMode, upiId, accountNumber, ifscCode, accountName, bankName, queryClient]);
 
   const statusColor = (status: string) => {
     if (status === "APPROVED") return "#2E9E5B";
@@ -190,7 +198,7 @@ export default function CommissionScreen() {
             { label: "Cash Withdrawal", rate: "₹5 per transaction" },
             { label: "Cash Deposit", rate: "₹5 per transaction" },
             { label: "Mini Statement", rate: "₹0.50 per query" },
-            { label: "Aadhaar Pay", rate: "0.531% of amount" },
+            { label: "Aadhaar Pay", rate: "Service fee: 0.531% of amount" },
           ].map((item) => (
             <View key={item.label} style={styles.rateRow}>
               <Text style={styles.rateLabel}>{item.label}</Text>
@@ -205,7 +213,7 @@ export default function CommissionScreen() {
             onPress={() => setActiveTab("earnings")}
           >
             <Text style={[styles.tabText, activeTab === "earnings" && styles.activeTabText]}>
-              Earnings ({transactions.filter((t: any) => t.type === "CREDIT" && t.serviceType !== "WITHDRAWAL_REFUND").length})
+              Earnings ({transactions.filter((tx: CommissionTransaction) => tx.type === "CREDIT" && tx.serviceType !== "WITHDRAWAL_REFUND").length})
             </Text>
           </Pressable>
           <Pressable
@@ -229,7 +237,7 @@ export default function CommissionScreen() {
                 <Text style={styles.emptySubText}>Complete recharges and AEPS transactions to earn commission</Text>
               </View>
             ) : (
-              transactions.map((tx: any) => (
+              transactions.map((tx: CommissionTransaction) => (
                 <View key={tx.id} style={styles.txCard}>
                   <View style={styles.txLeft}>
                     <View style={[styles.txIcon, { backgroundColor: tx.type === "CREDIT" ? "#d1fae5" : "#fee2e2" }]}>
@@ -245,7 +253,7 @@ export default function CommissionScreen() {
                     </View>
                   </View>
                   <Text style={[styles.txAmount, { color: tx.type === "CREDIT" ? "#2E9E5B" : "#e53935" }]}>
-                    {tx.type === "CREDIT" ? "+" : "-"}₹{parseFloat(tx.amount).toFixed(2)}
+                    {tx.type === "CREDIT" ? "+" : "-"}₹{parseFloat(String(tx.amount)).toFixed(2)}
                   </Text>
                 </View>
               ))
@@ -264,11 +272,11 @@ export default function CommissionScreen() {
                 <Text style={styles.emptySubText}>Your withdrawal requests will appear here</Text>
               </View>
             ) : (
-              withdrawals.map((w: any) => (
+              withdrawals.map((w: CommissionWithdrawal) => (
                 <View key={w.id} style={styles.withdrawalCard}>
                   <View style={styles.withdrawalHeader}>
                     <View style={styles.withdrawalLeft}>
-                      <Text style={styles.withdrawalAmount}>₹{parseFloat(w.amount).toFixed(2)}</Text>
+                      <Text style={styles.withdrawalAmount}>₹{parseFloat(String(w.amount)).toFixed(2)}</Text>
                       <Text style={styles.withdrawalDate}>{formatDate(w.createdAt)}</Text>
                     </View>
                     <View style={[styles.statusBadge, { backgroundColor: statusColor(w.status) + "20" }]}>
@@ -284,7 +292,7 @@ export default function CommissionScreen() {
                     )}
                     {w.mode === "BANK" && w.accountNumber && (
                       <Text style={styles.withdrawalInfo}>
-                        {w.accountName} · {w.accountNumber} · {w.ifscCode}
+                        {w.bankName ? `${w.bankName} · ` : ""}{w.accountName} · {w.accountNumber} · {w.ifscCode}
                       </Text>
                     )}
                     {w.adminNote && (
@@ -362,6 +370,16 @@ export default function CommissionScreen() {
               </View>
             ) : (
               <>
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Bank Name</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="e.g. State Bank of India"
+                    value={bankName}
+                    onChangeText={setBankName}
+                    placeholderTextColor="#aaa"
+                  />
+                </View>
                 <View style={styles.formGroup}>
                   <Text style={styles.formLabel}>Account Holder Name</Text>
                   <TextInput
@@ -675,7 +693,7 @@ const styles = StyleSheet.create({
   withdrawalDetails: { gap: 2 },
   withdrawalMode: {
     fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
+    fontFamily: "Inter_500Medium",
     color: "#555",
   },
   withdrawalInfo: {
@@ -688,6 +706,7 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "#f59e0b",
     marginTop: 4,
+    fontStyle: "italic",
   },
   modal: {
     flex: 1,
@@ -698,10 +717,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 12,
+    paddingTop: 8,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontFamily: "Inter_700Bold",
     color: "#1a1a1a",
   },
@@ -709,11 +729,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_500Medium",
     color: "#2E9E5B",
-    marginBottom: 16,
-    backgroundColor: "#d1fae5",
-    padding: 10,
-    borderRadius: 8,
-    textAlign: "center",
+    marginBottom: 20,
   },
   modeToggle: {
     flexDirection: "row",
@@ -724,7 +740,7 @@ const styles = StyleSheet.create({
   },
   modeBtn: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: "center",
     borderRadius: 8,
   },
@@ -751,11 +767,11 @@ const styles = StyleSheet.create({
   formLabel: {
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    color: "#444",
+    color: "#333",
     marginBottom: 6,
   },
   formInput: {
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#e0e0e0",
     borderRadius: 10,
     paddingHorizontal: 14,
@@ -763,6 +779,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Inter_400Regular",
     color: "#1a1a1a",
+    backgroundColor: "#fafafa",
   },
   submitBtn: {
     backgroundColor: "#2E9E5B",

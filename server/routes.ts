@@ -1625,8 +1625,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/commission/history", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const transactions = await storage.getUserCommissionTransactions((req as any).userId);
-      res.json({ transactions });
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+      const offset = (page - 1) * limit;
+      const allTransactions = await storage.getUserCommissionTransactions((req as any).userId);
+      const total = allTransactions.length;
+      const transactions = allTransactions.slice(offset, offset + limit);
+      res.json({ transactions, total, page, limit, hasMore: offset + limit < total });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch commission history" });
     }
@@ -1634,7 +1639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/commission/withdraw", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { amount, mode, upiId, accountNumber, ifscCode, accountName } = req.body;
+      const { amount, mode, upiId, accountNumber, ifscCode, accountName, bankName } = req.body;
       if (!amount || amount < 50) {
         return res.status(400).json({ error: "Minimum withdrawal amount is ₹50" });
       }
@@ -1644,8 +1649,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (mode === "UPI" && !upiId) {
         return res.status(400).json({ error: "UPI ID is required" });
       }
-      if (mode === "BANK" && (!accountNumber || !ifscCode || !accountName)) {
-        return res.status(400).json({ error: "Account number, IFSC code, and account name are required" });
+      if (mode === "BANK" && (!accountNumber || !ifscCode || !accountName || !bankName)) {
+        return res.status(400).json({ error: "Bank name, account holder name, account number, and IFSC code are required" });
       }
       const wallet = await storage.getOrCreateCommissionWallet((req as any).userId);
       if (wallet.balance < amount) {
@@ -1664,6 +1669,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         accountNumber: mode === "BANK" ? accountNumber : undefined,
         ifscCode: mode === "BANK" ? ifscCode : undefined,
         accountName: mode === "BANK" ? accountName : undefined,
+        bankName: mode === "BANK" ? bankName : undefined,
         status: "PENDING",
       });
       res.json({ success: true, withdrawal });

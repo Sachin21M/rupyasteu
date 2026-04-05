@@ -492,7 +492,16 @@
   <div class="table-section" id="commissionSection" style="display:none;">
     <div class="table-header">
       <h2>Commission Withdrawals <span id="commissionPendingBadge" class="commission-badge" style="display:none;">0</span></h2>
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="commissionSortField" onchange="sortCommissionWithdrawals()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
+          <option value="date">Sort by Date</option>
+          <option value="status">Sort by Status</option>
+          <option value="amount">Sort by Amount</option>
+        </select>
+        <select id="commissionSortDir" onchange="sortCommissionWithdrawals()" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px;">
+          <option value="desc">Newest First</option>
+          <option value="asc">Oldest First</option>
+        </select>
         <button class="refresh-btn" onclick="loadCommissionWithdrawals()">&#x21bb; Refresh</button>
       </div>
     </div>
@@ -1490,6 +1499,20 @@ async function loadCommissionWithdrawals() {
   }
 }
 
+function sortCommissionWithdrawals() {
+  const field = document.getElementById('commissionSortField').value;
+  const dir = document.getElementById('commissionSortDir').value;
+  const statusOrder = { PENDING: 0, APPROVED: 1, REJECTED: 2 };
+  allCommissionWithdrawals.sort((a, b) => {
+    let cmp = 0;
+    if (field === 'date') cmp = new Date(a.createdAt) - new Date(b.createdAt);
+    else if (field === 'status') cmp = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
+    else if (field === 'amount') cmp = parseFloat(a.amount) - parseFloat(b.amount);
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  renderCommissionTable();
+}
+
 function renderCommissionTable() {
   const tbody = document.getElementById('commissionTableBody');
   const empty = document.getElementById('commissionEmptyState');
@@ -1512,7 +1535,7 @@ function renderCommissionTable() {
     const statusBg = w.status === 'APPROVED' ? '#d1fae5' : w.status === 'REJECTED' ? '#fee2e2' : '#fef3c7';
     let details = '';
     if (w.mode === 'UPI' && w.upiId) details = esc(w.upiId);
-    else if (w.mode === 'BANK' && w.accountNumber) details = `${esc(w.accountName || '')} • ${esc(w.accountNumber)} • ${esc(w.ifscCode || '')}`;
+    else if (w.mode === 'BANK' && w.accountNumber) details = `${w.bankName ? esc(w.bankName) + ' • ' : ''}${esc(w.accountName || '')} • ${esc(w.accountNumber)} • ${esc(w.ifscCode || '')}`;
     const safeId = esc(w.id);
     let actions = '';
     if (w.status === 'PENDING') {

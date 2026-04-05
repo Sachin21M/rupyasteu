@@ -203,6 +203,7 @@ export interface CommissionWithdrawal {
   accountNumber?: string;
   ifscCode?: string;
   accountName?: string;
+  bankName?: string;
   status: CommissionWithdrawalStatus;
   adminNote?: string;
   createdAt: string;

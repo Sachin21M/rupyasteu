@@ -497,13 +497,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         try {
           const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
-          const commissionConfigs = await storage.getCommissionConfig();
-          const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
-          if (commCfg && commCfg.commissionAmount > 0) {
-            await storage.creditCommission(
-              transaction.userId, commCfg.commissionAmount, serviceType,
-              req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
-            );
+          const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
+          if (!alreadyCredited) {
+            const commissionConfigs = await storage.getCommissionConfig();
+            const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+            if (commCfg && commCfg.commissionAmount > 0) {
+              await storage.creditCommission(
+                transaction.userId, commCfg.commissionAmount, serviceType,
+                req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+              );
+            }
           }
         } catch (commErr: any) {
           console.error("Commission credit error (approve):", commErr.message);
@@ -557,13 +560,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         try {
           const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
-          const commissionConfigs = await storage.getCommissionConfig();
-          const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
-          if (commCfg && commCfg.commissionAmount > 0) {
-            await storage.creditCommission(
-              transaction.userId, commCfg.commissionAmount, serviceType,
-              req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
-            );
+          const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
+          if (!alreadyCredited) {
+            const commissionConfigs = await storage.getCommissionConfig();
+            const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+            if (commCfg && commCfg.commissionAmount > 0) {
+              await storage.creditCommission(
+                transaction.userId, commCfg.commissionAmount, serviceType,
+                req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+              );
+            }
           }
         } catch (commErr: any) {
           console.error("Commission credit error (retry):", commErr.message);
@@ -603,13 +609,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       try {
         const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
-        const commissionConfigs = await storage.getCommissionConfig();
-        const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
-        if (commCfg && commCfg.commissionAmount > 0) {
-          await storage.creditCommission(
-            transaction.userId, commCfg.commissionAmount, serviceType,
-            req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
-          );
+        const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
+        if (!alreadyCredited) {
+          const commissionConfigs = await storage.getCommissionConfig();
+          const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+          if (commCfg && commCfg.commissionAmount > 0) {
+            await storage.creditCommission(
+              transaction.userId, commCfg.commissionAmount, serviceType,
+              req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+            );
+          }
         }
       } catch (commErr: any) {
         console.error("Commission credit error (mark-success):", commErr.message);
@@ -1148,6 +1157,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updateData: Record<string, any> = {};
       let commissionCredited = 0;
+      let serviceChargeDeducted = 0;
       if (result.status) {
         updateData.status = "AEPS_SUCCESS";
         updateData.paysprintRefId = result.bankrrn || result.txnid || result.data?.ackno || "";
@@ -1155,29 +1165,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (result.ministatement) updateData.miniStatement = JSON.stringify(result.ministatement);
         updateData.message = result.message;
 
-        try {
-          const commissionConfigs = await storage.getCommissionConfig();
-          const commissionConfig = commissionConfigs.find(c => c.serviceType === type);
-          if (commissionConfig && commissionConfig.commissionAmount > 0) {
-            let earnedAmount = 0;
-            if (commissionConfig.commissionType === "FIXED") {
-              earnedAmount = commissionConfig.commissionAmount;
-            } else {
-              earnedAmount = Math.round(((amount || 0) * commissionConfig.commissionAmount / 100) * 100) / 100;
+        if (type === "AADHAAR_PAY" && amount && amount > 0) {
+          const charge = Math.round(amount * 0.00531 * 100) / 100;
+          updateData.serviceCharge = charge;
+          serviceChargeDeducted = charge;
+        } else {
+          try {
+            const alreadyCredited = await storage.hasCommissionCredit(referenceNo, type);
+            if (!alreadyCredited) {
+              const commissionConfigs = await storage.getCommissionConfig();
+              const commissionConfig = commissionConfigs.find(c => c.serviceType === type);
+              if (commissionConfig && commissionConfig.commissionAmount > 0) {
+                let earnedAmount = 0;
+                if (commissionConfig.commissionType === "FIXED") {
+                  earnedAmount = commissionConfig.commissionAmount;
+                } else {
+                  earnedAmount = Math.round(((amount || 0) * commissionConfig.commissionAmount / 100) * 100) / 100;
+                }
+                if (earnedAmount > 0) {
+                  await storage.creditCommission(
+                    (req as any).userId,
+                    earnedAmount,
+                    type,
+                    referenceNo,
+                    `Commission earned for ${type.replace(/_/g, " ")} - Ref: ${referenceNo}`
+                  );
+                  commissionCredited = earnedAmount;
+                }
+              }
             }
-            if (earnedAmount > 0) {
-              await storage.creditCommission(
-                (req as any).userId,
-                earnedAmount,
-                type,
-                referenceNo,
-                `Commission earned for ${type.replace(/_/g, " ")} - Ref: ${referenceNo}`
-              );
-              commissionCredited = earnedAmount;
-            }
+          } catch (commErr: any) {
+            console.error("Commission credit error:", commErr.message);
           }
-        } catch (commErr: any) {
-          console.error("Commission credit error:", commErr.message);
         }
       } else {
         updateData.status = "AEPS_FAILED";
@@ -1194,6 +1213,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         miniStatement: result.ministatement,
         referenceNo: result.bankrrn || referenceNo,
         commissionEarned: commissionCredited,
+        serviceCharge: serviceChargeDeducted || undefined,
       });
     } catch (error) {
       console.error("AEPS transaction error:", error);
@@ -1671,7 +1691,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/admin/commission-withdrawals/:id/approve", adminAuthMiddleware, async (req: Request, res: Response) => {
+  const handleApproveWithdrawal = async (req: Request, res: Response) => {
     try {
       const withdrawal = await storage.getCommissionWithdrawal(req.params.id);
       if (!withdrawal) return res.status(404).json({ error: "Withdrawal not found" });
@@ -1684,9 +1704,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       res.status(500).json({ error: "Failed to approve withdrawal" });
     }
-  });
+  };
 
-  app.post("/api/admin/commission-withdrawals/:id/reject", adminAuthMiddleware, async (req: Request, res: Response) => {
+  const handleRejectWithdrawal = async (req: Request, res: Response) => {
     try {
       const withdrawal = await storage.getCommissionWithdrawal(req.params.id);
       if (!withdrawal) return res.status(404).json({ error: "Withdrawal not found" });
@@ -1701,7 +1721,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Commission withdrawal reject error:", error);
       res.status(500).json({ error: "Failed to reject withdrawal" });
     }
-  });
+  };
+
+  app.post("/api/admin/commission-withdrawals/:id/approve", adminAuthMiddleware, handleApproveWithdrawal);
+  app.patch("/api/admin/commission-withdrawals/:id/approve", adminAuthMiddleware, handleApproveWithdrawal);
+  app.post("/api/admin/commission-withdrawals/:id/reject", adminAuthMiddleware, handleRejectWithdrawal);
+  app.patch("/api/admin/commission-withdrawals/:id/reject", adminAuthMiddleware, handleRejectWithdrawal);
 
   const httpServer = createServer(app);
   return httpServer;

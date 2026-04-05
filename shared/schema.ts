@@ -108,6 +108,7 @@ export interface AepsTransaction {
   balance?: string;
   miniStatement?: string;
   message?: string;
+  serviceCharge?: number;
   createdAt: string;
   updatedAt: string;
 }

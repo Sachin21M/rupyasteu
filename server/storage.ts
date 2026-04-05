@@ -54,10 +54,11 @@ async function initAepsTables() {
         balance VARCHAR(50),
         mini_statement TEXT,
         message TEXT,
+        service_charge DECIMAL(12,4),
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+      )`);
+    await pool.query(`ALTER TABLE aeps_transactions ADD COLUMN IF NOT EXISTS service_charge DECIMAL(12,4)`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS aeps_api_logs (
         id VARCHAR(64) PRIMARY KEY,
@@ -242,6 +243,7 @@ export interface IStorage {
 
   getCommissionWallet(userId: string): Promise<CommissionWallet | undefined>;
   getOrCreateCommissionWallet(userId: string): Promise<CommissionWallet>;
+  hasCommissionCredit(reference: string, serviceType: string): Promise<boolean>;
   creditCommission(userId: string, amount: number, serviceType: string, reference: string, description: string): Promise<CommissionTransaction>;
   getUserCommissionTransactions(userId: string): Promise<CommissionTransaction[]>;
   createCommissionWithdrawal(data: Omit<CommissionWithdrawal, "id" | "createdAt" | "updatedAt">): Promise<CommissionWithdrawal>;
@@ -366,6 +368,7 @@ function rowToAepsTransaction(row: any): AepsTransaction {
     balance: row.balance || undefined,
     miniStatement: row.mini_statement || undefined,
     message: row.message || undefined,
+    serviceCharge: row.service_charge != null ? parseFloat(row.service_charge) : undefined,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
   };
@@ -613,10 +616,10 @@ export class PgStorage implements IStorage {
   async createAepsTransaction(data: Omit<AepsTransaction, "id" | "createdAt" | "updatedAt">): Promise<AepsTransaction> {
     const id = randomUUID();
     const result = await pool.query(
-      `INSERT INTO aeps_transactions (id, user_id, type, aadhaar_masked, customer_mobile, bank_name, bank_iin, amount, status, reference_no, paysprint_ref_id, balance, mini_statement, message)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      `INSERT INTO aeps_transactions (id, user_id, type, aadhaar_masked, customer_mobile, bank_name, bank_iin, amount, status, reference_no, paysprint_ref_id, balance, mini_statement, message, service_charge)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
-      [id, data.userId, data.type, data.aadhaarMasked, data.customerMobile, data.bankName, data.bankIin, data.amount, data.status, data.referenceNo, data.paysprintRefId || null, data.balance || null, data.miniStatement || null, data.message || null]
+      [id, data.userId, data.type, data.aadhaarMasked, data.customerMobile, data.bankName, data.bankIin, data.amount, data.status, data.referenceNo, data.paysprintRefId || null, data.balance || null, data.miniStatement || null, data.message || null, data.serviceCharge ?? null]
     );
     return rowToAepsTransaction(result.rows[0]);
   }
@@ -636,6 +639,7 @@ export class PgStorage implements IStorage {
     if (data.balance !== undefined) { fields.push(`balance = $${idx++}`); values.push(data.balance); }
     if (data.miniStatement !== undefined) { fields.push(`mini_statement = $${idx++}`); values.push(data.miniStatement); }
     if (data.message !== undefined) { fields.push(`message = $${idx++}`); values.push(data.message); }
+    if (data.serviceCharge !== undefined) { fields.push(`service_charge = $${idx++}`); values.push(data.serviceCharge); }
 
     if (fields.length === 0) return this.getAepsTransaction(id);
 
@@ -835,6 +839,14 @@ export class PgStorage implements IStorage {
     );
     if (result.rows[0]) return rowToCommissionWallet(result.rows[0]);
     return (await this.getCommissionWallet(userId))!;
+  }
+
+  async hasCommissionCredit(reference: string, serviceType: string): Promise<boolean> {
+    const result = await pool.query(
+      `SELECT id FROM commission_transactions WHERE reference = $1 AND service_type = $2 AND type = 'CREDIT' LIMIT 1`,
+      [reference, serviceType]
+    );
+    return result.rows.length > 0;
   }
 
   async creditCommission(userId: string, amount: number, serviceType: string, reference: string, description: string): Promise<CommissionTransaction> {

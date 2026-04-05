@@ -1537,7 +1537,7 @@ async function approveCommission(id) {
   if (!confirm('Approve this withdrawal request? Make sure payment is sent before approving.')) return;
   try {
     const res = await fetch(`/api/admin/commission-withdrawals/${id}/approve`, {
-      method: 'POST',
+      method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Approved by admin' }),
     });
@@ -1559,7 +1559,7 @@ async function rejectCommission(id) {
   if (note === null) return;
   try {
     const res = await fetch(`/api/admin/commission-withdrawals/${id}/reject`, {
-      method: 'POST',
+      method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ note }),
     });

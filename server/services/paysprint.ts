@@ -23,7 +23,8 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
     reqid: reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  const secretBuffer = Buffer.from(jwtTokenEnv, "base64");
+  const token = jwt.sign(payload, secretBuffer, { algorithm: "HS256" });
   return { token, payload };
 }
 

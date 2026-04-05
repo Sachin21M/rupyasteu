@@ -164,6 +164,50 @@ export interface CommissionConfig {
   commissionType: "FIXED" | "PERCENTAGE";
 }
 
+export interface CommissionWallet {
+  id: string;
+  userId: string;
+  balance: number;
+  totalEarned: number;
+  totalWithdrawn: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommissionTransaction {
+  id: string;
+  userId: string;
+  type: "CREDIT" | "DEBIT";
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  serviceType: string;
+  reference: string;
+  description: string;
+  createdAt: string;
+}
+
+export const commissionWithdrawalStatuses = ["PENDING", "APPROVED", "REJECTED"] as const;
+export type CommissionWithdrawalStatus = typeof commissionWithdrawalStatuses[number];
+
+export const commissionWithdrawalModes = ["UPI", "BANK"] as const;
+export type CommissionWithdrawalMode = typeof commissionWithdrawalModes[number];
+
+export interface CommissionWithdrawal {
+  id: string;
+  userId: string;
+  amount: number;
+  mode: CommissionWithdrawalMode;
+  upiId?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+  accountName?: string;
+  status: CommissionWithdrawalStatus;
+  adminNote?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const sendOtpSchema = z.object({
   phone: phoneSchema,
 });

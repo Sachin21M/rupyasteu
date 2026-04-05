@@ -365,6 +365,14 @@ export default function AepsTransactionScreen() {
                 testID="amount-input"
               />
             </View>
+            {txType === "AADHAAR_PAY" && parseInt(amount) > 0 && (
+              <View style={{ marginTop: 8, backgroundColor: "#FFF7ED", borderRadius: 8, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="information-circle" size={16} color="#F59E0B" />
+                <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: "#92400E", flex: 1 }}>
+                  Service charge: 0.531% = ₹{(parseInt(amount) * 0.00531).toFixed(2)} (0.45% + 18% GST) will be collected from customer
+                </Text>
+              </View>
+            )}
           </View>
         )}
 

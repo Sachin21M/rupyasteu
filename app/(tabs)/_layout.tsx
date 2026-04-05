@@ -18,6 +18,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "clock", selected: "clock.fill" }} />
         <Label>History</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="commission">
+        <Icon sf={{ default: "indianrupeesign.circle", selected: "indianrupeesign.circle.fill" }} />
+        <Label>Commission</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <Icon sf={{ default: "person", selected: "person.fill" }} />
         <Label>Profile</Label>
@@ -71,6 +75,15 @@ function ClassicTabLayout() {
           title: "History",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "time" : "time-outline"} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="commission"
+        options={{
+          title: "Commission",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "wallet" : "wallet-outline"} size={24} color={color} />
           ),
         }}
       />

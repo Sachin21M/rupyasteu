@@ -1,4 +1,4 @@
-import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction, AepsApiLog, VendorWallet, WalletTransaction, CommissionConfig } from "../shared/schema";
+import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction, AepsApiLog, VendorWallet, WalletTransaction, CommissionConfig, CommissionWallet, CommissionTransaction, CommissionWithdrawal, CommissionWithdrawalStatus, CommissionWithdrawalMode } from "../shared/schema";
 import { randomUUID } from "crypto";
 import pg from "pg";
 
@@ -122,15 +122,61 @@ async function initAepsTables() {
     await pool.query(`
       INSERT INTO wallet_commission_config (service_type, commission_amount, commission_type)
       VALUES
-        ('BALANCE_ENQUIRY', 5, 'FIXED'),
-        ('CASH_WITHDRAWAL', 10, 'FIXED'),
-        ('MINI_STATEMENT', 5, 'FIXED'),
-        ('AADHAAR_PAY', 10, 'FIXED'),
-        ('CASH_DEPOSIT', 10, 'FIXED')
-      ON CONFLICT (service_type) DO NOTHING
+        ('BALANCE_ENQUIRY', 0, 'FIXED'),
+        ('CASH_WITHDRAWAL', 5, 'FIXED'),
+        ('MINI_STATEMENT', 0.50, 'FIXED'),
+        ('AADHAAR_PAY', 0.531, 'PERCENTAGE'),
+        ('CASH_DEPOSIT', 5, 'FIXED'),
+        ('MOBILE_RECHARGE', 1, 'FIXED'),
+        ('DTH_RECHARGE', 12, 'FIXED')
+      ON CONFLICT (service_type) DO UPDATE SET
+        commission_amount = EXCLUDED.commission_amount,
+        commission_type = EXCLUDED.commission_type
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS commission_wallets (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL UNIQUE,
+        balance DECIMAL(12,2) NOT NULL DEFAULT 0,
+        total_earned DECIMAL(12,2) NOT NULL DEFAULT 0,
+        total_withdrawn DECIMAL(12,2) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS commission_transactions (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        type VARCHAR(10) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        balance_before DECIMAL(12,2) NOT NULL DEFAULT 0,
+        balance_after DECIMAL(12,2) NOT NULL DEFAULT 0,
+        service_type VARCHAR(30) NOT NULL DEFAULT '',
+        reference VARCHAR(100) NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS commission_withdrawals (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        mode VARCHAR(10) NOT NULL DEFAULT 'UPI',
+        upi_id VARCHAR(100),
+        account_number VARCHAR(30),
+        ifsc_code VARCHAR(15),
+        account_name VARCHAR(100),
+        status VARCHAR(15) NOT NULL DEFAULT 'PENDING',
+        admin_note TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
     `);
     console.log("AEPS tables initialized successfully");
     console.log("Wallet tables initialized successfully");
+    console.log("Commission tables initialized successfully");
   } catch (err: any) {
     console.error("Failed to create tables:", err.message);
   }
@@ -193,6 +239,18 @@ export interface IStorage {
   getPendingWalletRecharges(): Promise<(WalletTransaction & { phone?: string })[]>;
   getCommissionConfig(): Promise<CommissionConfig[]>;
   updateCommissionConfig(serviceType: string, amount: number, type: "FIXED" | "PERCENTAGE"): Promise<CommissionConfig>;
+
+  getCommissionWallet(userId: string): Promise<CommissionWallet | undefined>;
+  getOrCreateCommissionWallet(userId: string): Promise<CommissionWallet>;
+  creditCommission(userId: string, amount: number, serviceType: string, reference: string, description: string): Promise<CommissionTransaction>;
+  getUserCommissionTransactions(userId: string): Promise<CommissionTransaction[]>;
+  createCommissionWithdrawal(data: Omit<CommissionWithdrawal, "id" | "createdAt" | "updatedAt">): Promise<CommissionWithdrawal>;
+  getCommissionWithdrawal(id: string): Promise<CommissionWithdrawal | undefined>;
+  updateCommissionWithdrawal(id: string, data: { status: CommissionWithdrawalStatus; adminNote?: string }): Promise<CommissionWithdrawal | undefined>;
+  getUserCommissionWithdrawals(userId: string): Promise<CommissionWithdrawal[]>;
+  getAllCommissionWithdrawals(): Promise<(CommissionWithdrawal & { phone?: string; name?: string })[]>;
+  getPendingCommissionWithdrawals(): Promise<(CommissionWithdrawal & { phone?: string; name?: string })[]>;
+  refundCommissionWithdrawal(withdrawalId: string, userId: string, amount: number): Promise<void>;
 }
 
 const OPERATORS: Operator[] = [
@@ -759,6 +817,136 @@ export class PgStorage implements IStorage {
     );
     return rowToCommissionConfig(result.rows[0]);
   }
+
+  async getCommissionWallet(userId: string): Promise<CommissionWallet | undefined> {
+    const result = await pool.query("SELECT * FROM commission_wallets WHERE user_id = $1", [userId]);
+    return result.rows[0] ? rowToCommissionWallet(result.rows[0]) : undefined;
+  }
+
+  async getOrCreateCommissionWallet(userId: string): Promise<CommissionWallet> {
+    const existing = await this.getCommissionWallet(userId);
+    if (existing) return existing;
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO commission_wallets (id, user_id, balance, total_earned, total_withdrawn)
+       VALUES ($1, $2, 0, 0, 0)
+       ON CONFLICT (user_id) DO NOTHING RETURNING *`,
+      [id, userId]
+    );
+    if (result.rows[0]) return rowToCommissionWallet(result.rows[0]);
+    return (await this.getCommissionWallet(userId))!;
+  }
+
+  async creditCommission(userId: string, amount: number, serviceType: string, reference: string, description: string): Promise<CommissionTransaction> {
+    const wallet = await this.getOrCreateCommissionWallet(userId);
+    const balanceBefore = wallet.balance;
+    const balanceAfter = balanceBefore + amount;
+    await pool.query(
+      `UPDATE commission_wallets SET balance = balance + $1, total_earned = total_earned + $1, updated_at = NOW() WHERE user_id = $2`,
+      [amount, userId]
+    );
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO commission_transactions (id, user_id, type, amount, balance_before, balance_after, service_type, reference, description)
+       VALUES ($1, $2, 'CREDIT', $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [id, userId, amount, balanceBefore, balanceAfter, serviceType, reference, description]
+    );
+    return rowToCommissionTransaction(result.rows[0]);
+  }
+
+  async getUserCommissionTransactions(userId: string): Promise<CommissionTransaction[]> {
+    const result = await pool.query(
+      "SELECT * FROM commission_transactions WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    return result.rows.map(rowToCommissionTransaction);
+  }
+
+  async createCommissionWithdrawal(data: Omit<CommissionWithdrawal, "id" | "createdAt" | "updatedAt">): Promise<CommissionWithdrawal> {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO commission_withdrawals (id, user_id, amount, mode, upi_id, account_number, ifsc_code, account_name, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [id, data.userId, data.amount, data.mode, data.upiId || null, data.accountNumber || null, data.ifscCode || null, data.accountName || null, data.status || "PENDING"]
+    );
+    await pool.query(
+      `UPDATE commission_wallets SET balance = balance - $1, total_withdrawn = total_withdrawn + $1, updated_at = NOW() WHERE user_id = $2`,
+      [data.amount, data.userId]
+    );
+    const wallet = await this.getOrCreateCommissionWallet(data.userId);
+    const balanceBefore = wallet.balance + data.amount;
+    const txId = randomUUID();
+    await pool.query(
+      `INSERT INTO commission_transactions (id, user_id, type, amount, balance_before, balance_after, service_type, reference, description)
+       VALUES ($1, $2, 'DEBIT', $3, $4, $5, 'WITHDRAWAL', $6, $7)`,
+      [txId, data.userId, data.amount, balanceBefore, wallet.balance, result.rows[0].id, `Withdrawal request via ${data.mode}`]
+    );
+    return rowToCommissionWithdrawal(result.rows[0]);
+  }
+
+  async getCommissionWithdrawal(id: string): Promise<CommissionWithdrawal | undefined> {
+    const result = await pool.query("SELECT * FROM commission_withdrawals WHERE id = $1", [id]);
+    return result.rows[0] ? rowToCommissionWithdrawal(result.rows[0]) : undefined;
+  }
+
+  async updateCommissionWithdrawal(id: string, data: { status: CommissionWithdrawalStatus; adminNote?: string }): Promise<CommissionWithdrawal | undefined> {
+    const result = await pool.query(
+      `UPDATE commission_withdrawals SET status = $1, admin_note = $2, updated_at = NOW() WHERE id = $3 RETURNING *`,
+      [data.status, data.adminNote || null, id]
+    );
+    return result.rows[0] ? rowToCommissionWithdrawal(result.rows[0]) : undefined;
+  }
+
+  async getUserCommissionWithdrawals(userId: string): Promise<CommissionWithdrawal[]> {
+    const result = await pool.query(
+      "SELECT * FROM commission_withdrawals WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    return result.rows.map(rowToCommissionWithdrawal);
+  }
+
+  async getAllCommissionWithdrawals(): Promise<(CommissionWithdrawal & { phone?: string; name?: string })[]> {
+    const result = await pool.query(
+      `SELECT cw.*, u.phone, u.name FROM commission_withdrawals cw
+       LEFT JOIN users u ON cw.user_id = u.id
+       ORDER BY cw.created_at DESC`
+    );
+    return result.rows.map((row: any) => ({
+      ...rowToCommissionWithdrawal(row),
+      phone: row.phone || undefined,
+      name: row.name || undefined,
+    }));
+  }
+
+  async getPendingCommissionWithdrawals(): Promise<(CommissionWithdrawal & { phone?: string; name?: string })[]> {
+    const result = await pool.query(
+      `SELECT cw.*, u.phone, u.name FROM commission_withdrawals cw
+       LEFT JOIN users u ON cw.user_id = u.id
+       WHERE cw.status = 'PENDING'
+       ORDER BY cw.created_at DESC`
+    );
+    return result.rows.map((row: any) => ({
+      ...rowToCommissionWithdrawal(row),
+      phone: row.phone || undefined,
+      name: row.name || undefined,
+    }));
+  }
+
+  async refundCommissionWithdrawal(withdrawalId: string, userId: string, amount: number): Promise<void> {
+    const wallet = await this.getOrCreateCommissionWallet(userId);
+    const balanceBefore = wallet.balance;
+    await pool.query(
+      `UPDATE commission_wallets SET balance = balance + $1, total_withdrawn = GREATEST(total_withdrawn - $1, 0), updated_at = NOW() WHERE user_id = $2`,
+      [amount, userId]
+    );
+    const walletAfter = await this.getCommissionWallet(userId);
+    const id = randomUUID();
+    await pool.query(
+      `INSERT INTO commission_transactions (id, user_id, type, amount, balance_before, balance_after, service_type, reference, description)
+       VALUES ($1, $2, 'CREDIT', $3, $4, $5, 'WITHDRAWAL_REFUND', $6, 'Withdrawal rejected - amount refunded')`,
+      [id, userId, amount, balanceBefore, walletAfter?.balance || balanceBefore + amount, withdrawalId]
+    );
+  }
 }
 
 function rowToWallet(row: any): VendorWallet {
@@ -792,6 +980,50 @@ function rowToCommissionConfig(row: any): CommissionConfig {
     serviceType: row.service_type,
     commissionAmount: parseFloat(row.commission_amount),
     commissionType: row.commission_type,
+  };
+}
+
+function rowToCommissionWallet(row: any): CommissionWallet {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    balance: parseFloat(row.balance),
+    totalEarned: parseFloat(row.total_earned),
+    totalWithdrawn: parseFloat(row.total_withdrawn),
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  };
+}
+
+function rowToCommissionTransaction(row: any): CommissionTransaction {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    amount: parseFloat(row.amount),
+    balanceBefore: parseFloat(row.balance_before),
+    balanceAfter: parseFloat(row.balance_after),
+    serviceType: row.service_type,
+    reference: row.reference,
+    description: row.description,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+  };
+}
+
+function rowToCommissionWithdrawal(row: any): CommissionWithdrawal {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    amount: parseFloat(row.amount),
+    mode: row.mode,
+    upiId: row.upi_id || undefined,
+    accountNumber: row.account_number || undefined,
+    ifscCode: row.ifsc_code || undefined,
+    accountName: row.account_name || undefined,
+    status: row.status,
+    adminNote: row.admin_note || undefined,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
   };
 }
 

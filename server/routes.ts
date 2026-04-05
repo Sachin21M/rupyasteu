@@ -495,6 +495,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           paysprintRefId: rechargeResult.data?.ackno as string,
           rechargeStatus: "RECHARGE_SUCCESS",
         });
+        try {
+          const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+          const commissionConfigs = await storage.getCommissionConfig();
+          const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+          if (commCfg && commCfg.commissionAmount > 0) {
+            await storage.creditCommission(
+              transaction.userId, commCfg.commissionAmount, serviceType,
+              req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+            );
+          }
+        } catch (commErr: any) {
+          console.error("Commission credit error (approve):", commErr.message);
+        }
       } else if (rechargeResult.response_code === 403) {
         await storage.updateTransaction(req.params.id, {
           rechargeStatus: "RECHARGE_PENDING",
@@ -542,6 +555,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           paysprintRefId: rechargeResult.data?.ackno as string,
           rechargeStatus: "RECHARGE_SUCCESS",
         });
+        try {
+          const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+          const commissionConfigs = await storage.getCommissionConfig();
+          const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+          if (commCfg && commCfg.commissionAmount > 0) {
+            await storage.creditCommission(
+              transaction.userId, commCfg.commissionAmount, serviceType,
+              req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+            );
+          }
+        } catch (commErr: any) {
+          console.error("Commission credit error (retry):", commErr.message);
+        }
       } else if (rechargeResult.response_code === 403) {
         await storage.updateTransaction(req.params.id, {
           rechargeStatus: "RECHARGE_PENDING",
@@ -575,6 +601,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rechargeStatus: "RECHARGE_SUCCESS",
         paysprintRefId: "MANUAL_" + Date.now(),
       });
+      try {
+        const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+        const commissionConfigs = await storage.getCommissionConfig();
+        const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+        if (commCfg && commCfg.commissionAmount > 0) {
+          await storage.creditCommission(
+            transaction.userId, commCfg.commissionAmount, serviceType,
+            req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+          );
+        }
+      } catch (commErr: any) {
+        console.error("Commission credit error (mark-success):", commErr.message);
+      }
 
       const updatedTx = await storage.getTransaction(req.params.id);
       res.json({ success: true, transaction: updatedTx });
@@ -1039,22 +1078,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Biometric data is required for AEPS transactions." });
       }
 
-      const wallet = await storage.getOrCreateWallet((req as any).userId);
-      const commissionConfigs = await storage.getCommissionConfig();
-      const commissionConfig = commissionConfigs.find(c => c.serviceType === type);
-      const commissionAmount = commissionConfig ? commissionConfig.commissionAmount : 0;
-      const txAmount = amount || 0;
-      const totalDeduction = commissionAmount;
-
-      if (wallet.balance < totalDeduction) {
-        return res.status(400).json({
-          error: `Insufficient wallet balance. Required: ₹${totalDeduction} (Commission: ₹${commissionAmount}). Current balance: ₹${wallet.balance}`,
-          walletBalance: wallet.balance,
-          requiredAmount: totalDeduction,
-          commissionAmount,
-        });
-      }
-
       const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
       const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
       const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -1124,7 +1147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const updateData: Record<string, any> = {};
-      let walletDeducted = false;
+      let commissionCredited = 0;
       if (result.status) {
         updateData.status = "AEPS_SUCCESS";
         updateData.paysprintRefId = result.bankrrn || result.txnid || result.data?.ackno || "";
@@ -1132,21 +1155,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (result.ministatement) updateData.miniStatement = JSON.stringify(result.ministatement);
         updateData.message = result.message;
 
-        if (commissionAmount > 0) {
-          const currentWallet = await storage.getOrCreateWallet((req as any).userId);
-          const newBalance = currentWallet.balance - commissionAmount;
-          await storage.updateWalletBalance((req as any).userId, -commissionAmount);
-          await storage.createWalletTransaction({
-            userId: (req as any).userId,
-            type: "COMMISSION",
-            amount: commissionAmount,
-            balanceBefore: currentWallet.balance,
-            balanceAfter: newBalance,
-            reference: referenceNo,
-            description: `Commission for ${type.replace(/_/g, ' ')} - Ref: ${referenceNo}`,
-            status: "COMPLETED",
-          });
-          walletDeducted = true;
+        try {
+          const commissionConfigs = await storage.getCommissionConfig();
+          const commissionConfig = commissionConfigs.find(c => c.serviceType === type);
+          if (commissionConfig && commissionConfig.commissionAmount > 0) {
+            let earnedAmount = 0;
+            if (commissionConfig.commissionType === "FIXED") {
+              earnedAmount = commissionConfig.commissionAmount;
+            } else {
+              earnedAmount = Math.round(((amount || 0) * commissionConfig.commissionAmount / 100) * 100) / 100;
+            }
+            if (earnedAmount > 0) {
+              await storage.creditCommission(
+                (req as any).userId,
+                earnedAmount,
+                type,
+                referenceNo,
+                `Commission earned for ${type.replace(/_/g, " ")} - Ref: ${referenceNo}`
+              );
+              commissionCredited = earnedAmount;
+            }
+          }
+        } catch (commErr: any) {
+          console.error("Commission credit error:", commErr.message);
         }
       } else {
         updateData.status = "AEPS_FAILED";
@@ -1162,8 +1193,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         balance: result.balanceamount,
         miniStatement: result.ministatement,
         referenceNo: result.bankrrn || referenceNo,
-        walletDeducted,
-        commissionCharged: walletDeducted ? commissionAmount : 0,
+        commissionEarned: commissionCredited,
       });
     } catch (error) {
       console.error("AEPS transaction error:", error);
@@ -1561,6 +1591,115 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("[PaySprint AEPS Callback] Error:", error);
       res.status(200).json({ status: true });
+    }
+  });
+
+  app.get("/api/commission/balance", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const wallet = await storage.getOrCreateCommissionWallet((req as any).userId);
+      res.json({ wallet });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission balance" });
+    }
+  });
+
+  app.get("/api/commission/history", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const transactions = await storage.getUserCommissionTransactions((req as any).userId);
+      res.json({ transactions });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission history" });
+    }
+  });
+
+  app.post("/api/commission/withdraw", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { amount, mode, upiId, accountNumber, ifscCode, accountName } = req.body;
+      if (!amount || amount < 50) {
+        return res.status(400).json({ error: "Minimum withdrawal amount is ₹50" });
+      }
+      if (!mode || !["UPI", "BANK"].includes(mode)) {
+        return res.status(400).json({ error: "Invalid withdrawal mode" });
+      }
+      if (mode === "UPI" && !upiId) {
+        return res.status(400).json({ error: "UPI ID is required" });
+      }
+      if (mode === "BANK" && (!accountNumber || !ifscCode || !accountName)) {
+        return res.status(400).json({ error: "Account number, IFSC code, and account name are required" });
+      }
+      const wallet = await storage.getOrCreateCommissionWallet((req as any).userId);
+      if (wallet.balance < amount) {
+        return res.status(400).json({ error: `Insufficient commission balance. Available: ₹${wallet.balance.toFixed(2)}` });
+      }
+      const pendingWithdrawals = await storage.getUserCommissionWithdrawals((req as any).userId);
+      const hasPending = pendingWithdrawals.some(w => w.status === "PENDING");
+      if (hasPending) {
+        return res.status(400).json({ error: "You already have a pending withdrawal request" });
+      }
+      const withdrawal = await storage.createCommissionWithdrawal({
+        userId: (req as any).userId,
+        amount,
+        mode,
+        upiId: mode === "UPI" ? upiId : undefined,
+        accountNumber: mode === "BANK" ? accountNumber : undefined,
+        ifscCode: mode === "BANK" ? ifscCode : undefined,
+        accountName: mode === "BANK" ? accountName : undefined,
+        status: "PENDING",
+      });
+      res.json({ success: true, withdrawal });
+    } catch (error) {
+      console.error("Commission withdraw error:", error);
+      res.status(500).json({ error: "Failed to submit withdrawal request" });
+    }
+  });
+
+  app.get("/api/commission/withdrawals", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const withdrawals = await storage.getUserCommissionWithdrawals((req as any).userId);
+      res.json({ withdrawals });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch withdrawals" });
+    }
+  });
+
+  app.get("/api/admin/commission-withdrawals", adminAuthMiddleware, async (_req: Request, res: Response) => {
+    try {
+      const withdrawals = await storage.getAllCommissionWithdrawals();
+      res.json({ withdrawals });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch commission withdrawals" });
+    }
+  });
+
+  app.post("/api/admin/commission-withdrawals/:id/approve", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const withdrawal = await storage.getCommissionWithdrawal(req.params.id);
+      if (!withdrawal) return res.status(404).json({ error: "Withdrawal not found" });
+      if (withdrawal.status !== "PENDING") return res.status(400).json({ error: "Withdrawal is not pending" });
+      const updated = await storage.updateCommissionWithdrawal(req.params.id, {
+        status: "APPROVED",
+        adminNote: req.body.note || "Approved by admin",
+      });
+      res.json({ success: true, withdrawal: updated });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to approve withdrawal" });
+    }
+  });
+
+  app.post("/api/admin/commission-withdrawals/:id/reject", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const withdrawal = await storage.getCommissionWithdrawal(req.params.id);
+      if (!withdrawal) return res.status(404).json({ error: "Withdrawal not found" });
+      if (withdrawal.status !== "PENDING") return res.status(400).json({ error: "Withdrawal is not pending" });
+      await storage.refundCommissionWithdrawal(req.params.id, withdrawal.userId, withdrawal.amount);
+      const updated = await storage.updateCommissionWithdrawal(req.params.id, {
+        status: "REJECTED",
+        adminNote: req.body.note || "Rejected by admin",
+      });
+      res.json({ success: true, withdrawal: updated });
+    } catch (error) {
+      console.error("Commission withdrawal reject error:", error);
+      res.status(500).json({ error: "Failed to reject withdrawal" });
     }
   });
 

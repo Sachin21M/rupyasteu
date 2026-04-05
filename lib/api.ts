@@ -200,3 +200,33 @@ export async function getCommissionConfig() {
   const res = await authFetch("/api/wallet/commission");
   return handleAepsResponse(res);
 }
+
+export async function getCommissionBalance() {
+  const res = await authFetch("/api/commission/balance");
+  return handleAepsResponse(res);
+}
+
+export async function getCommissionHistory() {
+  const res = await authFetch("/api/commission/history");
+  return handleAepsResponse(res);
+}
+
+export async function getCommissionWithdrawals() {
+  const res = await authFetch("/api/commission/withdrawals");
+  return handleAepsResponse(res);
+}
+
+export async function requestCommissionWithdrawal(data: {
+  amount: number;
+  mode: "UPI" | "BANK";
+  upiId?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+  accountName?: string;
+}) {
+  const res = await authFetch("/api/commission/withdraw", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return handleAepsResponse(res);
+}

@@ -11,13 +11,15 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "rupyasetuadmin.site"
+        "EXPO_PUBLIC_DOMAIN": "rupyasetuadmin.site",
+        "EXPO_PUBLIC_API_URL": "https://rupyasetuapi.site"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "rupyasetuadmin.site"
+        "EXPO_PUBLIC_DOMAIN": "rupyasetuadmin.site",
+        "EXPO_PUBLIC_API_URL": "https://rupyasetuapi.site"
       }
     }
   },

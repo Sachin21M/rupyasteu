@@ -326,7 +326,7 @@ export async function getOnboardingUrl(params: {
   callbackUrl?: string;
   isNew?: boolean;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/onboard/onboard/getonboardurl", {
+  const result = await makeAepsRequest("/service/onboard/onboard/getonboardurl", {
     merchantcode: params.merchantCode,
     mobile: params.mobile,
     is_new: params.isNew === false ? "0" : "1",
@@ -334,6 +334,26 @@ export async function getOnboardingUrl(params: {
     firm: params.firmName || "RupyaSetu",
     callback: params.callbackUrl || "https://rupyasetuapi.site/api/paysprint/aeps-callback",
   }, { skipEncryption: true });
+
+  // Normalize redirect URL — PaySprint places it in various locations across API versions
+  const extractedUrl: string | undefined =
+    (typeof result.data === "string" && result.data.startsWith("http") ? result.data : undefined) ||
+    result.data?.redirecturl ||
+    result.data?.redirectUrl ||
+    result.data?.url ||
+    result.data?.redirect_url ||
+    (result as any).redirecturl ||
+    (result as any).redirectUrl;
+
+  if (extractedUrl) {
+    console.log(`[AEPS] Onboarding URL extracted: ${extractedUrl.substring(0, 80)}...`);
+    result.data = { ...(typeof result.data === "object" && result.data !== null ? result.data : {}), redirecturl: extractedUrl };
+  } else {
+    console.log(`[AEPS] Onboarding raw data field: ${JSON.stringify(result.data)}`);
+    console.log(`[AEPS] Onboarding full result keys: ${Object.keys(result).join(", ")}`);
+  }
+
+  return result;
 }
 
 export async function twoFactorRegistration(params: {

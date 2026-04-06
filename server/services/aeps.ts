@@ -70,6 +70,7 @@ interface AepsResponse {
   response_code: number;
   message: string;
   data?: any;
+  redirecturl?: string;
   banklist?: { status: boolean; message: string; data: any[] };
   balanceamount?: string;
   bankrrn?: string;
@@ -335,22 +336,11 @@ export async function getOnboardingUrl(params: {
     callback: params.callbackUrl || "https://rupyasetuapi.site/api/paysprint/aeps-callback",
   }, { skipEncryption: true });
 
-  // Normalize redirect URL — PaySprint places it in various locations across API versions
-  const extractedUrl: string | undefined =
-    (typeof result.data === "string" && result.data.startsWith("http") ? result.data : undefined) ||
-    result.data?.redirecturl ||
-    result.data?.redirectUrl ||
-    result.data?.url ||
-    result.data?.redirect_url ||
-    (result as any).redirecturl ||
-    (result as any).redirectUrl;
-
-  if (extractedUrl) {
-    console.log(`[AEPS] Onboarding URL extracted: ${extractedUrl.substring(0, 80)}...`);
-    result.data = { ...(typeof result.data === "object" && result.data !== null ? result.data : {}), redirecturl: extractedUrl };
+  // PaySprint returns redirecturl as a top-level field (not inside data)
+  if (result.redirecturl) {
+    console.log(`[AEPS] Onboarding URL: ${result.redirecturl.substring(0, 80)}...`);
   } else {
-    console.log(`[AEPS] Onboarding raw data field: ${JSON.stringify(result.data)}`);
-    console.log(`[AEPS] Onboarding full result keys: ${Object.keys(result).join(", ")}`);
+    console.log(`[AEPS] Onboarding no URL found. response_code=${result.response_code} keys=${Object.keys(result).join(",")}`);
   }
 
   return result;

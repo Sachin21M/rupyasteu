@@ -50,8 +50,9 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
       firmName: firmName || "RupyaSetu",
       isNew: true,
     });
-    if (onboardResult.data?.redirecturl) {
-      kycRedirectUrl = onboardResult.data.redirecturl;
+    const url1 = onboardResult.redirecturl || onboardResult.data?.redirecturl;
+    if (url1) {
+      kycRedirectUrl = url1;
       kycStatus = "PENDING";
     }
   } catch (err: any) {
@@ -89,7 +90,7 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
       firmName: firmName || "RupyaSetu",
       isNew: true,
     });
-    if (!onboardResult.data?.redirecturl) {
+    if (!(onboardResult.redirecturl || onboardResult.data?.redirecturl)) {
       console.log(`[Auto-Onboard] is_new=1 failed (${onboardResult.message}), trying is_new=0...`);
       onboardResult = await aepsService.getOnboardingUrl({
         merchantCode: merchant.merchantCode,
@@ -99,9 +100,10 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
         isNew: false,
       });
     }
-    if (onboardResult.data?.redirecturl) {
+    const retryUrl = onboardResult.redirecturl || onboardResult.data?.redirecturl;
+    if (retryUrl) {
       await storage.updateAepsMerchant(merchant.userId, {
-        kycRedirectUrl: onboardResult.data.redirecturl,
+        kycRedirectUrl: retryUrl,
         kycStatus: "PENDING",
       });
       console.log(`[Auto-Onboard] Retry succeeded for merchant ${merchant.merchantCode}`);
@@ -916,7 +918,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mobile: user.phone,
         isNew: true,
       });
-      if (!result.data?.redirecturl) {
+      if (!(result.redirecturl || result.data?.redirecturl)) {
         result = await aepsService.getOnboardingUrl({
           merchantCode,
           mobile: user.phone,
@@ -924,18 +926,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      if (result.data?.redirecturl) {
+      const kycUrl = result.redirecturl || result.data?.redirecturl;
+      if (kycUrl) {
         const merchant = await storage.getAepsMerchant((req as any).userId);
         if (!merchant) {
           await storage.createAepsMerchant((req as any).userId, merchantCode, "bank2", {
             phone: user.phone,
             createdBy: "self",
-            kycRedirectUrl: result.data.redirecturl,
+            kycRedirectUrl: kycUrl,
           });
         } else {
-          await storage.updateAepsMerchant((req as any).userId, { merchantCode, kycStatus: "PENDING", kycRedirectUrl: result.data.redirecturl });
+          await storage.updateAepsMerchant((req as any).userId, { merchantCode, kycStatus: "PENDING", kycRedirectUrl: kycUrl });
         }
-        res.json({ success: true, redirectUrl: result.data.redirecturl });
+        res.json({ success: true, redirectUrl: kycUrl });
       } else {
         res.json({ success: false, response_code: result.response_code ?? null, error: result.message });
       }

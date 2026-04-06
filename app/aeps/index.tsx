@@ -316,7 +316,11 @@ export default function AepsServicesScreen() {
                       onPress={handleCompleteKyc}
                       disabled={onboardingLoading}
                     >
-                      <Text style={styles.setupBtnText}>I Completed KYC</Text>
+                      {onboardingLoading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.setupBtnText}>I Completed KYC</Text>
+                      )}
                     </Pressable>
                   </View>
                 ) : null}

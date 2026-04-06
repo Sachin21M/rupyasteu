@@ -121,29 +121,15 @@ export default function AepsServicesScreen() {
     }
   }, []);
 
-  async function handleOpenKyc() {
-    const url = kycRedirectUrl;
-    if (!url) {
-      Alert.alert("KYC Not Available", "Your merchant account is being set up. Please try again in a moment.");
-      return;
-    }
-    try {
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert(
-        "Complete KYC",
-        "Please open this URL to complete verification:\n\n" + url + "\n\nAfter completing, tap 'I Completed KYC' below."
-      );
-    }
-  }
-
-  async function handleRetryOnboard() {
-    if (!merchantCode) return;
+  async function fetchKycUrl(): Promise<string | null> {
+    if (kycRedirectUrl) return kycRedirectUrl;
+    if (!merchantCode) return null;
     setOnboardingLoading(true);
     try {
       const result = await aepsOnboard(merchantCode);
       if (result.success && result.redirectUrl) {
         setKycRedirectUrl(result.redirectUrl);
+        return result.redirectUrl;
       } else if (result.response_code === 12001) {
         Alert.alert(
           "Already Registered",
@@ -163,6 +149,20 @@ export default function AepsServicesScreen() {
       Alert.alert("Error", err.message || "Failed to initiate KYC setup. Please try again.");
     } finally {
       setOnboardingLoading(false);
+    }
+    return null;
+  }
+
+  async function handleOpenKyc() {
+    const url = await fetchKycUrl();
+    if (!url) return;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        "Complete KYC",
+        "Please open this URL to complete verification:\n\n" + url + "\n\nAfter completing, tap 'I Completed KYC' below."
+      );
     }
   }
 
@@ -295,45 +295,31 @@ export default function AepsServicesScreen() {
                     </Pressable>
                   </View>
                 )}
-                <View style={{ flexDirection: "row", gap: 10 }}>
-                  {merchantCode && kycRedirectUrl ? (
-                    <>
-                      <Pressable
-                        style={[styles.setupBtn, { flex: 1, backgroundColor: Colors.primary }]}
-                        onPress={handleOpenKyc}
-                      >
-                        <Ionicons name="open-outline" size={16} color="#fff" />
-                        <Text style={styles.setupBtnText}>Complete KYC</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.setupBtn, { flex: 1, backgroundColor: "#6366F1" }, onboardingLoading && { opacity: 0.6 }]}
-                        onPress={handleCompleteKyc}
-                        disabled={onboardingLoading}
-                      >
-                        {onboardingLoading ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text style={styles.setupBtnText}>I Completed KYC</Text>
-                        )}
-                      </Pressable>
-                    </>
-                  ) : merchantCode && !kycRedirectUrl ? (
+                {merchantCode ? (
+                  <View style={{ flexDirection: "row", gap: 10 }}>
                     <Pressable
-                      style={[styles.setupBtn, onboardingLoading && { opacity: 0.6 }]}
-                      onPress={handleRetryOnboard}
+                      style={[styles.setupBtn, { flex: 1, backgroundColor: Colors.primary }, onboardingLoading && { opacity: 0.6 }]}
+                      onPress={handleOpenKyc}
                       disabled={onboardingLoading}
                     >
                       {onboardingLoading ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
                         <>
-                          <Ionicons name="refresh" size={16} color="#fff" />
-                          <Text style={styles.setupBtnText}>Complete KYC Setup</Text>
+                          <Ionicons name="open-outline" size={16} color="#fff" />
+                          <Text style={styles.setupBtnText}>Complete KYC</Text>
                         </>
                       )}
                     </Pressable>
-                  ) : null}
-                </View>
+                    <Pressable
+                      style={[styles.setupBtn, { flex: 1, backgroundColor: "#6366F1" }, onboardingLoading && { opacity: 0.6 }]}
+                      onPress={handleCompleteKyc}
+                      disabled={onboardingLoading}
+                    >
+                      <Text style={styles.setupBtnText}>I Completed KYC</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </>
             )}
           </View>

@@ -708,7 +708,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const timestamp = Math.floor(Date.now() / 1000);
       const uniqueReqId = Math.floor(Math.random() * 1000000000).toString();
-      const jwtPayload = { timestamp, partnerId: PAYSPRINT_PARTNER_ID, reqid: uniqueReqId };
+      const jwtPayload = { iss: "PAYSPRINT", timestamp, partnerId: PAYSPRINT_PARTNER_ID, product: "WALLET", reqid: uniqueReqId };
       const jwtToken = jwt.default.sign(jwtPayload, jwtTokenEnv, { algorithm: "HS256" });
 
       let endpoint = "/service/recharge/recharge/dorecharge";

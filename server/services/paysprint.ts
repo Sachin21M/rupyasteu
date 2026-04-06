@@ -255,7 +255,8 @@ export async function initiateRecharge(params: {
   referenceid: string;
 }): Promise<PaysprintResponse> {
   const key = params.operator.toLowerCase().trim();
-  const operatorCode = OPERATOR_MAP[key] ?? parseInt(params.operator) ?? 14;
+  const parsed = parseInt(params.operator, 10);
+  const operatorCode = OPERATOR_MAP[key] ?? (Number.isNaN(parsed) ? 14 : parsed);
   console.log(`[Recharge] Operator lookup: "${params.operator}" → code ${operatorCode}`);
   return makePaysprintRequest("/service/recharge/recharge/dorecharge", {
     operator: operatorCode,

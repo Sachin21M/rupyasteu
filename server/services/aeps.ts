@@ -154,9 +154,11 @@ async function makeAepsRequest(
       requestBody = JSON.stringify(fullPayload);
     }
 
+    const PAYSPRINT_AUTHORIZED_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
+      ...(PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
     };
 
     let rawText: string;

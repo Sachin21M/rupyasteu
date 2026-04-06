@@ -158,7 +158,8 @@ async function makeAepsRequest(
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
-      ...(PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
+      // Authorisedkey is only required in UAT (not in LIVE when using dedicated IP whitelist)
+      ...(!isProductionEnv() && PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
     };
 
     let rawText: string;

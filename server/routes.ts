@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { generateJwtToken, verifyJwtToken } from "./utils/encryption";
 import { validateUtr, validatePhone, validateAmount } from "./utils/validators";
 import { generateOtp, sendSmsAlert } from "./utils/smsalert";
-import { initiateRecharge, checkRechargeStatus, getOperatorInfo } from "./services/paysprint";
+import { initiateRecharge, checkRechargeStatus, getOperatorInfo, getOperatorList } from "./services/paysprint";
 import * as aepsService from "./services/aeps";
 import { generateAepsReport } from "./services/aeps-report";
 import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema, aepsTransactionSchema } from "../shared/schema";
@@ -668,7 +668,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log("========================================\n");
 
       let result;
-      if (action === "browseplan") {
+      if (action === "operatorlist") {
+        result = await getOperatorList();
+      } else if (action === "browseplan") {
         result = await getOperatorInfo({ number: number || "7067018549", type: type || "MOBILE" });
       } else if (action === "dorecharge") {
         const testRefId = referenceid || `RSTEST${Date.now()}`;
@@ -682,7 +684,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (action === "status") {
         result = await checkRechargeStatus(referenceid || "TEST123");
       } else {
-        return res.status(400).json({ error: "Invalid action. Use: browseplan, dorecharge, status" });
+        return res.status(400).json({ error: "Invalid action. Use: operatorlist, browseplan, dorecharge, status" });
       }
 
       res.json({ action, result });

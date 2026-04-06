@@ -18,8 +18,10 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const payload = {
+    iss: "PAYSPRINT",
     timestamp,
-    partnerid: PAYSPRINT_PARTNER_ID,
+    partnerId: PAYSPRINT_PARTNER_ID,
+    product: "WALLET",
     reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
@@ -218,6 +220,7 @@ function simulateResponse(
 }
 
 const OPERATOR_MAP: Record<string, number> = {
+  // Mobile operators
   "jio": 14,
   "airtel": 4,
   "vi": 33,
@@ -225,6 +228,23 @@ const OPERATOR_MAP: Record<string, number> = {
   "idea": 34,
   "bsnl": 8,
   "mtnl": 10,
+  "bsnl special": 44,
+  // DTH operators
+  "airteldth": 1,
+  "airtel dth": 1,
+  "tataplay": 7,
+  "tata play": 7,
+  "tata sky": 7,
+  "tatasky": 7,
+  "dishtv": 3,
+  "dish tv": 3,
+  "dish": 3,
+  "sundirect": 6,
+  "sun direct": 6,
+  "d2h": 4,
+  "videocon": 4,
+  "videocond2h": 4,
+  "videocon d2h": 4,
 };
 
 export async function initiateRecharge(params: {
@@ -234,13 +254,19 @@ export async function initiateRecharge(params: {
   recharge_type: string;
   referenceid: string;
 }): Promise<PaysprintResponse> {
-  const operatorCode = OPERATOR_MAP[params.operator.toLowerCase()] || parseInt(params.operator) || 14;
+  const key = params.operator.toLowerCase().trim();
+  const operatorCode = OPERATOR_MAP[key] ?? parseInt(params.operator) ?? 14;
+  console.log(`[Recharge] Operator lookup: "${params.operator}" → code ${operatorCode}`);
   return makePaysprintRequest("/service/recharge/recharge/dorecharge", {
     operator: operatorCode,
     canumber: params.canumber,
     amount: params.amount,
     referenceid: params.referenceid,
   });
+}
+
+export async function getOperatorList(): Promise<PaysprintResponse> {
+  return makePaysprintRequest("/service/recharge/recharge/operatorlist", {});
 }
 
 export async function checkRechargeStatus(referenceId: string): Promise<PaysprintResponse> {

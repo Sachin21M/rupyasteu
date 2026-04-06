@@ -330,7 +330,7 @@ export async function getOnboardingUrl(params: {
     merchantcode: params.merchantCode,
     mobile: params.mobile,
     is_new: params.isNew === false ? "0" : "1",
-    email: params.email || "",
+    email: params.email || `${params.mobile}@rupyasetu.in`,
     firm: params.firmName || "RupyaSetu",
     callback: params.callbackUrl || "https://rupyasetuapi.site/api/paysprint/aeps-callback",
   }, { skipEncryption: true });

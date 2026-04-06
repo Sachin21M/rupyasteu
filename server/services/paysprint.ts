@@ -10,8 +10,8 @@ function isProductionEnv(): boolean {
   return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
 }
 
-function generateUniqueReqId(): string {
-  return Math.floor(Math.random() * 1000000000).toString();
+function generateUniqueReqId(): number {
+  return Math.floor(Math.random() * 1000000000);
 }
 
 function generatePaysprintJWT(): { token: string; payload: Record<string, unknown> } {

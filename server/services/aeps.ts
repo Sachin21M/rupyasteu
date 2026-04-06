@@ -114,7 +114,8 @@ async function logAepsApiCall(
 
 async function makeAepsRequest(
   endpoint: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  options?: { skipEncryption?: boolean }
 ): Promise<AepsResponse> {
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
   if (!jwtTokenEnv) {
@@ -136,7 +137,7 @@ async function makeAepsRequest(
   };
 
   try {
-    const useEncryption = isProductionEnv();
+    const useEncryption = isProductionEnv() && !options?.skipEncryption;
 
     console.log(`[AEPS] Request to ${endpoint}`);
 
@@ -332,7 +333,7 @@ export async function getOnboardingUrl(params: {
     email: params.email || "",
     firm: params.firmName || "RupyaSetu",
     callback: params.callbackUrl || "https://rupyasetuapi.site/api/paysprint/aeps-callback",
-  });
+  }, { skipEncryption: true });
 }
 
 export async function twoFactorRegistration(params: {

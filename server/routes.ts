@@ -50,7 +50,7 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
       firmName: firmName || "RupyaSetu",
       isNew: true,
     });
-    if (onboardResult.status && onboardResult.data?.redirecturl) {
+    if (onboardResult.data?.redirecturl) {
       kycRedirectUrl = onboardResult.data.redirecturl;
       kycStatus = "PENDING";
     }
@@ -89,7 +89,7 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
       firmName: firmName || "RupyaSetu",
       isNew: true,
     });
-    if (!onboardResult.status || !onboardResult.data?.redirecturl) {
+    if (!onboardResult.data?.redirecturl) {
       console.log(`[Auto-Onboard] is_new=1 failed (${onboardResult.message}), trying is_new=0...`);
       onboardResult = await aepsService.getOnboardingUrl({
         merchantCode: merchant.merchantCode,
@@ -99,7 +99,7 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
         isNew: false,
       });
     }
-    if (onboardResult.status && onboardResult.data?.redirecturl) {
+    if (onboardResult.data?.redirecturl) {
       await storage.updateAepsMerchant(merchant.userId, {
         kycRedirectUrl: onboardResult.data.redirecturl,
         kycStatus: "PENDING",
@@ -916,7 +916,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mobile: user.phone,
         isNew: true,
       });
-      if (!result.status || !result.data?.redirecturl) {
+      if (!result.data?.redirecturl) {
         result = await aepsService.getOnboardingUrl({
           merchantCode,
           mobile: user.phone,
@@ -924,7 +924,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      if (result.status && result.data?.redirecturl) {
+      if (result.data?.redirecturl) {
         const merchant = await storage.getAepsMerchant((req as any).userId);
         if (!merchant) {
           await storage.createAepsMerchant((req as any).userId, merchantCode, "bank2", {
@@ -962,7 +962,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mobile: user.phone,
       });
 
-      if (verifyResult.status && verifyResult.response_code === 1) {
+      if (verifyResult.response_code === 1) {
         const updates: Record<string, string> = { kycStatus: "COMPLETED" };
         if (merchantCode) updates.merchantCode = merchantCode;
         const merchant = await storage.updateAepsMerchant((req as any).userId, updates);

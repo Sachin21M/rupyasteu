@@ -1,3 +1,8 @@
+// Force IPv4 DNS resolution so all outbound API calls use the whitelisted IPv4 address.
+// This must be the very first import before any network-capable modules are loaded.
+import dns from "dns";
+dns.setDefaultResultOrder("ipv4first");
+
 // Load .env file on VPS (no-op on Replit where env vars are injected)
 import * as dotenv from "dotenv";
 dotenv.config();

@@ -19,6 +19,7 @@
     },
     "android": {
       "package": "com.rupyasetu",
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#E8E8E8",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

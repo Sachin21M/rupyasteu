@@ -17,6 +17,7 @@ import Colors from "@/constants/colors";
 import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
+import type { RdDiscoveryResult } from "@/lib/rd-service";
 
 type ServiceType = {
   id: string;
@@ -82,6 +83,7 @@ export default function AepsServicesScreen() {
   const [authLoading, setAuthLoading] = useState(false);
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
   const [rdChecking, setRdChecking] = useState(false);
+  const [rdDiagnostics, setRdDiagnostics] = useState<string[]>([]);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -93,10 +95,14 @@ export default function AepsServicesScreen() {
   async function checkRdDevice() {
     if (Platform.OS === "web") return;
     setRdChecking(true);
+    setRdDiagnostics([]);
     try {
-      const device = await discoverRdDevice();
-      setRdDevice(device);
-    } catch {}
+      const result = await discoverRdDevice();
+      setRdDevice(result.device);
+      setRdDiagnostics(result.diagnostics);
+    } catch (e: any) {
+      setRdDiagnostics([`Fatal: ${e?.message}`]);
+    }
     setRdChecking(false);
   }
 
@@ -258,23 +264,33 @@ export default function AepsServicesScreen() {
       </View>
 
       {Platform.OS !== "web" && (
-        <View style={[styles.rdDeviceBanner, { backgroundColor: rdDevice ? "#f0fdf4" : "#fff7ed", borderColor: rdDevice ? "#bbf7d0" : "#fed7aa" }]}>
-          <View style={[styles.rdDeviceDot, { backgroundColor: rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444" }]} />
-          <MaterialCommunityIcons
-            name={rdDevice ? "usb" : "usb-off"}
-            size={18}
-            color={rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444"}
-          />
-          <Text style={[styles.rdDeviceBannerText, { color: rdChecking ? "#92400e" : rdDevice ? "#166534" : "#9a3412" }]}>
-            {rdChecking
-              ? "Scanning for biometric device..."
-              : rdDevice
-              ? `${rdDevice.manufacturer} ${rdDevice.model} detected (port ${rdDevice.port})`
-              : "No biometric device detected — connect Mantra/Morpho via USB"}
-          </Text>
-          <Pressable onPress={checkRdDevice} hitSlop={10} disabled={rdChecking}>
-            <Ionicons name="refresh" size={18} color={rdDevice ? "#2E9E5B" : "#F59E0B"} />
-          </Pressable>
+        <View style={{ marginHorizontal: 20, marginBottom: 16 }}>
+          <View style={[styles.rdDeviceBanner, { backgroundColor: rdDevice ? "#f0fdf4" : "#fff7ed", borderColor: rdDevice ? "#bbf7d0" : "#fed7aa", marginHorizontal: 0, marginBottom: 0 }]}>
+            <View style={[styles.rdDeviceDot, { backgroundColor: rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444" }]} />
+            <MaterialCommunityIcons
+              name={rdDevice ? "usb" : "usb-off"}
+              size={18}
+              color={rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444"}
+            />
+            <Text style={[styles.rdDeviceBannerText, { color: rdChecking ? "#92400e" : rdDevice ? "#166534" : "#9a3412" }]}>
+              {rdChecking
+                ? "Scanning for biometric device..."
+                : rdDevice
+                ? `${rdDevice.manufacturer} ${rdDevice.model} detected (port ${rdDevice.port})`
+                : "No biometric device detected — connect Mantra/Morpho via USB"}
+            </Text>
+            <Pressable onPress={checkRdDevice} hitSlop={10} disabled={rdChecking}>
+              <Ionicons name="refresh" size={18} color={rdDevice ? "#2E9E5B" : "#F59E0B"} />
+            </Pressable>
+          </View>
+          {!rdChecking && !rdDevice && rdDiagnostics.length > 0 && (
+            <View style={styles.rdDiagBox}>
+              <Text style={styles.rdDiagTitle}>Connection Diagnostics:</Text>
+              {rdDiagnostics.map((line, i) => (
+                <Text key={i} style={styles.rdDiagLine} numberOfLines={2}>{line}</Text>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
@@ -523,6 +539,27 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     fontFamily: "Inter_500Medium",
+  },
+  rdDiagBox: {
+    backgroundColor: "#1e1e2e",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 6,
+    gap: 2,
+  },
+  rdDiagTitle: {
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    color: "#a0a0b0",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  rdDiagLine: {
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+    color: "#e0e0f0",
+    lineHeight: 16,
   },
   rdStatusRow: {
     flexDirection: "row",

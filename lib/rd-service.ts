@@ -17,7 +17,7 @@ export type RdCaptureResult = {
   error?: string;
 };
 
-// Mantra MFS100 uses port 11100 on Android; try multiple ports and hosts
+// Mantra MFS100/MFS110 uses port 11100; try multiple ports and hosts
 const RD_PORTS = [11100, 11101, 11102, 11103, 8080];
 const RD_HOSTS = ["127.0.0.1", "localhost"];
 const RD_TIMEOUT = 5000;
@@ -62,15 +62,33 @@ function parseDeviceInfoFromXml(xml: string): Partial<RdDeviceInfo> {
   };
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeout: number): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const resp = await fetch(url, { ...options, signal: controller.signal });
-    return resp;
-  } finally {
-    clearTimeout(timer);
-  }
+// XHR-based request — required because React Native's fetch silently drops
+// non-standard HTTP verbs. XMLHttpRequest backed by OkHttp3 on Android
+// correctly sends custom methods like RDSERVICE and CAPTURE (UIDAI spec).
+function xhrRequest(
+  method: string,
+  url: string,
+  body: string | null,
+  timeout: number
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    xhr.setRequestHeader("Content-Type", "text/xml");
+    xhr.timeout = timeout;
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 400) {
+        resolve(xhr.responseText || "");
+      } else {
+        reject(new Error(`HTTP ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.ontimeout = () => reject(new Error("Timeout"));
+
+    xhr.send(body);
+  });
 }
 
 export async function discoverRdDevice(): Promise<RdDeviceInfo | null> {
@@ -79,20 +97,24 @@ export async function discoverRdDevice(): Promise<RdDeviceInfo | null> {
   for (const host of RD_HOSTS) {
     for (const port of RD_PORTS) {
       try {
-        // Use standard GET method — Mantra RD Service accepts GET for /rd/info
-        // Custom "RDSERVICE" verb is rejected by React Native's network layer
-        const resp = await fetchWithTimeout(
+        // UIDAI spec: RDSERVICE custom HTTP method for device info
+        const text = await xhrRequest(
+          "RDSERVICE",
           `http://${host}:${port}/rd/info`,
-          {
-            method: "GET",
-            headers: { "Content-Type": "text/xml" },
-          },
+          null,
           RD_TIMEOUT
         );
-        const text = await resp.text();
-        if (text && (text.includes("RDService") || text.includes("DeviceInfo") || text.includes("READY") || text.includes("dpId"))) {
+        if (
+          text &&
+          (text.includes("RDService") ||
+            text.includes("DeviceInfo") ||
+            text.includes("READY") ||
+            text.includes("dpId"))
+        ) {
           const parsed = parseDeviceInfoFromXml(text);
-          console.log(`[RD] Device found at ${host}:${port} — ${parsed.manufacturer} ${parsed.model}`);
+          console.log(
+            `[RD] Device found at ${host}:${port} — ${parsed.manufacturer} ${parsed.model}`
+          );
           return {
             connected: true,
             manufacturer: parsed.manufacturer || "Unknown",
@@ -104,14 +126,19 @@ export async function discoverRdDevice(): Promise<RdDeviceInfo | null> {
           };
         }
       } catch (err: any) {
-        console.log(`[RD] No device at ${host}:${port} — ${err?.message || "timeout"}`);
+        console.log(
+          `[RD] No device at ${host}:${port} — ${err?.message || "timeout"}`
+        );
       }
     }
   }
   return null;
 }
 
-export async function captureFingerprint(port?: number, host?: string): Promise<RdCaptureResult> {
+export async function captureFingerprint(
+  port?: number,
+  host?: string
+): Promise<RdCaptureResult> {
   if (Platform.OS === "web") {
     return {
       success: true,
@@ -148,23 +175,19 @@ export async function captureFingerprint(port?: number, host?: string): Promise<
       success: false,
       pidData: "",
       deviceInfo: null,
-      error: "No RD device found. Please ensure:\n\n1. A UIDAI-certified fingerprint scanner (Mantra MFS100, Morpho, etc.) is connected via USB/OTG\n2. The RD Service app is installed from Play Store\n3. The RD Service app is running",
+      error:
+        "No RD device found. Please ensure:\n\n1. A UIDAI-certified fingerprint scanner (Mantra MFS100/MFS110, Morpho, etc.) is connected via USB/OTG\n2. The RD Service app is installed from Play Store\n3. The RD Service app is running and shows 'Device connected'",
     };
   }
 
   try {
-    // Use standard POST method — Mantra RD Service accepts POST for /rd/capture
-    const resp = await fetchWithTimeout(
+    // UIDAI spec: CAPTURE custom HTTP method for fingerprint capture
+    const pidXml = await xhrRequest(
+      "CAPTURE",
       `http://${device.host}:${device.port}/rd/capture`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "text/xml" },
-        body: CAPTURE_XML,
-      },
+      CAPTURE_XML,
       CAPTURE_TIMEOUT
     );
-
-    const pidXml = await resp.text();
 
     if (!pidXml || pidXml.length < 50) {
       return {
@@ -206,12 +229,13 @@ export async function captureFingerprint(port?: number, host?: string): Promise<
       deviceInfo: device,
     };
   } catch (err: any) {
-    if (err?.name === "AbortError") {
+    if (err?.message === "Timeout") {
       return {
         success: false,
         pidData: "",
         deviceInfo: device,
-        error: "Biometric capture timed out. Please place your finger on the scanner and try again.",
+        error:
+          "Biometric capture timed out. Please place your finger on the scanner and try again.",
       };
     }
     return {

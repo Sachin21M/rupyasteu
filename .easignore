@@ -1,0 +1,21 @@
+# Backend files not needed for mobile build
+server/
+server_dist/
+ecosystem.config.js
+
+# Large directories with no mobile relevance
+attached_assets/
+static-build/
+hostinger-proxy/
+
+# Docs and scripts
+docs/
+scripts/
+
+# Dev/test files
+patches/
+proxy.zip
+
+# Android/iOS generated folders (EAS generates its own)
+android/
+ios/

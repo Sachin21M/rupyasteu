@@ -40,3 +40,7 @@ yarn-error.*
 
 .env
 server_dist/
+
+# Large dirs not needed for mobile build
+attached_assets/
+static-build/

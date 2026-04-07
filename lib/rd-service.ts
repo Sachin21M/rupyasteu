@@ -9,7 +9,7 @@
  * On Web: Returns simulated data for testing.
  */
 import { Platform } from "react-native";
-import * as IntentLauncher from "expo-intent-launcher";
+import { startActivityAsync, ResultCode } from "expo-intent-launcher";
 
 export type RdDeviceInfo = {
   connected: boolean;
@@ -134,7 +134,7 @@ export async function discoverRdDevice(): Promise<RdDiscoveryResult> {
   const diagnostics: string[] = [];
 
   try {
-    const result = await IntentLauncher.startActivityAsync(RD_INFO_ACTION, {});
+    const result = await startActivityAsync(RD_INFO_ACTION, {});
     const code = result.resultCode;
     const extras = (result.extra as Record<string, unknown>) || {};
 
@@ -142,8 +142,7 @@ export async function discoverRdDevice(): Promise<RdDiscoveryResult> {
       `Intent INFO → resultCode=${code} extras=${Object.keys(extras).join(",")}`
     );
 
-    // RESULT_OK = -1 in Android
-    if (code === -1 || code === IntentLauncher.ResultCode?.Success) {
+    if (code === ResultCode.Success) {
       const device = makeDeviceFromExtras(extras);
       return { device, diagnostics };
     }
@@ -207,14 +206,14 @@ export async function captureFingerprint(
   }
 
   try {
-    const result = await IntentLauncher.startActivityAsync(RD_CAPTURE_ACTION, {
+    const result = await startActivityAsync(RD_CAPTURE_ACTION, {
       extra: { PID_OPTIONS: CAPTURE_XML },
     });
 
     const code = result.resultCode;
     const extras = (result.extra as Record<string, unknown>) || {};
 
-    if (code !== -1 && code !== IntentLauncher.ResultCode?.Success) {
+    if (code !== ResultCode.Success) {
       return {
         success: false,
         pidData: "",

@@ -267,7 +267,7 @@ export default function AepsServicesScreen() {
           <View style={[styles.rdDeviceBanner, { backgroundColor: rdDevice ? "#f0fdf4" : "#fff7ed", borderColor: rdDevice ? "#bbf7d0" : "#fed7aa", marginHorizontal: 0, marginBottom: 0 }]}>
             <View style={[styles.rdDeviceDot, { backgroundColor: rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444" }]} />
             <MaterialCommunityIcons
-              name={rdDevice ? "usb" : "usb-off"}
+              name={rdDevice ? "usb" : "usb-port"}
               size={18}
               color={rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444"}
             />

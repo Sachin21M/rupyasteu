@@ -49,7 +49,11 @@
     "extra": {
       "router": {
         "origin": "https://replit.com/"
+      },
+      "eas": {
+        "projectId": "de7d0931-73ff-433a-a060-97b6d8f98c42"
       }
-    }
+    },
+    "owner": "sachin_13"
   }
 }

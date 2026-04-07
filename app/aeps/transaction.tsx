@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -18,6 +18,8 @@ import { getAepsBanks, getAepsMerchant, performAepsTransaction } from "@/lib/api
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 import type { AepsBank } from "@/shared/schema";
+import RdServiceBridge from "@/lib/RdServiceBridge";
+import type { RdBridgeHandle } from "@/lib/RdServiceBridge";
 
 type MerchantStatus = {
   kycStatus: string;
@@ -47,6 +49,7 @@ export default function AepsTransactionScreen() {
   const [rdChecking, setRdChecking] = useState(false);
   const [merchantStatus, setMerchantStatus] = useState<MerchantStatus>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
+  const rdBridgeRef = useRef<RdBridgeHandle>(null);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
   const bottomPadding = Platform.OS === "web" ? 34 : insets.bottom;
@@ -54,15 +57,17 @@ export default function AepsTransactionScreen() {
   useEffect(() => {
     loadBanks();
     checkMerchantStatus();
-    checkRdDevice();
+    const t = setTimeout(() => checkRdDevice(), 1500);
+    return () => clearTimeout(t);
   }, []);
 
   async function checkRdDevice() {
     if (Platform.OS === "web") return;
+    if (!rdBridgeRef.current) return;
     setRdChecking(true);
     try {
-      const device = await discoverRdDevice();
-      setRdDevice(device);
+      const result = await discoverRdDevice(rdBridgeRef.current);
+      setRdDevice(result.device);
     } catch {}
     setRdChecking(false);
   }
@@ -102,8 +107,13 @@ export default function AepsTransactionScreen() {
 
   async function handleCaptureBiometric() {
     setCapturingBiometric(true);
+    if (!rdBridgeRef.current) {
+      Alert.alert("Not Ready", "Biometric bridge is initializing. Please try again in a moment.");
+      setCapturingBiometric(false);
+      return;
+    }
     try {
-      const result = await captureFingerprint(rdDevice?.port);
+      const result = await captureFingerprint(rdBridgeRef.current, rdDevice?.port);
       if (result.success) {
         setBiometricData(result.pidData);
         setBiometricCaptured(true);
@@ -452,6 +462,10 @@ export default function AepsTransactionScreen() {
           )}
         </Pressable>
       </View>
+
+      {Platform.OS !== "web" && (
+        <RdServiceBridge ref={rdBridgeRef} />
+      )}
     </ScrollView>
   );
 }

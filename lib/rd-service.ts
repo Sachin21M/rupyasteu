@@ -1,4 +1,14 @@
+/**
+ * RD Service — communicates with UIDAI-certified biometric devices via their
+ * local HTTP server (Mantra RD Service on localhost:11100).
+ *
+ * IMPORTANT: Custom HTTP methods (RDSERVICE, CAPTURE) are required by the
+ * UIDAI spec but are silently blocked by React Native's OkHttp3 networking
+ * layer. We therefore use a WebView bridge (lib/RdServiceBridge.tsx) which
+ * runs inside Chrome's Blink engine and supports any HTTP method.
+ */
 import { Platform } from "react-native";
+import type { RdBridgeHandle } from "./RdServiceBridge";
 
 export type RdDeviceInfo = {
   connected: boolean;
@@ -33,7 +43,7 @@ const CAPTURE_XML = `<?xml version="1.0"?>
   <CustOpts><Param name="mantrakey" value="" /></CustOpts>
 </PidOptions>`;
 
-const SIMULATED_PID = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS100" mc="MIIEGDCCAwCgAwIBAgIEA" dc="2f196bbc-e2f8-4018-87a9-9b58eb" /><Skey ci="20250101">SIMULATED_KEY</Skey><Hmac>SIMULATED_HMAC</Hmac><Data type="X">SIMULATED_BIOMETRIC_DATA</Data></PidData>`;
+const SIMULATED_PID = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS110" mc="MIIEGDCCAwCgAwIBAgIEA" dc="9519866" /><Skey ci="20250101">SIMULATED_KEY</Skey><Hmac>SIMULATED_HMAC</Hmac><Data type="X">SIMULATED_BIOMETRIC_DATA</Data></PidData>`;
 
 function parseDeviceInfoFromXml(xml: string): Partial<RdDeviceInfo> {
   const getAttr = (tag: string, attr: string): string => {
@@ -62,84 +72,45 @@ function parseDeviceInfoFromXml(xml: string): Partial<RdDeviceInfo> {
   return { manufacturer, model: mi || rdsId || "Unknown", serialNo: dc || "N/A" };
 }
 
-// XHR-based — React Native's fetch silently drops custom HTTP verbs.
-// XMLHttpRequest via OkHttp3 correctly sends RDSERVICE / CAPTURE methods.
-function xhrRequest(
-  method: string,
-  url: string,
-  body: string | null,
-  timeout: number
-): Promise<{ text: string; status: number }> {
-  return new Promise((resolve, reject) => {
-    try {
-      const xhr = new XMLHttpRequest();
-      xhr.open(method, url, true);
-      xhr.setRequestHeader("Content-Type", "text/xml");
-      xhr.timeout = timeout;
-
-      xhr.onreadystatechange = () => {
-        if (xhr.readyState === 4) {
-          if (xhr.status === 0) {
-            reject(new Error(`status=0 (network blocked or unreachable)`));
-          } else if (xhr.status >= 200 && xhr.status < 500) {
-            resolve({ text: xhr.responseText || "", status: xhr.status });
-          } else {
-            reject(new Error(`HTTP ${xhr.status}`));
-          }
-        }
-      };
-      xhr.onerror = () => reject(new Error(`onerror (status=${xhr.status})`));
-      xhr.ontimeout = () => reject(new Error(`timeout after ${timeout}ms`));
-      xhr.send(body);
-    } catch (e: any) {
-      reject(new Error(`open failed: ${e?.message}`));
-    }
-  });
-}
-
-export async function discoverRdDevice(): Promise<RdDiscoveryResult> {
+export async function discoverRdDevice(bridge: RdBridgeHandle): Promise<RdDiscoveryResult> {
   if (Platform.OS === "web") return { device: null, diagnostics: [] };
 
   const diagnostics: string[] = [];
 
   for (const host of RD_HOSTS) {
     for (const port of RD_PORTS) {
-      // Try RDSERVICE first (UIDAI spec), then GET as diagnostic fallback
-      for (const method of ["RDSERVICE", "GET"]) {
-        try {
-          const url = `http://${host}:${port}/rd/info`;
-          const { text, status } = await xhrRequest(method, url, null, RD_TIMEOUT);
-          const snippet = text.substring(0, 100).replace(/[\n\r]/g, " ");
-          diagnostics.push(`${method} ${host}:${port} → ${status} | ${snippet || "(empty)"}`);
+      const url = `http://${host}:${port}/rd/info`;
+      // UIDAI spec requires RDSERVICE method — bridge (WebView) sends it correctly
+      const result = await bridge.xhrRequest("RDSERVICE", url, null, RD_TIMEOUT);
 
-          if (
-            text &&
-            (text.includes("RDService") ||
-              text.includes("DeviceInfo") ||
-              text.includes("READY") ||
-              text.includes("dpId"))
-          ) {
-            const parsed = parseDeviceInfoFromXml(text);
-            return {
-              device: {
-                connected: true,
-                manufacturer: parsed.manufacturer || "Unknown",
-                model: parsed.model || "Unknown",
-                serialNo: parsed.serialNo || "N/A",
-                port,
-                host,
-                rdServiceInfo: text,
-              },
-              diagnostics,
-            };
-          }
-          // Got a response but not RD data — no point trying GET too for this port
-          break;
-        } catch (err: any) {
-          diagnostics.push(`${method} ${host}:${port} → ERR: ${err?.message || "unknown"}`);
-          // If RDSERVICE timed out/blocked, also try GET to test basic connectivity
-          if (method === "GET") break;
+      if (result.success && result.text) {
+        const snippet = result.text.substring(0, 100).replace(/[\n\r]/g, " ");
+        diagnostics.push(`RDSERVICE ${host}:${port} → ${result.status} | ${snippet}`);
+
+        if (
+          result.text.includes("RDService") ||
+          result.text.includes("DeviceInfo") ||
+          result.text.includes("READY") ||
+          result.text.includes("dpId")
+        ) {
+          const parsed = parseDeviceInfoFromXml(result.text);
+          return {
+            device: {
+              connected: true,
+              manufacturer: parsed.manufacturer || "Unknown",
+              model: parsed.model || "Unknown",
+              serialNo: parsed.serialNo || "N/A",
+              port,
+              host,
+              rdServiceInfo: result.text,
+            },
+            diagnostics,
+          };
         }
+        // Connected but not RD data
+        diagnostics.push(`RDSERVICE ${host}:${port} → ${result.status} (not RD service)`);
+      } else {
+        diagnostics.push(`RDSERVICE ${host}:${port} → ERR: ${result.error || `status=${result.status}`}`);
       }
     }
   }
@@ -148,6 +119,7 @@ export async function discoverRdDevice(): Promise<RdDiscoveryResult> {
 }
 
 export async function captureFingerprint(
+  bridge: RdBridgeHandle,
   port?: number,
   host?: string
 ): Promise<RdCaptureResult> {
@@ -179,7 +151,7 @@ export async function captureFingerprint(
       rdServiceInfo: "",
     };
   } else {
-    const result = await discoverRdDevice();
+    const result = await discoverRdDevice(bridge);
     device = result.device;
   }
 
@@ -193,62 +165,54 @@ export async function captureFingerprint(
     };
   }
 
-  try {
-    // Try CAPTURE first (UIDAI spec), fallback to POST
-    let pidXml = "";
-    for (const method of ["CAPTURE", "POST"]) {
-      try {
-        const { text } = await xhrRequest(
-          method,
-          `http://${device.host}:${device.port}/rd/capture`,
-          CAPTURE_XML,
-          CAPTURE_TIMEOUT
-        );
-        pidXml = text;
-        break;
-      } catch (e: any) {
-        if (method === "CAPTURE") continue;
-        throw e;
-      }
-    }
+  // UIDAI spec: CAPTURE method for fingerprint capture
+  const captureResult = await bridge.xhrRequest(
+    "CAPTURE",
+    `http://${device.host}:${device.port}/rd/capture`,
+    CAPTURE_XML,
+    CAPTURE_TIMEOUT
+  );
 
-    if (!pidXml || pidXml.length < 50) {
-      return {
-        success: false,
-        pidData: "",
-        deviceInfo: device,
-        error: "Empty response from RD device. Please try again.",
-      };
-    }
-
-    const errCodeMatch = pidXml.match(/errCode="(\d+)"/);
-    const errInfoMatch = pidXml.match(/errInfo="([^"]*)"/);
-    const errCode = errCodeMatch ? errCodeMatch[1] : null;
-    const errInfo = errInfoMatch ? errInfoMatch[1] : "";
-
-    if (errCode && errCode !== "0") {
-      return {
-        success: false,
-        pidData: "",
-        deviceInfo: device,
-        error: `Biometric capture failed: ${errInfo || "Unknown error"} (Code: ${errCode})`,
-      };
-    }
-
-    const parsedInfo = parseDeviceInfoFromXml(pidXml);
-    if (parsedInfo.manufacturer && parsedInfo.manufacturer !== "Unknown") device.manufacturer = parsedInfo.manufacturer;
-    if (parsedInfo.model && parsedInfo.model !== "Unknown") device.model = parsedInfo.model;
-    if (parsedInfo.serialNo && parsedInfo.serialNo !== "N/A") device.serialNo = parsedInfo.serialNo;
-
-    return { success: true, pidData: pidXml, deviceInfo: device };
-  } catch (err: any) {
+  if (!captureResult.success) {
     return {
       success: false,
       pidData: "",
       deviceInfo: device,
-      error: `RD device error: ${err?.message || "Unknown error"}`,
+      error: `RD device error: ${captureResult.error || `status=${captureResult.status}`}`,
     };
   }
+
+  const pidXml = captureResult.text || "";
+
+  if (!pidXml || pidXml.length < 50) {
+    return {
+      success: false,
+      pidData: "",
+      deviceInfo: device,
+      error: "Empty response from RD device. Please place your finger and try again.",
+    };
+  }
+
+  const errCodeMatch = pidXml.match(/errCode="(\d+)"/);
+  const errInfoMatch = pidXml.match(/errInfo="([^"]*)"/);
+  const errCode = errCodeMatch ? errCodeMatch[1] : null;
+  const errInfo = errInfoMatch ? errInfoMatch[1] : "";
+
+  if (errCode && errCode !== "0") {
+    return {
+      success: false,
+      pidData: "",
+      deviceInfo: device,
+      error: `Biometric capture failed: ${errInfo || "Unknown error"} (Code: ${errCode})`,
+    };
+  }
+
+  const parsedInfo = parseDeviceInfoFromXml(pidXml);
+  if (parsedInfo.manufacturer && parsedInfo.manufacturer !== "Unknown") device.manufacturer = parsedInfo.manufacturer;
+  if (parsedInfo.model && parsedInfo.model !== "Unknown") device.model = parsedInfo.model;
+  if (parsedInfo.serialNo && parsedInfo.serialNo !== "N/A") device.serialNo = parsedInfo.serialNo;
+
+  return { success: true, pidData: pidXml, deviceInfo: device };
 }
 
 export function isSimulated(): boolean {

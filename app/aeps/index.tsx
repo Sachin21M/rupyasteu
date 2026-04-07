@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -17,9 +17,6 @@ import Colors from "@/constants/colors";
 import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
-import type { RdDiscoveryResult } from "@/lib/rd-service";
-import RdServiceBridge from "@/lib/RdServiceBridge";
-import type { RdBridgeHandle } from "@/lib/RdServiceBridge";
 
 type ServiceType = {
   id: string;
@@ -86,27 +83,20 @@ export default function AepsServicesScreen() {
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
   const [rdChecking, setRdChecking] = useState(false);
   const [rdDiagnostics, setRdDiagnostics] = useState<string[]>([]);
-  const rdBridgeRef = useRef<RdBridgeHandle>(null);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
   useEffect(() => {
     checkMerchantStatus();
-    // Give the hidden WebView bridge 1.5s to initialize before scanning
-    const t = setTimeout(() => checkRdDevice(), 1500);
-    return () => clearTimeout(t);
+    checkRdDevice();
   }, []);
 
   async function checkRdDevice() {
     if (Platform.OS === "web") return;
-    if (!rdBridgeRef.current) {
-      setRdDiagnostics(["Bridge not ready — please wait a moment and try again"]);
-      return;
-    }
     setRdChecking(true);
     setRdDiagnostics([]);
     try {
-      const result = await discoverRdDevice(rdBridgeRef.current);
+      const result = await discoverRdDevice();
       setRdDevice(result.device);
       setRdDiagnostics(result.diagnostics);
     } catch (e: any) {
@@ -201,13 +191,8 @@ export default function AepsServicesScreen() {
 
   async function handleDailyAuth() {
     setAuthLoading(true);
-    if (!rdBridgeRef.current) {
-      Alert.alert("Not Ready", "Biometric bridge is initializing. Please try again in a moment.");
-      setAuthLoading(false);
-      return;
-    }
     try {
-      const captureResult = await captureFingerprint(rdBridgeRef.current, rdDevice?.port, rdDevice?.host);
+      const captureResult = await captureFingerprint();
       if (!captureResult.success) {
         Alert.alert("Capture Failed", captureResult.error || "Could not capture biometric data.");
         setAuthLoading(false);
@@ -472,12 +457,6 @@ export default function AepsServicesScreen() {
         </View>
       </View>
 
-      {/* Hidden WebView bridge — sends RDSERVICE/CAPTURE via Chrome's Blink engine */}
-      {Platform.OS !== "web" && (
-        <RdServiceBridge
-          ref={rdBridgeRef}
-        />
-      )}
     </ScrollView>
   );
 }

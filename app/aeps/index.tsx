@@ -187,7 +187,7 @@ export default function AepsServicesScreen() {
   async function handleDailyAuth() {
     setAuthLoading(true);
     try {
-      const captureResult = await captureFingerprint(rdDevice?.port);
+      const captureResult = await captureFingerprint(rdDevice?.port, rdDevice?.host);
       if (!captureResult.success) {
         Alert.alert("Capture Failed", captureResult.error || "Could not capture biometric data.");
         setAuthLoading(false);
@@ -256,6 +256,27 @@ export default function AepsServicesScreen() {
           <Text style={styles.infoBannerSub}>Banking services using Aadhaar + biometric verification</Text>
         </View>
       </View>
+
+      {Platform.OS !== "web" && (
+        <View style={[styles.rdDeviceBanner, { backgroundColor: rdDevice ? "#f0fdf4" : "#fff7ed", borderColor: rdDevice ? "#bbf7d0" : "#fed7aa" }]}>
+          <View style={[styles.rdDeviceDot, { backgroundColor: rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444" }]} />
+          <MaterialCommunityIcons
+            name={rdDevice ? "usb" : "usb-off"}
+            size={18}
+            color={rdChecking ? "#F59E0B" : rdDevice ? "#2E9E5B" : "#EF4444"}
+          />
+          <Text style={[styles.rdDeviceBannerText, { color: rdChecking ? "#92400e" : rdDevice ? "#166534" : "#9a3412" }]}>
+            {rdChecking
+              ? "Scanning for biometric device..."
+              : rdDevice
+              ? `${rdDevice.manufacturer} ${rdDevice.model} detected (port ${rdDevice.port})`
+              : "No biometric device detected — connect Mantra/Morpho via USB"}
+          </Text>
+          <Pressable onPress={checkRdDevice} hitSlop={10} disabled={rdChecking}>
+            <Ionicons name="refresh" size={18} color={rdDevice ? "#2E9E5B" : "#F59E0B"} />
+          </Pressable>
+        </View>
+      )}
 
       {!onboarded && (
         <View style={styles.setupSection}>
@@ -481,6 +502,27 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "rgba(255,255,255,0.8)",
     lineHeight: 18,
+  },
+  rdDeviceBanner: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  rdDeviceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  rdDeviceBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
   },
   rdStatusRow: {
     flexDirection: "row",

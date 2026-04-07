@@ -6,6 +6,7 @@ export type RdDeviceInfo = {
   model: string;
   serialNo: string;
   port: number;
+  host: string;
   rdServiceInfo: string;
 };
 
@@ -16,7 +17,9 @@ export type RdCaptureResult = {
   error?: string;
 };
 
-const RD_PORTS = [11100, 11101, 11102, 11103];
+// Mantra MFS100 uses port 11100 on Android; try multiple ports and hosts
+const RD_PORTS = [11100, 11101, 11102, 11103, 8080];
+const RD_HOSTS = ["127.0.0.1", "localhost"];
 const RD_TIMEOUT = 5000;
 const CAPTURE_TIMEOUT = 30000;
 
@@ -73,32 +76,42 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeout: numb
 export async function discoverRdDevice(): Promise<RdDeviceInfo | null> {
   if (Platform.OS === "web") return null;
 
-  for (const port of RD_PORTS) {
-    try {
-      const resp = await fetchWithTimeout(
-        `http://127.0.0.1:${port}/rd/info`,
-        { method: "RDSERVICE", headers: { "Content-Type": "text/xml" } },
-        RD_TIMEOUT
-      );
-      const text = await resp.text();
-      if (text && (text.includes("RDService") || text.includes("DeviceInfo") || text.includes("READY"))) {
-        const parsed = parseDeviceInfoFromXml(text);
-        return {
-          connected: true,
-          manufacturer: parsed.manufacturer || "Unknown",
-          model: parsed.model || "Unknown",
-          serialNo: parsed.serialNo || "N/A",
-          port,
-          rdServiceInfo: text,
-        };
+  for (const host of RD_HOSTS) {
+    for (const port of RD_PORTS) {
+      try {
+        // Use standard GET method — Mantra RD Service accepts GET for /rd/info
+        // Custom "RDSERVICE" verb is rejected by React Native's network layer
+        const resp = await fetchWithTimeout(
+          `http://${host}:${port}/rd/info`,
+          {
+            method: "GET",
+            headers: { "Content-Type": "text/xml" },
+          },
+          RD_TIMEOUT
+        );
+        const text = await resp.text();
+        if (text && (text.includes("RDService") || text.includes("DeviceInfo") || text.includes("READY") || text.includes("dpId"))) {
+          const parsed = parseDeviceInfoFromXml(text);
+          console.log(`[RD] Device found at ${host}:${port} — ${parsed.manufacturer} ${parsed.model}`);
+          return {
+            connected: true,
+            manufacturer: parsed.manufacturer || "Unknown",
+            model: parsed.model || "Unknown",
+            serialNo: parsed.serialNo || "N/A",
+            port,
+            host,
+            rdServiceInfo: text,
+          };
+        }
+      } catch (err: any) {
+        console.log(`[RD] No device at ${host}:${port} — ${err?.message || "timeout"}`);
       }
-    } catch {
     }
   }
   return null;
 }
 
-export async function captureFingerprint(port?: number): Promise<RdCaptureResult> {
+export async function captureFingerprint(port?: number, host?: string): Promise<RdCaptureResult> {
   if (Platform.OS === "web") {
     return {
       success: true,
@@ -109,6 +122,7 @@ export async function captureFingerprint(port?: number): Promise<RdCaptureResult
         model: "Web Testing",
         serialNo: "SIM-001",
         port: 0,
+        host: "localhost",
         rdServiceInfo: "Simulated for web",
       },
     };
@@ -122,6 +136,7 @@ export async function captureFingerprint(port?: number): Promise<RdCaptureResult
       model: "Unknown",
       serialNo: "N/A",
       port,
+      host: host || "127.0.0.1",
       rdServiceInfo: "",
     };
   } else {
@@ -138,10 +153,11 @@ export async function captureFingerprint(port?: number): Promise<RdCaptureResult
   }
 
   try {
+    // Use standard POST method — Mantra RD Service accepts POST for /rd/capture
     const resp = await fetchWithTimeout(
-      `http://127.0.0.1:${device.port}/rd/capture`,
+      `http://${device.host}:${device.port}/rd/capture`,
       {
-        method: "CAPTURE",
+        method: "POST",
         headers: { "Content-Type": "text/xml" },
         body: CAPTURE_XML,
       },

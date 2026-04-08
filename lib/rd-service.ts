@@ -54,30 +54,56 @@ function parseXmlAttr(xml: string, tag: string, attr: string): string {
   return attrMatch ? attrMatch[1] : "";
 }
 
-function makeDeviceFromExtras(extras: Record<string, unknown>): RdDeviceInfo {
-  // Mantra returns XML string in various keys depending on version
+// App-description strings returned by Mantra RD Service when NO physical device is connected.
+// These appear in the "info" attribute of <RDService> (not in <DeviceInfo>).
+const APP_DESCRIPTION_PATTERNS = [
+  "vendor device manager",
+  "authentication",
+  "rdservice",
+  "rd service",
+  "mantra l1",
+];
+
+function isAppDescription(value: string): boolean {
+  const lower = value.toLowerCase();
+  return APP_DESCRIPTION_PATTERNS.some((p) => lower.includes(p));
+}
+
+/**
+ * Parse the RD Service INFO response extras.
+ * Returns null if no physical device is detected — i.e. the RD Service app
+ * is running but the USB scanner is not connected.
+ */
+function makeDeviceFromExtras(extras: Record<string, unknown>): RdDeviceInfo | null {
   const xmlStr =
     (extras["RD_SERVICE_INFO"] as string) ||
     (extras["rdServiceInfo"] as string) ||
     (extras["DEVICE_INFO"] as string) ||
     "";
 
-  let model = "Unknown";
-  let serialNo = "N/A";
-  let manufacturer = "Unknown";
+  let model = "";
+  let serialNo = "";
+  let manufacturer = "";
 
   if (xmlStr) {
+    // Check RDService-level status — "NOTREADY" means no physical device
+    const rdStatus = parseXmlAttr(xmlStr, "RDService", "status");
+    if (rdStatus && rdStatus.toUpperCase() === "NOTREADY") {
+      return null;
+    }
+
     const dpId =
       parseXmlAttr(xmlStr, "DeviceInfo", "dpId") ||
       parseXmlAttr(xmlStr, "RDService", "dpId");
-    const mi =
-      parseXmlAttr(xmlStr, "DeviceInfo", "mi") ||
-      parseXmlAttr(xmlStr, "RDService", "info");
-    const dc =
-      parseXmlAttr(xmlStr, "DeviceInfo", "dc") ||
-      parseXmlAttr(xmlStr, "RDService", "dc");
 
-    if (mi) model = mi;
+    // mi from <DeviceInfo mi="MFS110"> is the physical device model.
+    // DO NOT fall back to RDService.info — that's the app description string.
+    const mi = parseXmlAttr(xmlStr, "DeviceInfo", "mi");
+
+    // dc from <DeviceInfo dc="9519866"> is the physical device serial number.
+    const dc = parseXmlAttr(xmlStr, "DeviceInfo", "dc");
+
+    if (mi && !isAppDescription(mi)) model = mi;
     if (dc) serialNo = dc;
 
     const dpLower = dpId.toLowerCase();
@@ -100,24 +126,26 @@ function makeDeviceFromExtras(extras: Record<string, unknown>): RdDeviceInfo {
   const flatMfr =
     (extras["dpId"] as string) || (extras["manufacturer"] as string);
 
-  if (flatModel && model === "Unknown") model = flatModel;
-  if (flatSerial && serialNo === "N/A") serialNo = flatSerial;
-  if (flatMfr && manufacturer === "Unknown") {
+  if (flatModel && !model && !isAppDescription(flatModel)) model = flatModel;
+  if (flatSerial && !serialNo) serialNo = flatSerial;
+  if (flatMfr && !manufacturer) {
     const fmLower = flatMfr.toLowerCase();
     if (fmLower.includes("mantra")) manufacturer = "Mantra";
     else if (fmLower.includes("morpho")) manufacturer = "Morpho";
-    else manufacturer = flatMfr;
+    else if (!isAppDescription(flatMfr)) manufacturer = flatMfr;
   }
 
-  // Default to Mantra if we got a successful response but no brand info
-  if (manufacturer === "Unknown") manufacturer = "Mantra";
-  if (model === "Unknown") model = "MFS110";
+  // If we have no physical device identifier (model + serial), the hardware
+  // scanner is not connected even though the RD Service app is running.
+  if (!model && !serialNo) {
+    return null;
+  }
 
   return {
     connected: true,
-    manufacturer,
-    model,
-    serialNo,
+    manufacturer: manufacturer || "Mantra",
+    model: model || "Unknown",
+    serialNo: serialNo || "N/A",
     port: 11100,
     host: "127.0.0.1",
     rdServiceInfo: xmlStr || JSON.stringify(extras),
@@ -144,6 +172,15 @@ export async function discoverRdDevice(): Promise<RdDiscoveryResult> {
 
     if (code === ResultCode.Success) {
       const device = makeDeviceFromExtras(extras);
+      if (!device) {
+        return {
+          device: null,
+          diagnostics: [
+            ...diagnostics,
+            "Mantra RD Service app is running but no biometric scanner is connected. Plug in your USB fingerprint device and try again.",
+          ],
+        };
+      }
       return { device, diagnostics };
     }
 
@@ -151,7 +188,7 @@ export async function discoverRdDevice(): Promise<RdDiscoveryResult> {
       device: null,
       diagnostics: [
         ...diagnostics,
-        `Device not ready (resultCode=${code}). Ensure Mantra RD Service is open and device is connected.`,
+        `RD Service not ready (code=${code}). Open Mantra RD Service app and ensure the device is connected.`,
       ],
     };
   } catch (e: any) {

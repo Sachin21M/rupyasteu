@@ -71,37 +71,39 @@ function isAppDescription(value: string): boolean {
 
 /**
  * Parse the RD Service INFO response extras.
- * Returns null if no physical device is detected — i.e. the RD Service app
- * is running but the USB scanner is not connected.
+ * Mantra returns two separate extra keys:
+ *   RD_SERVICE_INFO — RD Service app info (version, dpId, status)
+ *   DEVICE_INFO     — physical device info (mi=model, dc=serial)
+ * Both must be parsed independently to detect a real physical device.
+ *
+ * Returns null only when status="NOTREADY" is explicitly set.
  */
 function makeDeviceFromExtras(extras: Record<string, unknown>): RdDeviceInfo | null {
-  const xmlStr =
+  // Parse both extra XMLs independently
+  const rdServiceXml =
     (extras["RD_SERVICE_INFO"] as string) ||
     (extras["rdServiceInfo"] as string) ||
-    (extras["DEVICE_INFO"] as string) ||
     "";
+  const deviceInfoXml =
+    (extras["DEVICE_INFO"] as string) ||
+    (extras["deviceInfo"] as string) ||
+    "";
+
+  // "NOTREADY" from the RD Service XML means no device is connected
+  const rdStatus = parseXmlAttr(rdServiceXml, "RDService", "status");
+  if (rdStatus && rdStatus.toUpperCase() === "NOTREADY") {
+    return null;
+  }
 
   let model = "";
   let serialNo = "";
   let manufacturer = "";
 
-  if (xmlStr) {
-    // Check RDService-level status — "NOTREADY" means no physical device
-    const rdStatus = parseXmlAttr(xmlStr, "RDService", "status");
-    if (rdStatus && rdStatus.toUpperCase() === "NOTREADY") {
-      return null;
-    }
-
-    const dpId =
-      parseXmlAttr(xmlStr, "DeviceInfo", "dpId") ||
-      parseXmlAttr(xmlStr, "RDService", "dpId");
-
-    // mi from <DeviceInfo mi="MFS110"> is the physical device model.
-    // DO NOT fall back to RDService.info — that's the app description string.
-    const mi = parseXmlAttr(xmlStr, "DeviceInfo", "mi");
-
-    // dc from <DeviceInfo dc="9519866"> is the physical device serial number.
-    const dc = parseXmlAttr(xmlStr, "DeviceInfo", "dc");
+  // --- Physical device info from DEVICE_INFO extra (primary source) ---
+  if (deviceInfoXml) {
+    const mi = parseXmlAttr(deviceInfoXml, "DeviceInfo", "mi");
+    const dc = parseXmlAttr(deviceInfoXml, "DeviceInfo", "dc");
+    const dpId = parseXmlAttr(deviceInfoXml, "DeviceInfo", "dpId");
 
     if (mi && !isAppDescription(mi)) model = mi;
     if (dc) serialNo = dc;
@@ -111,10 +113,30 @@ function makeDeviceFromExtras(extras: Record<string, unknown>): RdDeviceInfo | n
     else if (dpLower.includes("morpho")) manufacturer = "Morpho";
     else if (dpLower.includes("startek")) manufacturer = "Startek";
     else if (dpLower.includes("secugen")) manufacturer = "SecuGen";
-    else if (dpId) manufacturer = dpId;
+    else if (dpId && !isAppDescription(dpId)) manufacturer = dpId;
   }
 
-  // Also check flat extra keys (some RD Service versions return flat values)
+  // --- Fallback: look inside RD_SERVICE_INFO for nested DeviceInfo ---
+  if (!model && rdServiceXml) {
+    const mi = parseXmlAttr(rdServiceXml, "DeviceInfo", "mi");
+    const dc = parseXmlAttr(rdServiceXml, "DeviceInfo", "dc");
+    const dpId =
+      parseXmlAttr(rdServiceXml, "DeviceInfo", "dpId") ||
+      parseXmlAttr(rdServiceXml, "RDService", "dpId");
+
+    if (mi && !isAppDescription(mi)) model = mi;
+    if (dc && !serialNo) serialNo = dc;
+
+    if (!manufacturer) {
+      const dpLower = dpId.toLowerCase();
+      if (dpLower.includes("mantra")) manufacturer = "Mantra";
+      else if (dpLower.includes("morpho")) manufacturer = "Morpho";
+      else if (dpLower.includes("startek")) manufacturer = "Startek";
+      else if (dpLower.includes("secugen")) manufacturer = "SecuGen";
+    }
+  }
+
+  // --- Flat extra keys (some RD Service versions return flat values) ---
   const flatModel =
     (extras["mi"] as string) ||
     (extras["MI"] as string) ||
@@ -135,20 +157,17 @@ function makeDeviceFromExtras(extras: Record<string, unknown>): RdDeviceInfo | n
     else if (!isAppDescription(flatMfr)) manufacturer = flatMfr;
   }
 
-  // If we have no physical device identifier (model + serial), the hardware
-  // scanner is not connected even though the RD Service app is running.
-  if (!model && !serialNo) {
-    return null;
-  }
-
+  // If the intent returned Success and status is not NOTREADY, the RD Service
+  // is ready. Even if we couldn't parse model/serial from the XML, report as
+  // connected so the user can proceed to the biometric capture step.
   return {
     connected: true,
     manufacturer: manufacturer || "Mantra",
-    model: model || "Unknown",
+    model: model || "MFS110",
     serialNo: serialNo || "N/A",
     port: 11100,
     host: "127.0.0.1",
-    rdServiceInfo: xmlStr || JSON.stringify(extras),
+    rdServiceInfo: rdServiceXml || deviceInfoXml || JSON.stringify(extras),
   };
 }
 

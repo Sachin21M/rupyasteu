@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  TextInput,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -80,6 +81,7 @@ export default function AepsServicesScreen() {
   const [kycRedirectUrl, setKycRedirectUrl] = useState("");
   const [onboardingLoading, setOnboardingLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [authAadhaar, setAuthAadhaar] = useState("");
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
   const [rdChecking, setRdChecking] = useState(false);
   const [rdDiagnostics, setRdDiagnostics] = useState<string[]>([]);
@@ -190,6 +192,10 @@ export default function AepsServicesScreen() {
   }
 
   async function handleDailyAuth() {
+    if (Platform.OS !== "web" && authAadhaar.length !== 12) {
+      Alert.alert("Aadhaar Required", "Enter your 12-digit Aadhaar number before scanning.");
+      return;
+    }
     setAuthLoading(true);
     try {
       const captureResult = await captureFingerprint();
@@ -208,6 +214,7 @@ export default function AepsServicesScreen() {
       if (captureResult.deviceInfo) setRdDevice(captureResult.deviceInfo);
 
       const result = await aeps2faAuthenticate({
+        aadhaarNumber: authAadhaar,
         data: captureResult.pidData,
         latitude: "0.0",
         longitude: "0.0",
@@ -386,22 +393,34 @@ export default function AepsServicesScreen() {
               </View>
             </View>
             {Platform.OS !== "web" && (
-              <View style={styles.rdStatusRow}>
-                <View style={[styles.rdDot, { backgroundColor: rdDevice ? Colors.success : "#EF4444" }]} />
-                <Text style={[styles.rdStatusText, { color: rdDevice ? Colors.success : Colors.textSecondary }]}>
-                  {rdChecking ? "Scanning for RD device..." : rdDevice ? `${rdDevice.manufacturer} ${rdDevice.model} connected` : "No RD device detected"}
-                </Text>
-                {!rdDevice && !rdChecking && (
-                  <Pressable onPress={checkRdDevice} hitSlop={8}>
-                    <Ionicons name="refresh" size={18} color={Colors.primary} />
-                  </Pressable>
-                )}
-              </View>
+              <>
+                <TextInput
+                  style={styles.aadhaarInput}
+                  placeholder="Enter your 12-digit Aadhaar number"
+                  placeholderTextColor={Colors.textSecondary}
+                  keyboardType="number-pad"
+                  maxLength={12}
+                  value={authAadhaar}
+                  onChangeText={setAuthAadhaar}
+                  editable={!authLoading}
+                />
+                <View style={styles.rdStatusRow}>
+                  <View style={[styles.rdDot, { backgroundColor: rdDevice ? Colors.success : "#EF4444" }]} />
+                  <Text style={[styles.rdStatusText, { color: rdDevice ? Colors.success : Colors.textSecondary }]}>
+                    {rdChecking ? "Scanning for RD device..." : rdDevice ? `${rdDevice.manufacturer} ${rdDevice.model} connected` : "No RD device detected"}
+                  </Text>
+                  {!rdDevice && !rdChecking && (
+                    <Pressable onPress={checkRdDevice} hitSlop={8}>
+                      <Ionicons name="refresh" size={18} color={Colors.primary} />
+                    </Pressable>
+                  )}
+                </View>
+              </>
             )}
             <Pressable
-              style={[styles.setupBtn, { backgroundColor: "#6366F1" }, authLoading && { opacity: 0.6 }]}
+              style={[styles.setupBtn, { backgroundColor: "#6366F1" }, (authLoading || (Platform.OS !== "web" && authAadhaar.length !== 12)) && { opacity: 0.5 }]}
               onPress={handleDailyAuth}
-              disabled={authLoading}
+              disabled={authLoading || (Platform.OS !== "web" && authAadhaar.length !== 12)}
             >
               {authLoading ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -653,6 +672,19 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "#888",
     textAlign: "center" as const,
+  },
+  aadhaarInput: {
+    height: 44,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    color: "#111827",
+    backgroundColor: "#F9FAFB",
+    marginBottom: 10,
+    letterSpacing: 1,
   },
   setupBtn: {
     flex: 1,

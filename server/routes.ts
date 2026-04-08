@@ -38,7 +38,7 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
 
   // PaySprint onboarding API: we send merchantcode, PaySprint registers it as sub-merchant ID.
   // The API does not return a different code — the code we send IS the sub-merchant identifier.
-  const merchantCode = "RS-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+  const merchantCode = "RS" + Math.random().toString(36).substring(2, 8).toUpperCase();
 
   let kycRedirectUrl = "";
   let kycStatus: "PENDING" | "FAILED" = "FAILED";
@@ -1047,7 +1047,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
         referenceno: referenceNo,
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         data: biometricData,
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
@@ -1124,7 +1124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         is_iris: "No",
       };
 
@@ -1281,7 +1281,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ error: "This user is already registered as a merchant" });
       }
 
-      const merchantCode = "RS-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      const merchantCode = "RS" + Math.random().toString(36).substring(2, 8).toUpperCase();
 
       let kycRedirectUrl = "";
       try {

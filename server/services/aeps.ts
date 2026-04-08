@@ -319,7 +319,7 @@ function simulateAepsResponse(endpoint: string, payload: Record<string, unknown>
 }
 
 export async function getAepsBankList(): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/banklist/index", {}, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/banklist/index", {});
 }
 
 export async function getOnboardingUrl(params: {
@@ -362,7 +362,7 @@ export async function twoFactorRegistration(params: {
   timestamp: string;
   is_iris: string;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/registration", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/registration", params);
 }
 
 export async function twoFactorAuthentication(params: {
@@ -378,7 +378,7 @@ export async function twoFactorAuthentication(params: {
   timestamp: string;
   is_iris: string;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/authentication", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/authentication", params);
 }
 
 export async function balanceEnquiry(params: {
@@ -398,7 +398,7 @@ export async function balanceEnquiry(params: {
   submerchantid: string;
   is_iris: string;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/balanceenquiry/index", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/balanceenquiry/index", params);
 }
 
 export async function miniStatement(params: {
@@ -418,7 +418,7 @@ export async function miniStatement(params: {
   submerchantid: string;
   is_iris: string;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/ministatement/index", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/ministatement/index", params);
 }
 
 export async function cashWithdrawal(params: {
@@ -439,7 +439,7 @@ export async function cashWithdrawal(params: {
   is_iris: string;
   amount: number;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/v3/cashwithdraw/index", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/v3/cashwithdraw/index", params);
 }
 
 export async function aadhaarPay(params: {
@@ -460,7 +460,7 @@ export async function aadhaarPay(params: {
   is_iris: string;
   amount: number;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/aadharpay/index", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/aadharpay/index", params);
 }
 
 export async function cashDeposit(params: {
@@ -481,11 +481,11 @@ export async function cashDeposit(params: {
   is_iris: string;
   amount: number;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/cashdeposit/index", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/cashdeposit/index", params);
 }
 
 export async function checkAepsTransactionStatus(params: {
   referenceno: string;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/cashwithdraw/status", params, { skipEncryption: true });
+  return makeAepsRequest("/service/aeps/cashwithdraw/status", params);
 }

@@ -115,7 +115,14 @@ export default function AepsTransactionScreen() {
           Alert.alert("Biometric Captured", `Fingerprint captured successfully.\n\nDevice: ${dev?.manufacturer} ${dev?.model}\nSerial: ${dev?.serialNo}`);
         }
       } else {
-        Alert.alert("Capture Failed", result.error || "Could not capture biometric data.");
+        Alert.alert(
+          "Scan Failed",
+          result.error || "Could not capture biometric data.",
+          [
+            { text: "OK", style: "cancel" },
+            { text: "Try Again", onPress: () => setTimeout(handleCaptureBiometric, 300) },
+          ]
+        );
       }
     } catch (err: any) {
       Alert.alert("Error", err.message || "Biometric capture failed");

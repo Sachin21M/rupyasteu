@@ -248,11 +248,19 @@ export async function captureFingerprint(
     const errInfo = errInfoMatch ? errInfoMatch[1] : "";
 
     if (errCode && errCode !== "0") {
+      const friendlyMessages: Record<string, string> = {
+        "710": "Fingerprint not detected. Place your finger firmly on the scanner.",
+        "720": "Scan timed out. Place your finger before the timer runs out.",
+        "730": "Poor fingerprint quality. Clean your finger, press firmly and flat on the scanner, then try again.",
+        "740": "Device not responding. Unplug and reconnect the biometric device.",
+        "800": "Device initialisation failed. Restart the Mantra RD Service app.",
+      };
+      const friendly = friendlyMessages[errCode];
       return {
         success: false,
         pidData: "",
         deviceInfo: null,
-        error: `Biometric capture failed: ${errInfo || "Unknown error"} (Code: ${errCode})`,
+        error: friendly || `Biometric capture failed: ${errInfo || "Unknown error"} (Code: ${errCode})`,
       };
     }
 

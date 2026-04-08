@@ -194,7 +194,14 @@ export default function AepsServicesScreen() {
     try {
       const captureResult = await captureFingerprint();
       if (!captureResult.success) {
-        Alert.alert("Capture Failed", captureResult.error || "Could not capture biometric data.");
+        Alert.alert(
+          "Scan Failed",
+          captureResult.error || "Could not capture biometric data.",
+          [
+            { text: "OK", style: "cancel" },
+            { text: "Try Again", onPress: () => { setAuthLoading(false); setTimeout(handleDailyAuth, 300); return; } },
+          ]
+        );
         setAuthLoading(false);
         return;
       }

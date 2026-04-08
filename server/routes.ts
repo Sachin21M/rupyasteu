@@ -1036,7 +1036,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Complete merchant onboarding first" });
       }
 
-      const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+      const _now2fa = new Date();
+      const timestamp = `${_now2fa.getFullYear()}-${String(_now2fa.getMonth()+1).padStart(2,"0")}-${String(_now2fa.getDate()).padStart(2,"0")} ${String(_now2fa.getHours()).padStart(2,"0")}:${String(_now2fa.getMinutes()).padStart(2,"0")}:${String(_now2fa.getSeconds()).padStart(2,"0")}`;
       const referenceNo = `2FA${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
 
       const fullPayload = {
@@ -1050,7 +1051,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         data: biometricData,
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
-        is_iris: "NO",
+        is_iris: "No",
       };
 
       const result = await aepsService.twoFactorAuthentication(fullPayload);
@@ -1094,7 +1095,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
       const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
-      const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+      const _nowAeps = new Date();
+      const timestamp = `${_nowAeps.getFullYear()}-${String(_nowAeps.getMonth()+1).padStart(2,"0")}-${String(_nowAeps.getDate()).padStart(2,"0")} ${String(_nowAeps.getHours()).padStart(2,"0")}:${String(_nowAeps.getMinutes()).padStart(2,"0")}:${String(_nowAeps.getSeconds()).padStart(2,"0")}`;
 
       const aepsTx = await storage.createAepsTransaction({
         userId: (req as any).userId,
@@ -1123,7 +1125,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
         submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
-        is_iris: "NO",
+        is_iris: "No",
       };
 
       let result;

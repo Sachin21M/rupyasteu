@@ -149,7 +149,7 @@ async function makeAepsRequest(
 
     if (useEncryption) {
       const encrypted = encryptPayload(fullPayload);
-      requestBody = JSON.stringify({ data: encrypted });
+      requestBody = JSON.stringify({ body: encrypted });
     } else {
       requestBody = JSON.stringify(fullPayload);
     }

@@ -173,6 +173,11 @@ export async function aepsOnboardComplete(data: { status: string; merchantCode?:
   return handleAepsResponse(res);
 }
 
+export async function getAepsKycStatus() {
+  const res = await authFetch("/api/aeps/kyc-status");
+  return handleAepsResponse(res);
+}
+
 export async function getAepsTransactionStatus(id: string) {
   const res = await authFetch(`/api/aeps/transaction/${id}/status`);
   return handleAepsResponse(res);

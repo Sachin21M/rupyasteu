@@ -906,6 +906,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Real PaySprint KYC status check — always calls PaySprint, never trusts local DB alone
+  app.get("/api/aeps/kyc-status", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant) return res.json({ kycStatus: "NOT_STARTED", onboarded: false });
+
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Call PaySprint with is_new=false to check if merchant is already registered
+      const verifyResult = await aepsService.getOnboardingUrl({
+        merchantCode: merchant.merchantCode,
+        mobile: user.phone,
+        isNew: false,
+      });
+
+      // response_code 2 = "already registered/completed" on PaySprint's side
+      // response_code 1 with no redirecturl = also completed (some PaySprint versions)
+      const psCompleted =
+        verifyResult.response_code === 2 ||
+        (verifyResult.response_code === 1 && !verifyResult.redirecturl);
+
+      const newStatus = psCompleted ? "COMPLETED" : "PENDING";
+
+      // Update local DB only if it differs from PaySprint truth
+      if (merchant.kycStatus !== newStatus) {
+        await storage.updateAepsMerchant((req as any).userId, { kycStatus: newStatus });
+      }
+
+      const today = new Date().toISOString().split("T")[0];
+      const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);
+
+      res.json({
+        kycStatus: newStatus,
+        onboarded: psCompleted,
+        dailyAuthenticated: dailyAuth?.authenticated || false,
+        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message },
+      });
+    } catch (error) {
+      console.error("KYC status check error:", error);
+      res.status(500).json({ error: "Failed to check KYC status from PaySprint" });
+    }
+  });
+
   app.post("/api/aeps/onboard", authMiddleware, async (req: Request, res: Response) => {
     try {
       const { merchantCode } = req.body;
@@ -967,13 +1011,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mobile: user.phone,
       });
 
-      if (verifyResult.response_code === 1) {
+      // response_code 2 = already registered on PaySprint (COMPLETED)
+      // response_code 1 with no redirecturl = also completed on some PaySprint versions
+      const psCompleted =
+        verifyResult.response_code === 2 ||
+        (verifyResult.response_code === 1 && !verifyResult.redirecturl);
+
+      if (psCompleted) {
         const updates: Record<string, string> = { kycStatus: "COMPLETED" };
         if (merchantCode) updates.merchantCode = merchantCode;
-        const merchant = await storage.updateAepsMerchant((req as any).userId, updates);
+        await storage.updateAepsMerchant((req as any).userId, updates);
         res.json({ success: true, kycStatus: "COMPLETED" });
       } else {
-        res.json({ success: false, kycStatus: "PENDING", message: "KYC verification not yet complete. Please complete the onboarding process first." });
+        res.json({ success: false, kycStatus: "PENDING", message: "KYC verification not yet complete on PaySprint. Please complete the onboarding process first." });
       }
     } catch (error) {
       console.error("AEPS onboard complete error:", error);

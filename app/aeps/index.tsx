@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -10,12 +10,13 @@ import {
   Alert,
   Linking,
   TextInput,
+  AppState,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aepsOnboardComplete } from "@/lib/api";
+import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
@@ -80,6 +81,9 @@ export default function AepsServicesScreen() {
   const [merchantCode, setMerchantCode] = useState("");
   const [kycRedirectUrl, setKycRedirectUrl] = useState("");
   const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [kycIncompleteWarning, setKycIncompleteWarning] = useState(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const kycUrlOpenedRef = useRef(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authAadhaar, setAuthAadhaar] = useState("");
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
@@ -91,6 +95,20 @@ export default function AepsServicesScreen() {
   useEffect(() => {
     checkMerchantStatus();
     checkRdDevice();
+
+    // When user comes back from browser (after KYC), auto-check PaySprint status
+    const appStateSub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && kycUrlOpenedRef.current) {
+        kycUrlOpenedRef.current = false;
+        stopKycPolling();
+        verifyKycFromPaySprint();
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+      stopKycPolling();
+    };
   }, []);
 
   async function checkRdDevice() {
@@ -128,64 +146,74 @@ export default function AepsServicesScreen() {
     }
   }, []);
 
-  async function fetchKycUrl(): Promise<string | null> {
-    if (kycRedirectUrl) return kycRedirectUrl;
-    if (!merchantCode) return null;
-    setOnboardingLoading(true);
-    try {
-      const result = await aepsOnboard(merchantCode);
-      if (result.success && result.redirectUrl) {
-        setKycRedirectUrl(result.redirectUrl);
-        return result.redirectUrl;
-      } else if (result.response_code === 12001) {
-        Alert.alert(
-          "Already Registered",
-          "Your merchant account is already registered with PaySprint. If you have completed KYC verification, tap 'Verify Status' to activate AEPS services. If not, please contact support.",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Verify Status", onPress: handleCompleteKyc },
-          ]
-        );
-      } else {
-        Alert.alert(
-          "Setup Failed",
-          result.error || result.message || "PaySprint could not generate a KYC link. Please try again in a moment."
-        );
-      }
-    } catch (err: any) {
-      Alert.alert("Error", err.message || "Failed to initiate KYC setup. Please try again.");
-    } finally {
-      setOnboardingLoading(false);
+  function stopKycPolling() {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
     }
-    return null;
+  }
+
+  function startKycPolling() {
+    stopKycPolling();
+    pollingRef.current = setInterval(() => {
+      verifyKycFromPaySprint();
+    }, 5000);
+  }
+
+  async function verifyKycFromPaySprint() {
+    try {
+      const result = await getAepsKycStatus();
+      if (result.onboarded) {
+        stopKycPolling();
+        setOnboarded(true);
+        setKycStatus("COMPLETED");
+        setKycIncompleteWarning(false);
+        Alert.alert("KYC Verified!", "Your AEPS merchant account is now active. You can perform AEPS transactions.");
+      } else {
+        setKycIncompleteWarning(true);
+      }
+    } catch {
+      // Silent fail for background checks
+    }
   }
 
   async function handleOpenKyc() {
-    const url = await fetchKycUrl();
-    if (!url) return;
-    try {
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert(
-        "Complete KYC",
-        "Please open this URL to complete verification:\n\n" + url + "\n\nAfter completing, tap 'I Completed KYC' below."
-      );
-    }
-  }
-
-  async function handleCompleteKyc() {
+    setKycIncompleteWarning(false);
     setOnboardingLoading(true);
     try {
-      const result = await aepsOnboardComplete({ status: "success", merchantCode: merchantCode.trim() || undefined });
-      if (result.success) {
-        setOnboarded(true);
-        setKycStatus("COMPLETED");
-        Alert.alert("Success", "Merchant onboarding completed successfully!");
-      } else {
-        Alert.alert("Error", "KYC verification not yet complete. Please try again after completing verification.");
+      let url = kycRedirectUrl;
+      if (!url && merchantCode) {
+        const result = await aepsOnboard(merchantCode);
+        if (result.success && result.redirectUrl) {
+          url = result.redirectUrl;
+          setKycRedirectUrl(result.redirectUrl);
+        } else if (result.response_code === 12001) {
+          // Already registered on PaySprint — just verify status
+          setOnboardingLoading(false);
+          await verifyKycFromPaySprint();
+          return;
+        } else {
+          Alert.alert(
+            "Setup Failed",
+            result.error || result.message || "PaySprint could not generate a KYC link. Please try again."
+          );
+          setOnboardingLoading(false);
+          return;
+        }
       }
+      if (!url) {
+        Alert.alert("Error", "No KYC URL available. Please try again.");
+        setOnboardingLoading(false);
+        return;
+      }
+
+      kycUrlOpenedRef.current = true;
+      startKycPolling(); // Poll every 5s while browser is open
+      await Linking.openURL(url);
     } catch (err: any) {
-      Alert.alert("Error", err.message || "Failed to verify KYC");
+      kycUrlOpenedRef.current = false;
+      stopKycPolling();
+      Alert.alert("Error", err.message || "Failed to open KYC setup.");
     } finally {
       setOnboardingLoading(false);
     }
@@ -346,9 +374,17 @@ export default function AepsServicesScreen() {
                   </View>
                 )}
                 {merchantCode ? (
-                  <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View>
+                    {kycIncompleteWarning && (
+                      <View style={styles.kycWarningBox}>
+                        <Ionicons name="time-outline" size={16} color="#F59E0B" />
+                        <Text style={styles.kycWarningText}>
+                          KYC not yet completed on PaySprint. Please finish all steps on the verification page, then come back — we'll detect it automatically.
+                        </Text>
+                      </View>
+                    )}
                     <Pressable
-                      style={[styles.setupBtn, { flex: 1, backgroundColor: Colors.primary }, onboardingLoading && { opacity: 0.6 }]}
+                      style={[styles.setupBtn, { backgroundColor: Colors.primary }, onboardingLoading && { opacity: 0.6 }]}
                       onPress={handleOpenKyc}
                       disabled={onboardingLoading}
                     >
@@ -357,21 +393,13 @@ export default function AepsServicesScreen() {
                       ) : (
                         <>
                           <Ionicons name="open-outline" size={16} color="#fff" />
-                          <Text style={styles.setupBtnText}>Complete KYC</Text>
+                          <Text style={styles.setupBtnText}>Complete Your KYC Setup</Text>
                         </>
                       )}
                     </Pressable>
-                    <Pressable
-                      style={[styles.setupBtn, { flex: 1, backgroundColor: "#6366F1" }, onboardingLoading && { opacity: 0.6 }]}
-                      onPress={handleCompleteKyc}
-                      disabled={onboardingLoading}
-                    >
-                      {onboardingLoading ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <Text style={styles.setupBtnText}>I Completed KYC</Text>
-                      )}
-                    </Pressable>
+                    <Text style={styles.kycAutoHint}>
+                      After completing KYC, return to this app — your status will update automatically.
+                    </Text>
                   </View>
                 ) : null}
               </>
@@ -672,6 +700,30 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "#888",
     textAlign: "center" as const,
+  },
+  kycWarningBox: {
+    flexDirection: "row" as const,
+    alignItems: "flex-start" as const,
+    gap: 8,
+    backgroundColor: "#FEF3C7",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  kycWarningText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "#92400E",
+    lineHeight: 18,
+  },
+  kycAutoHint: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: "#888",
+    textAlign: "center" as const,
+    marginTop: 8,
+    paddingHorizontal: 4,
   },
   aadhaarInput: {
     height: 44,

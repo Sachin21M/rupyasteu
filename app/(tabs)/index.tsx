@@ -155,6 +155,9 @@ export default function HomeScreen() {
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Recharge</Text>
+        <Pressable onPress={() => router.push("/recharge/history")}>
+          <Text style={styles.seeAll}>History</Text>
+        </Pressable>
       </View>
 
       <View style={styles.servicesRow}>

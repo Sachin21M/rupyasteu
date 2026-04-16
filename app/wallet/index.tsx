@@ -13,7 +13,7 @@ import {
   Dimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import QRCode from "react-native-qrcode-svg";
@@ -36,8 +36,9 @@ export default function WalletScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const isWeb = Platform.OS === "web";
+  const { openRecharge } = useLocalSearchParams<{ openRecharge?: string }>();
 
-  const [showRecharge, setShowRecharge] = useState(false);
+  const [showRecharge, setShowRecharge] = useState(openRecharge === "1");
   const [rechargeAmount, setRechargeAmount] = useState("");
   const [utr, setUtr] = useState("");
   const [showCommission, setShowCommission] = useState(false);

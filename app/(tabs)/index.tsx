@@ -21,6 +21,7 @@ import type { Transaction } from "@/shared/schema";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const AEPS_CARD_WIDTH = (SCREEN_WIDTH - 32 - 20) / 3;
+const LOW_BALANCE_THRESHOLD = 50;
 
 function ServiceCard({ icon, label, color, onPress, cardStyle }: {
   icon: React.ReactNode;
@@ -152,6 +153,25 @@ export default function HomeScreen() {
           <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
         </View>
       </Pressable>
+
+      {walletData && walletBalance < LOW_BALANCE_THRESHOLD && (
+        <Pressable
+          style={({ pressed }) => [styles.lowBalanceBanner, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push({ pathname: "/wallet", params: { openRecharge: "1" } })}
+          testID="low-balance-banner"
+        >
+          <View style={styles.lowBalanceIconWrap}>
+            <Ionicons name="warning" size={18} color={Colors.warning} />
+          </View>
+          <View style={styles.lowBalanceTextWrap}>
+            <Text style={styles.lowBalanceTitle}>Low Wallet Balance</Text>
+            <Text style={styles.lowBalanceSubtitle}>
+              Your balance is ₹{walletBalance.toFixed(2)}. Tap to add money before recharging.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={Colors.warning} />
+        </Pressable>
+      )}
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Recharge</Text>
@@ -556,5 +576,39 @@ const styles = StyleSheet.create({
   txStatus: {
     fontSize: 11,
     fontFamily: "Inter_500Medium",
+  },
+  lowBalanceBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.warningLight,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.warning + "40",
+    gap: 10,
+  },
+  lowBalanceIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.warning + "20",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  lowBalanceTextWrap: {
+    flex: 1,
+  },
+  lowBalanceTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#92400E",
+  },
+  lowBalanceSubtitle: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "#B45309",
+    marginTop: 2,
   },
 });

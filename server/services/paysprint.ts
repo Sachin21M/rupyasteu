@@ -79,7 +79,7 @@ async function makePaysprintRequest(
     } else if (shouldEncrypt) {
       try {
         const encrypted = encryptPayload(fullPayload);
-        requestBody = JSON.stringify({ body: encrypted });
+        requestBody = JSON.stringify({ data: encrypted });
         console.log("[STEP 3] AES ENCRYPTION: APPLIED (PAYSPRINT_ENCRYPT=true, direct mode)");
         console.log("  Encrypted length:", encrypted.length, "chars");
       } catch (encErr) {

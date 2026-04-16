@@ -324,14 +324,6 @@ export default function AepsServicesScreen() {
               <Ionicons name="refresh" size={18} color={rdDevice ? "#2E9E5B" : "#F59E0B"} />
             </Pressable>
           </View>
-          {!rdChecking && !rdDevice && rdDiagnostics.length > 0 && (
-            <View style={styles.rdDiagBox}>
-              <Text style={styles.rdDiagTitle}>Connection Diagnostics:</Text>
-              {rdDiagnostics.map((line, i) => (
-                <Text key={i} style={styles.rdDiagLine} numberOfLines={2}>{line}</Text>
-              ))}
-            </View>
-          )}
         </View>
       )}
 

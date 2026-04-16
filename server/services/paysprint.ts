@@ -78,7 +78,10 @@ async function makePaysprintRequest(
 
     let requestBody: string;
 
-    if (useEncryption) {
+    if (PAYSPRINT_PROXY_URL) {
+      requestBody = JSON.stringify(fullPayload);
+      console.log("[STEP 3] AES ENCRYPTION: SKIPPED (proxy mode — plaintext sent to trusted proxy)");
+    } else if (useEncryption) {
       try {
         const encrypted = encryptPayload(fullPayload);
         requestBody = JSON.stringify({ data: encrypted });

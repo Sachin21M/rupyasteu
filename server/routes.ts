@@ -611,19 +611,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
             transaction = await storage.getTransaction(req.params.id) ?? transaction;
           } else if (isFailed) {
-            const wallet = await storage.getOrCreateWallet(transaction.userId);
-            await storage.updateWalletBalance(transaction.userId, transaction.amount);
-            await storage.createWalletTransaction({
-              userId: transaction.userId,
-              type: "CREDIT",
-              amount: transaction.amount,
-              balanceBefore: wallet.balance,
-              balanceAfter: wallet.balance + transaction.amount,
-              reference: `refund-${req.params.id}`,
-              description: `Refund for failed recharge ₹${transaction.amount} - ${transaction.subscriberNumber}`,
-              status: "COMPLETED",
-            });
-            await storage.updateTransaction(req.params.id, { rechargeStatus: "RECHARGE_FAILED" });
+            const guardTx = await storage.getTransaction(req.params.id);
+            if (guardTx && guardTx.rechargeStatus === "RECHARGE_PROCESSING") {
+              await storage.updateTransaction(req.params.id, { rechargeStatus: "RECHARGE_FAILED" });
+              const wallet = await storage.getOrCreateWallet(transaction.userId);
+              await storage.updateWalletBalance(transaction.userId, transaction.amount);
+              await storage.createWalletTransaction({
+                userId: transaction.userId,
+                type: "CREDIT",
+                amount: transaction.amount,
+                balanceBefore: wallet.balance,
+                balanceAfter: wallet.balance + transaction.amount,
+                reference: `refund-${req.params.id}`,
+                description: `Refund for failed recharge ₹${transaction.amount} - ${transaction.subscriberNumber}`,
+                status: "COMPLETED",
+              });
+            }
             transaction = await storage.getTransaction(req.params.id) ?? transaction;
           }
         } catch (pollErr: any) {

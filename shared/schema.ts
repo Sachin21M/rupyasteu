@@ -9,7 +9,7 @@ export const utrSchema = z.string().regex(/^[A-Za-z0-9]{12,22}$/, "Invalid UTR f
 export const rechargeTypes = ["MOBILE", "DTH"] as const;
 export type RechargeType = typeof rechargeTypes[number];
 
-export const paymentStatuses = ["PAYMENT_PENDING", "PAYMENT_UNVERIFIED", "PAYMENT_VERIFIED", "PAYMENT_FAILED"] as const;
+export const paymentStatuses = ["PAYMENT_PENDING", "PAYMENT_UNVERIFIED", "PAYMENT_VERIFIED", "PAYMENT_FAILED", "WALLET_PAYMENT"] as const;
 export type PaymentStatus = typeof paymentStatuses[number];
 
 export const rechargeStatuses = ["RECHARGE_PENDING", "RECHARGE_PROCESSING", "RECHARGE_SUCCESS", "RECHARGE_FAILED"] as const;

@@ -445,81 +445,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const newBalance = wallet.balance - amount;
-      await storage.updateWalletBalance((req as any).userId, -amount);
-      await storage.createWalletTransaction({
-        userId: (req as any).userId,
-        type: "DEBIT",
-        amount,
-        balanceBefore: wallet.balance,
-        balanceAfter: newBalance,
-        reference: `recharge-${Date.now()}`,
-        description: `${type === "MOBILE" ? "Mobile" : "DTH"} Recharge ₹${amount} - ${subscriberNumber} (${operator.name})`,
-        status: "COMPLETED",
-      });
+      let walletDebited = false;
+      let transactionId: string | undefined;
 
-      const transaction = await storage.createTransaction({
-        userId: (req as any).userId,
-        type,
-        operatorId,
-        operatorName: operator.name,
-        subscriberNumber,
-        amount,
-        planId,
-        planDescription,
-        paymentStatus: "WALLET_PAYMENT",
-        rechargeStatus: "RECHARGE_PROCESSING",
-      });
-
-      const rechargeResult = await initiateRecharge({
-        operator: operatorId,
-        canumber: subscriberNumber,
-        amount,
-        recharge_type: type === "MOBILE" ? "prepaid" : "dth",
-        referenceid: transaction.id,
-      });
-
-      if (rechargeResult.status) {
-        await storage.updateTransaction(transaction.id, {
-          paysprintRefId: rechargeResult.data?.ackno as string,
-          rechargeStatus: "RECHARGE_SUCCESS",
-        });
-        try {
-          const serviceType = type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
-          const alreadyCredited = await storage.hasCommissionCredit(transaction.id, serviceType);
-          if (!alreadyCredited) {
-            const commissionConfigs = await storage.getCommissionConfig();
-            const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
-            if (commCfg && commCfg.commissionAmount > 0) {
-              await storage.creditCommission(
-                (req as any).userId, commCfg.commissionAmount, serviceType,
-                transaction.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${amount} - ${subscriberNumber}`
-              );
-            }
-          }
-        } catch (commErr: any) {
-          console.error("Commission credit error (instant recharge):", commErr.message);
-        }
-        const updatedTx = await storage.getTransaction(transaction.id);
-        return res.json({ success: true, transaction: updatedTx, message: "Recharge successful!" });
-      } else {
-        await storage.updateWalletBalance((req as any).userId, amount);
+      try {
+        await storage.updateWalletBalance((req as any).userId, -amount);
+        walletDebited = true;
         await storage.createWalletTransaction({
           userId: (req as any).userId,
-          type: "CREDIT",
+          type: "DEBIT",
           amount,
-          balanceBefore: newBalance,
-          balanceAfter: newBalance + amount,
-          reference: `refund-${transaction.id}`,
-          description: `Refund for failed recharge ₹${amount} - ${subscriberNumber}`,
+          balanceBefore: wallet.balance,
+          balanceAfter: newBalance,
+          reference: `recharge-${Date.now()}`,
+          description: `${type === "MOBILE" ? "Mobile" : "DTH"} Recharge ₹${amount} - ${subscriberNumber} (${operator.name})`,
           status: "COMPLETED",
         });
-        await storage.updateTransaction(transaction.id, {
-          rechargeStatus: "RECHARGE_FAILED",
+
+        const transaction = await storage.createTransaction({
+          userId: (req as any).userId,
+          type,
+          operatorId,
+          operatorName: operator.name,
+          subscriberNumber,
+          amount,
+          planId,
+          planDescription,
+          paymentStatus: "WALLET_PAYMENT",
+          rechargeStatus: "RECHARGE_PROCESSING",
         });
-        return res.status(400).json({
-          success: false,
-          error: rechargeResult.message || "Recharge failed. Your amount has been refunded to your wallet.",
+        transactionId = transaction.id;
+
+        const rechargeResult = await initiateRecharge({
+          operator: operatorId,
+          canumber: subscriberNumber,
+          amount,
+          recharge_type: type === "MOBILE" ? "prepaid" : "dth",
+          referenceid: transaction.id,
         });
+
+        if (rechargeResult.status) {
+          await storage.updateTransaction(transaction.id, {
+            paysprintRefId: rechargeResult.data?.ackno as string,
+            rechargeStatus: "RECHARGE_SUCCESS",
+          });
+          try {
+            const serviceType = type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+            const alreadyCredited = await storage.hasCommissionCredit(transaction.id, serviceType);
+            if (!alreadyCredited) {
+              const commissionConfigs = await storage.getCommissionConfig();
+              const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+              if (commCfg && commCfg.commissionAmount > 0) {
+                await storage.creditCommission(
+                  (req as any).userId, commCfg.commissionAmount, serviceType,
+                  transaction.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${amount} - ${subscriberNumber}`
+                );
+              }
+            }
+          } catch (commErr: any) {
+            console.error("Commission credit error (instant recharge):", commErr.message);
+          }
+          const updatedTx = await storage.getTransaction(transaction.id);
+          return res.json({ success: true, transaction: updatedTx, message: "Recharge successful!" });
+        } else {
+          await storage.updateWalletBalance((req as any).userId, amount);
+          await storage.createWalletTransaction({
+            userId: (req as any).userId,
+            type: "CREDIT",
+            amount,
+            balanceBefore: newBalance,
+            balanceAfter: newBalance + amount,
+            reference: `refund-${transaction.id}`,
+            description: `Refund for failed recharge ₹${amount} - ${subscriberNumber}`,
+            status: "COMPLETED",
+          });
+          await storage.updateTransaction(transaction.id, {
+            rechargeStatus: "RECHARGE_FAILED",
+          });
+          return res.status(400).json({
+            success: false,
+            error: rechargeResult.message || "Recharge failed. Your amount has been refunded to your wallet.",
+          });
+        }
+      } catch (innerError: any) {
+        console.error("Instant recharge inner error:", innerError);
+        if (walletDebited) {
+          try {
+            await storage.updateWalletBalance((req as any).userId, amount);
+            await storage.createWalletTransaction({
+              userId: (req as any).userId,
+              type: "CREDIT",
+              amount,
+              balanceBefore: newBalance,
+              balanceAfter: newBalance + amount,
+              reference: `refund-emergency-${Date.now()}`,
+              description: `Emergency refund for failed recharge ₹${amount} - ${subscriberNumber}`,
+              status: "COMPLETED",
+            });
+            if (transactionId) {
+              await storage.updateTransaction(transactionId, { rechargeStatus: "RECHARGE_FAILED" });
+            }
+          } catch (refundErr: any) {
+            console.error("CRITICAL: Refund failed after wallet debit error:", refundErr.message, { userId: (req as any).userId, amount });
+          }
+        }
+        return res.status(500).json({ error: "Recharge failed. Your wallet has been refunded if any amount was deducted." });
       }
     } catch (error) {
       console.error("Instant recharge error:", error);

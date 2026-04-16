@@ -40,7 +40,7 @@ function RechargeHistoryCard({ tx }: { tx: Transaction }) {
     <Pressable
       testID={`recharge-history-card-${tx.id}`}
       style={({ pressed }) => [styles.card, pressed && { opacity: 0.8 }]}
-      onPress={() => router.push({ pathname: "/payment/status", params: { transactionId: tx.id } })}
+      onPress={() => router.push({ pathname: "/recharge/detail", params: { transactionId: tx.id } })}
     >
       <View style={styles.cardTop}>
         <View style={[styles.iconBox, { backgroundColor: isMobile ? Colors.primaryLight : Colors.pendingLight }]}>

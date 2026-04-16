@@ -12,8 +12,11 @@ import {
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useQuery } from "@tanstack/react-query";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
-import { getOperators } from "@/lib/api";
+import { getOperators, getWallet } from "@/lib/api";
+import { LOW_BALANCE_KEY, DEFAULT_THRESHOLD } from "@/constants/wallet";
 import type { Operator } from "@/shared/schema";
 
 const OPERATOR_COLORS: Record<string, string> = {
@@ -29,6 +32,23 @@ export default function MobileRechargeScreen() {
   const [operators, setOperators] = useState<Operator[]>([]);
   const [selectedOperator, setSelectedOperator] = useState<Operator | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lowBalanceThreshold, setLowBalanceThreshold] = useState(DEFAULT_THRESHOLD);
+
+  const { data: walletData } = useQuery({
+    queryKey: ["/api/wallet"],
+    queryFn: getWallet,
+  });
+  const walletBalance = walletData?.wallet?.balance ?? 0;
+  const isLowBalance = walletData != null && walletBalance < lowBalanceThreshold;
+
+  useEffect(() => {
+    AsyncStorage.getItem(LOW_BALANCE_KEY).then((val) => {
+      if (val) {
+        const parsed = parseFloat(val);
+        if (!isNaN(parsed) && parsed > 0) setLowBalanceThreshold(parsed);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     loadOperators();
@@ -77,6 +97,22 @@ export default function MobileRechargeScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {isLowBalance && (
+          <View style={styles.lowBalanceBanner} testID="low-balance-warning">
+            <View style={styles.lowBalanceLeft}>
+              <Ionicons name="warning" size={18} color="#B45309" />
+              <Text style={styles.lowBalanceText}>
+                Low balance: ₹{walletBalance.toFixed(2)}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => router.push({ pathname: "/wallet", params: { openRecharge: "1" } })}
+              style={styles.addMoneyBtn}
+            >
+              <Text style={styles.addMoneyText}>Add Money</Text>
+            </Pressable>
+          </View>
+        )}
         <View style={styles.inputSection}>
           <Text style={styles.label}>Mobile Number</Text>
           <View style={styles.phoneRow}>
@@ -283,6 +319,43 @@ const styles = StyleSheet.create({
   },
   continueBtnText: {
     fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
+  },
+  lowBalanceBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FEF3C7",
+    borderLeftWidth: 4,
+    borderLeftColor: "#F59E0B",
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  lowBalanceLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  lowBalanceText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#92400E",
+    flex: 1,
+  },
+  addMoneyBtn: {
+    backgroundColor: "#F59E0B",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  addMoneyText: {
+    fontSize: 12,
     fontFamily: "Inter_600SemiBold",
     color: "#fff",
   },

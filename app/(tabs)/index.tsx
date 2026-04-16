@@ -10,18 +10,19 @@ import {
   ActivityIndicator,
   Dimensions,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { getTransactions, getWallet } from "@/lib/api";
+import { LOW_BALANCE_KEY, DEFAULT_THRESHOLD } from "@/constants/wallet";
 import type { Transaction } from "@/shared/schema";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const AEPS_CARD_WIDTH = (SCREEN_WIDTH - 32 - 20) / 3;
-const LOW_BALANCE_THRESHOLD = 50;
 
 function ServiceCard({ icon, label, color, onPress, cardStyle }: {
   icon: React.ReactNode;
@@ -81,6 +82,20 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [lowBalanceThreshold, setLowBalanceThreshold] = useState(DEFAULT_THRESHOLD);
+
+  useFocusEffect(
+    useCallback(() => {
+      AsyncStorage.getItem(LOW_BALANCE_KEY).then((val) => {
+        if (val) {
+          const parsed = parseInt(val, 10);
+          if (!isNaN(parsed) && parsed > 0) setLowBalanceThreshold(parsed);
+        } else {
+          setLowBalanceThreshold(DEFAULT_THRESHOLD);
+        }
+      });
+    }, [])
+  );
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["transactions"],
@@ -154,7 +169,7 @@ export default function HomeScreen() {
         </View>
       </Pressable>
 
-      {walletData && walletBalance < LOW_BALANCE_THRESHOLD && (
+      {walletData && walletBalance < lowBalanceThreshold && (
         <Pressable
           style={({ pressed }) => [styles.lowBalanceBanner, pressed && { opacity: 0.85 }]}
           onPress={() => router.push({ pathname: "/wallet", params: { openRecharge: "1" } })}

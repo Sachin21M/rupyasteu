@@ -138,7 +138,7 @@ async function makeAepsRequest(
   };
 
   try {
-    const useEncryption = isProductionEnv() && !options?.skipEncryption;
+    const shouldEncrypt = !PAYSPRINT_PROXY_URL && process.env.PAYSPRINT_ENCRYPT === "true" && !options?.skipEncryption;
 
     console.log(`[AEPS] Request to ${endpoint}`);
 
@@ -147,11 +147,16 @@ async function makeAepsRequest(
 
     let requestBody: string;
 
-    if (useEncryption) {
+    if (shouldEncrypt) {
       const encrypted = encryptPayload(fullPayload);
       requestBody = JSON.stringify({ body: encrypted });
+      console.log(`[AEPS] AES ENCRYPTION: APPLIED (PAYSPRINT_ENCRYPT=true, direct mode)`);
+    } else if (PAYSPRINT_PROXY_URL) {
+      requestBody = JSON.stringify(fullPayload);
+      console.log(`[AEPS] AES ENCRYPTION: SKIPPED (proxy mode — plaintext sent to trusted proxy)`);
     } else {
       requestBody = JSON.stringify(fullPayload);
+      console.log(`[AEPS] AES ENCRYPTION: SKIPPED (direct mode — VPS IP is whitelisted by PaySprint)`);
     }
 
     const PAYSPRINT_AUTHORIZED_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
@@ -159,7 +164,7 @@ async function makeAepsRequest(
       "Content-Type": "application/json",
       "Token": jwtToken,
       // Authorisedkey is only required in UAT (not in LIVE when using dedicated IP whitelist)
-      ...(!isProductionEnv() && PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
+      ...(process.env.PAYSPRINT_ENCRYPT !== "true" && !isProductionEnv() && PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
     };
 
     let rawText: string;

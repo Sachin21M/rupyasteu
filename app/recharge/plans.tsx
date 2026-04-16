@@ -80,12 +80,13 @@ export default function PlansScreen() {
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletLoading, setWalletLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
     loadPlans();
+    loadWallet();
   }, []);
 
   async function loadPlans() {
@@ -103,14 +104,7 @@ export default function PlansScreen() {
     }
   }
 
-  const filteredPlans = selectedCategory
-    ? plans.filter((p) => p.category === selectedCategory)
-    : plans;
-
-  async function handlePayNow() {
-    if (!selectedPlan) return;
-    setWalletLoading(true);
-    setResult(null);
+  async function loadWallet() {
     try {
       const data = await getWallet();
       setWalletBalance(data.wallet?.balance ?? 0);
@@ -119,6 +113,15 @@ export default function PlansScreen() {
     } finally {
       setWalletLoading(false);
     }
+  }
+
+  const filteredPlans = selectedCategory
+    ? plans.filter((p) => p.category === selectedCategory)
+    : plans;
+
+  async function handlePayNow() {
+    if (!selectedPlan) return;
+    setResult(null);
     setShowConfirm(true);
   }
 
@@ -245,6 +248,16 @@ export default function PlansScreen() {
           <View style={styles.selectedInfo}>
             <Text style={styles.selectedLabel}>Selected Plan</Text>
             <Text style={styles.selectedAmount}>₹{selectedPlan.amount}</Text>
+            {!walletLoading && walletBalance !== null && (
+              walletBalance < selectedPlan.amount ? (
+                <View style={styles.balanceWarningRow}>
+                  <Ionicons name="warning" size={12} color="#B45309" />
+                  <Text style={styles.balanceWarningText}>Low balance · ₹{walletBalance.toFixed(2)}</Text>
+                </View>
+              ) : (
+                <Text style={styles.balanceOkText}>Wallet: ₹{walletBalance.toFixed(2)}</Text>
+              )
+            )}
           </View>
           <Pressable
             style={styles.proceedBtn}
@@ -519,6 +532,7 @@ const styles = StyleSheet.create({
   },
   selectedInfo: {
     gap: 2,
+    flex: 1,
   },
   selectedLabel: {
     fontSize: 12,
@@ -529,6 +543,23 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: "Inter_700Bold",
     color: Colors.text,
+  },
+  balanceWarningRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  balanceWarningText: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    color: "#B45309",
+  },
+  balanceOkText: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    marginTop: 2,
   },
   proceedBtn: {
     flex: 1,

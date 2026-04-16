@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
+  Share,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +17,12 @@ import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import Colors from "@/constants/colors";
 import { getTransaction } from "@/lib/api";
 import type { Transaction } from "@/shared/schema";
+
+const POLL_INTERVAL_MS = 10000;
+
+function isPendingStatus(tx: Transaction): boolean {
+  return tx.rechargeStatus !== "RECHARGE_SUCCESS" && tx.rechargeStatus !== "RECHARGE_FAILED";
+}
 
 function statusConfig(tx: Transaction) {
   const isSuccess = tx.rechargeStatus === "RECHARGE_SUCCESS";
@@ -99,6 +106,8 @@ export default function RechargeDetailScreen() {
   const { transactionId } = useLocalSearchParams<{ transactionId: string }>();
   const [transaction, setTransaction] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
+  const [polling, setPolling] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!transactionId) {
@@ -106,16 +115,79 @@ export default function RechargeDetailScreen() {
       return;
     }
     loadTransaction();
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
-  async function loadTransaction() {
+  async function loadTransaction(silent = false) {
+    if (!silent) setLoading(true);
     try {
       const result = await getTransaction(transactionId!);
-      setTransaction(result.transaction);
+      const tx: Transaction = result.transaction;
+      setTransaction(tx);
+      if (isPendingStatus(tx)) {
+        startPolling();
+      } else {
+        stopPolling();
+      }
     } catch {
-      Alert.alert("Error", "Could not load recharge details. Please try again.");
+      if (!silent) {
+        Alert.alert("Error", "Could not load recharge details. Please try again.");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  }
+
+  function startPolling() {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      setPolling(true);
+      try {
+        const result = await getTransaction(transactionId!);
+        const tx: Transaction = result.transaction;
+        setTransaction(tx);
+        if (!isPendingStatus(tx)) {
+          stopPolling();
+        }
+      } catch {
+      } finally {
+        setPolling(false);
+      }
+    }, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function handleShare() {
+    if (!transaction) return;
+    const config = statusConfig(transaction);
+    const date = new Date(transaction.createdAt);
+    const formattedDate = `${date.getDate()} ${date.toLocaleDateString("en-IN", { month: "short" })} ${date.getFullYear()}, ${date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
+    const isMobile = transaction.type === "MOBILE";
+    const lines = [
+      `RupyaSetu Recharge Receipt`,
+      `─────────────────────`,
+      `Type: ${isMobile ? "Mobile Recharge" : "DTH Recharge"}`,
+      `Operator: ${transaction.operatorName}`,
+      `${isMobile ? "Mobile" : "Subscriber ID"}: ${transaction.subscriberNumber}`,
+      transaction.planDescription ? `Plan: ${transaction.planDescription}` : null,
+      `Amount: ₹${transaction.amount}`,
+      `Status: ${config.label}`,
+      `Date: ${formattedDate}`,
+      transaction.utr ? `UTR: ${transaction.utr}` : null,
+      transaction.paysprintRefId ? `Ref ID: ${transaction.paysprintRefId}` : null,
+    ].filter(Boolean).join("\n");
+
+    try {
+      await Share.share({ message: lines });
+    } catch {
     }
   }
 
@@ -144,6 +216,7 @@ export default function RechargeDetailScreen() {
   const config = statusConfig(transaction);
   const isFailed = transaction.rechargeStatus === "RECHARGE_FAILED";
   const isMobile = transaction.type === "MOBILE";
+  const pending = isPendingStatus(transaction);
 
   const date = new Date(transaction.createdAt);
   const formattedDate = `${date.getDate()} ${date.toLocaleDateString("en-IN", {
@@ -179,8 +252,23 @@ export default function RechargeDetailScreen() {
           <Ionicons name="chevron-back" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Recharge Details</Text>
-        <View style={{ width: 40 }} />
+        <Pressable
+          testID="recharge-detail-share"
+          style={styles.shareBtn}
+          onPress={handleShare}
+        >
+          <Ionicons name="share-outline" size={22} color={Colors.primary} />
+        </Pressable>
       </View>
+
+      {pending && (
+        <View style={styles.pollingBanner}>
+          <ActivityIndicator size="small" color={Colors.warning} style={{ marginRight: 8 }} />
+          <Text style={styles.pollingText}>
+            {polling ? "Checking status…" : "Checking for updates every 10s"}
+          </Text>
+        </View>
+      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -287,10 +375,30 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  shareBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.primaryLighter,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   headerTitle: {
     fontSize: 18,
     fontFamily: "Inter_700Bold",
     color: Colors.text,
+  },
+  pollingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: Colors.warningLight,
+  },
+  pollingText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.warning,
   },
   scrollContent: {
     paddingHorizontal: 20,

@@ -25,22 +25,21 @@ function tryDecryptPayload(base64String) {
 }
 
 /**
- * AEPS endpoints expect plain JSON. If an AEPS request arrives with the
+ * All PaySprint endpoints expect plain JSON. If any request arrives with the
  * encrypted wrapper { data: "base64..." }, decrypt it before forwarding.
+ * This handles both AEPS and recharge endpoints uniformly.
  */
 function resolvePayload(url, payload) {
-  const isAeps = typeof url === 'string' && url.includes('/aeps/');
-  if (!isAeps) return payload;
   if (!payload || typeof payload !== 'object') return payload;
 
   const keys = Object.keys(payload);
   if (keys.length === 1 && keys[0] === 'data' && typeof payload.data === 'string') {
     const decrypted = tryDecryptPayload(payload.data);
     if (decrypted) {
-      console.log('[proxy] AEPS encrypted payload detected — decrypted before forwarding');
+      console.log('[proxy] Encrypted payload detected for', url, '— decrypted before forwarding');
       return decrypted;
     }
-    console.warn('[proxy] AEPS payload looks encrypted but decryption failed — forwarding as-is');
+    console.warn('[proxy] Payload looks encrypted but decryption failed for', url, '— forwarding as-is');
   }
 
   return payload;

@@ -118,13 +118,14 @@ async function makePaysprintRequest(
     if (PAYSPRINT_PROXY_URL) {
       console.log("[STEP 7] SERVER IP: Using proxy for whitelisted IP 88.222.246.128");
       console.log("  Proxy URL:", PAYSPRINT_PROXY_URL);
+      console.log("  Sending plaintext payload to proxy (proxy is trusted middleware — no encryption needed)");
       const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: fullUrl,
           headers: paysprintHeaders,
-          payload: JSON.parse(requestBody),
+          payload: fullPayload,
         }),
       });
       if (!proxyResponse.ok) {

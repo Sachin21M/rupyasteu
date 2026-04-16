@@ -14,6 +14,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
+import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { getTransaction } from "@/lib/api";
 import type { Transaction } from "@/shared/schema";
@@ -95,6 +97,52 @@ function DetailRow({ label, value, valueColor }: { label: string; value: string;
         <Text style={[styles.detailValue, valueColor ? { color: valueColor } : undefined]} numberOfLines={2}>
           {value}
         </Text>
+      </View>
+      <View style={styles.divider} />
+    </>
+  );
+}
+
+function CopyableRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    };
+  }, []);
+
+  async function handleCopy() {
+    await Clipboard.setStringAsync(value);
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+    }
+    setCopied(true);
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <>
+      <View style={styles.detailRow}>
+        <Text style={styles.detailLabel}>{label}</Text>
+        <Pressable
+          testID={`copy-${label.toLowerCase().replace(/\s+/g, "-")}`}
+          style={styles.copyableValue}
+          onPress={handleCopy}
+          hitSlop={8}
+        >
+          <Text style={[styles.detailValue, styles.copyableText, mono && styles.monoText]} numberOfLines={1} adjustsFontSizeToFit>
+            {value}
+          </Text>
+          <Ionicons
+            name={copied ? "checkmark-circle" : "copy-outline"}
+            size={16}
+            color={copied ? Colors.success : Colors.primary}
+          />
+        </Pressable>
       </View>
       <View style={styles.divider} />
     </>
@@ -314,16 +362,11 @@ export default function RechargeDetailScreen() {
           )}
 
           {transaction.utr ? (
-            <DetailRow label="UTR" value={transaction.utr} />
+            <CopyableRow label="UTR" value={transaction.utr} mono />
           ) : null}
 
           {transaction.paysprintRefId ? (
-            <>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Reference ID</Text>
-                <Text style={[styles.detailValue, styles.refIdText]}>{transaction.paysprintRefId}</Text>
-              </View>
-            </>
+            <CopyableRow label="Reference ID" value={transaction.paysprintRefId} mono />
           ) : null}
         </Animated.View>
 
@@ -454,6 +497,22 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   refIdText: {
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 0.4,
+  },
+  copyableValue: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "60%",
+  },
+  copyableText: {
+    maxWidth: undefined,
+    flex: 1,
+    textAlign: "right",
+  },
+  monoText: {
     fontSize: 12,
     fontFamily: "Inter_500Medium",
     letterSpacing: 0.4,

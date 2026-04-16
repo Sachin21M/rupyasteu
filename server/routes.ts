@@ -486,9 +486,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (rechargeResult.status) {
           const paysprintDataStatus = (rechargeResult.data?.status as string || "").toUpperCase();
-          const isPending = rechargeResult.response_code === 2 || paysprintDataStatus === "PENDING";
+          const isConfirmedSuccess = rechargeResult.response_code === 1 && paysprintDataStatus === "SUCCESS";
 
-          if (isPending) {
+          if (!isConfirmedSuccess) {
             await storage.updateTransaction(transaction.id, {
               paysprintRefId: rechargeResult.data?.ackno as string,
               rechargeStatus: "RECHARGE_PROCESSING",
@@ -588,7 +588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const statusResult = await checkRechargeStatus(req.params.id);
           const psStatus = (statusResult.data?.status as string || "").toUpperCase();
-          const isSuccess = statusResult.status && (psStatus === "SUCCESS" || (statusResult.response_code === 1 && psStatus !== "PENDING"));
+          const isSuccess = statusResult.status === true && statusResult.response_code === 1 && psStatus === "SUCCESS";
           const isFailed = psStatus === "FAILED" || (!statusResult.status && statusResult.response_code !== 500 && statusResult.response_code !== 502);
 
           if (isSuccess) {
@@ -710,9 +710,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (rechargeResult.status) {
         const paysprintDataStatus = (rechargeResult.data?.status as string || "").toUpperCase();
-        const isPending = rechargeResult.response_code === 2 || paysprintDataStatus === "PENDING";
+        const isConfirmedSuccess = rechargeResult.response_code === 1 && paysprintDataStatus === "SUCCESS";
 
-        if (isPending) {
+        if (!isConfirmedSuccess) {
           await storage.updateTransaction(req.params.id, {
             paysprintRefId: rechargeResult.data?.ackno as string,
             rechargeStatus: "RECHARGE_PROCESSING",
@@ -783,9 +783,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (rechargeResult.status) {
         const paysprintDataStatus = (rechargeResult.data?.status as string || "").toUpperCase();
-        const isPending = rechargeResult.response_code === 2 || paysprintDataStatus === "PENDING";
+        const isConfirmedSuccess = rechargeResult.response_code === 1 && paysprintDataStatus === "SUCCESS";
 
-        if (isPending) {
+        if (!isConfirmedSuccess) {
           await storage.updateTransaction(req.params.id, {
             paysprintRefId: rechargeResult.data?.ackno as string,
             rechargeStatus: "RECHARGE_PROCESSING",

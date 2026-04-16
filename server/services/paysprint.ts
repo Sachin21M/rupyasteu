@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { encryptPayload } from "../utils/encryption";
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
@@ -70,11 +71,24 @@ async function makePaysprintRequest(
 
     let requestBody: string;
 
-    requestBody = JSON.stringify(fullPayload);
+    const shouldEncrypt = !PAYSPRINT_PROXY_URL && process.env.PAYSPRINT_ENCRYPT === "true";
+
     if (PAYSPRINT_PROXY_URL) {
+      requestBody = JSON.stringify(fullPayload);
       console.log("[STEP 3] AES ENCRYPTION: SKIPPED (proxy mode — plaintext sent to trusted proxy)");
+    } else if (shouldEncrypt) {
+      try {
+        const encrypted = encryptPayload(fullPayload);
+        requestBody = JSON.stringify({ body: encrypted });
+        console.log("[STEP 3] AES ENCRYPTION: APPLIED (PAYSPRINT_ENCRYPT=true, direct mode)");
+        console.log("  Encrypted length:", encrypted.length, "chars");
+      } catch (encErr) {
+        console.warn("[STEP 3] AES encryption FAILED, falling back to plaintext:", encErr);
+        requestBody = JSON.stringify(fullPayload);
+      }
     } else {
-      console.log("[STEP 3] AES ENCRYPTION: SKIPPED (direct mode — VPS IP is whitelisted by PaySprint)");
+      requestBody = JSON.stringify(fullPayload);
+      console.log("[STEP 3] AES ENCRYPTION: SKIPPED (direct mode — VPS IP is whitelisted, PAYSPRINT_ENCRYPT not set)");
     }
 
     console.log("[STEP 4] REQUEST HEADERS:");

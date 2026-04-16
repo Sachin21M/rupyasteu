@@ -73,6 +73,20 @@ export async function initiateRecharge(data: {
   return res.json();
 }
 
+export async function instantRecharge(data: {
+  type: string;
+  operatorId: string;
+  subscriberNumber: string;
+  amount: number;
+  planId?: string;
+}) {
+  const res = await authFetch("/api/recharge/instant", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
 export async function submitUtr(transactionId: string, utr: string) {
   const res = await authFetch("/api/recharge/submit-utr", {
     method: "POST",

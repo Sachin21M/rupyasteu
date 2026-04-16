@@ -7,13 +7,13 @@ import {
   FlatList,
   Platform,
   ActivityIndicator,
-  Alert,
+  Modal,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getPlans, initiateRecharge } from "@/lib/api";
+import { getPlans, instantRecharge, getWallet } from "@/lib/api";
 import type { Plan } from "@/shared/schema";
 
 function PlanCard({ plan, selected, onSelect }: {
@@ -77,7 +77,12 @@ export default function PlansScreen() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [loading, setLoading] = useState(true);
-  const [initiating, setInitiating] = useState(false);
+
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
     loadPlans();
@@ -102,11 +107,26 @@ export default function PlansScreen() {
     ? plans.filter((p) => p.category === selectedCategory)
     : plans;
 
-  async function handleProceed() {
+  async function handlePayNow() {
     if (!selectedPlan) return;
-    setInitiating(true);
+    setWalletLoading(true);
+    setResult(null);
     try {
-      const result = await initiateRecharge({
+      const data = await getWallet();
+      setWalletBalance(data.wallet?.balance ?? 0);
+    } catch {
+      setWalletBalance(0);
+    } finally {
+      setWalletLoading(false);
+    }
+    setShowConfirm(true);
+  }
+
+  async function handleConfirmRecharge() {
+    if (!selectedPlan) return;
+    setProcessing(true);
+    try {
+      const res = await instantRecharge({
         type: type!,
         operatorId: operatorId!,
         subscriberNumber: subscriberNumber!,
@@ -114,26 +134,21 @@ export default function PlansScreen() {
         planId: selectedPlan.id,
       });
 
-      if (result.success) {
-        router.push({
-          pathname: "/payment/utr",
-          params: {
-            transactionId: result.transaction.id,
-            amount: String(result.transaction.amount),
-            operatorName: result.transaction.operatorName,
-            subscriberNumber: result.transaction.subscriberNumber,
-            upiVpa: result.upiDetails?.payeeVpa || "",
-            upiNote: result.upiDetails?.note || "",
-          },
-        });
+      if (res.success) {
+        setShowConfirm(false);
+        setResult({ success: true, message: `₹${selectedPlan.amount} recharge for ${subscriberNumber} was successful!` });
+        setSelectedPlan(null);
+      } else {
+        setResult({ success: false, message: res.error || "Recharge failed. Please try again." });
       }
-    } catch (error) {
-      console.error("Failed to initiate recharge:", error);
-      Alert.alert("Error", "Failed to initiate recharge. Please try again.");
+    } catch {
+      setResult({ success: false, message: "Something went wrong. Please try again." });
     } finally {
-      setInitiating(false);
+      setProcessing(false);
     }
   }
+
+  const insufficient = walletBalance !== null && selectedPlan !== null && walletBalance < selectedPlan.amount;
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -149,6 +164,20 @@ export default function PlansScreen() {
         </View>
         <View style={{ width: 44 }} />
       </View>
+
+      {result && (
+        <View style={[styles.resultBanner, result.success ? styles.resultSuccess : styles.resultError]}>
+          <Ionicons
+            name={result.success ? "checkmark-circle" : "close-circle"}
+            size={20}
+            color="#fff"
+          />
+          <Text style={styles.resultText}>{result.message}</Text>
+          <Pressable onPress={() => setResult(null)} hitSlop={10}>
+            <Ionicons name="close" size={18} color="rgba(255,255,255,0.8)" />
+          </Pressable>
+        </View>
+      )}
 
       {categories.length > 0 && (
         <View style={styles.categoryRow}>
@@ -218,21 +247,102 @@ export default function PlansScreen() {
             <Text style={styles.selectedAmount}>₹{selectedPlan.amount}</Text>
           </View>
           <Pressable
-            style={[styles.proceedBtn, initiating && { opacity: 0.7 }]}
-            onPress={handleProceed}
-            disabled={initiating}
+            style={styles.proceedBtn}
+            onPress={handlePayNow}
           >
-            {initiating ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Text style={styles.proceedBtnText}>Pay Now</Text>
-                <Ionicons name="arrow-forward" size={20} color="#fff" />
-              </>
-            )}
+            <Text style={styles.proceedBtnText}>Pay Now</Text>
+            <Ionicons name="arrow-forward" size={20} color="#fff" />
           </Pressable>
         </View>
       )}
+
+      <Modal
+        visible={showConfirm}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !processing && setShowConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 16 }]}>
+            <View style={styles.modalHandle} />
+
+            <Text style={styles.modalTitle}>Confirm Recharge</Text>
+
+            <View style={styles.rechargeDetails}>
+              <View style={styles.rechargeRow}>
+                <Text style={styles.rechargeLabel}>Number</Text>
+                <Text style={styles.rechargeValue}>{subscriberNumber}</Text>
+              </View>
+              <View style={styles.rechargeRow}>
+                <Text style={styles.rechargeLabel}>Operator</Text>
+                <Text style={styles.rechargeValue}>{operatorName}</Text>
+              </View>
+              <View style={styles.rechargeRow}>
+                <Text style={styles.rechargeLabel}>Plan Amount</Text>
+                <Text style={[styles.rechargeValue, { color: Colors.primary, fontFamily: "Inter_700Bold" }]}>₹{selectedPlan?.amount}</Text>
+              </View>
+              {selectedPlan?.validity && (
+                <View style={styles.rechargeRow}>
+                  <Text style={styles.rechargeLabel}>Validity</Text>
+                  <Text style={styles.rechargeValue}>{selectedPlan.validity}</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.walletSection}>
+              <Ionicons name="wallet-outline" size={18} color={Colors.textSecondary} />
+              <Text style={styles.walletLabel}>Wallet Balance</Text>
+              {walletLoading ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <Text style={[styles.walletBalance, insufficient && styles.walletInsufficient]}>
+                  ₹{walletBalance?.toFixed(2) ?? "0.00"}
+                </Text>
+              )}
+            </View>
+
+            {insufficient && (
+              <View style={styles.insufficientBanner}>
+                <Ionicons name="warning" size={16} color="#B45309" />
+                <Text style={styles.insufficientText}>
+                  Insufficient balance. Please add money to your wallet.
+                </Text>
+              </View>
+            )}
+
+            {result && !result.success && (
+              <View style={styles.errorBanner}>
+                <Ionicons name="close-circle" size={16} color="#DC2626" />
+                <Text style={styles.errorBannerText}>{result.message}</Text>
+              </View>
+            )}
+
+            <View style={styles.modalActions}>
+              <Pressable
+                style={styles.cancelBtn}
+                onPress={() => { setShowConfirm(false); setResult(null); }}
+                disabled={processing}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.confirmBtn,
+                  (insufficient || processing || walletLoading) && styles.confirmBtnDisabled,
+                ]}
+                onPress={handleConfirmRecharge}
+                disabled={!!insufficient || processing || walletLoading}
+              >
+                {processing ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.confirmBtnText}>Confirm & Recharge</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -269,6 +379,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
+  },
+  resultBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  resultSuccess: {
+    backgroundColor: "#16A34A",
+  },
+  resultError: {
+    backgroundColor: "#DC2626",
+  },
+  resultText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#fff",
   },
   categoryRow: {
     paddingVertical: 14,
@@ -413,6 +542,139 @@ const styles = StyleSheet.create({
   },
   proceedBtnText: {
     fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    gap: 16,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: Colors.border,
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    textAlign: "center",
+  },
+  rechargeDetails: {
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
+  rechargeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  rechargeLabel: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+  },
+  rechargeValue: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+  },
+  walletSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.primaryLighter,
+    borderRadius: 12,
+    padding: 14,
+  },
+  walletLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textSecondary,
+  },
+  walletBalance: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    color: Colors.primary,
+  },
+  walletInsufficient: {
+    color: "#DC2626",
+  },
+  insufficientBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FEF3C7",
+    borderRadius: 10,
+    padding: 12,
+  },
+  insufficientText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#92400E",
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FEE2E2",
+    borderRadius: 10,
+    padding: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "#991B1B",
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 12,
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 14,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: "center",
+  },
+  cancelBtnText: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.textSecondary,
+  },
+  confirmBtn: {
+    flex: 2,
+    paddingVertical: 16,
+    borderRadius: 14,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+  },
+  confirmBtnDisabled: {
+    opacity: 0.5,
+  },
+  confirmBtnText: {
+    fontSize: 15,
     fontFamily: "Inter_600SemiBold",
     color: "#fff",
   },

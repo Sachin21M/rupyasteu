@@ -698,6 +698,10 @@ function getFilteredTransactions() {
   return allTransactions;
 }
 
+function isWalletPayment(tx) {
+  return tx.paymentStatus === 'WALLET_PAYMENT';
+}
+
 function setFilter(filter, el) {
   currentFilter = filter;
   document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
@@ -712,6 +716,7 @@ function formatDate(iso) {
 }
 
 function getPaymentPill(status) {
+  if (status === 'WALLET_PAYMENT') return `<span class="pill verified" style="background:#7C3AED;color:#fff;">Wallet</span>`;
   const label = status.replace('PAYMENT_', '');
   let cls = 'pending';
   if (status === 'PAYMENT_VERIFIED') cls = 'verified';
@@ -742,14 +747,17 @@ function renderTable() {
 
   empty.style.display = 'none';
   tbody.innerHTML = filtered.map(tx => {
-    const isPending = tx.paymentStatus === 'PAYMENT_UNVERIFIED' && tx.rechargeStatus === 'RECHARGE_PENDING';
-    const isRetryable = tx.paymentStatus === 'PAYMENT_VERIFIED' && 
+    const isWallet = tx.paymentStatus === 'WALLET_PAYMENT';
+    const isPending = !isWallet && tx.paymentStatus === 'PAYMENT_UNVERIFIED' && tx.rechargeStatus === 'RECHARGE_PENDING';
+    const isRetryable = !isWallet && tx.paymentStatus === 'PAYMENT_VERIFIED' && 
       (tx.rechargeStatus === 'RECHARGE_PENDING' || tx.rechargeStatus === 'RECHARGE_FAILED');
     const safeId = esc(tx.id);
     const safePhone = esc(tx.userPhone || '—');
     const safeAmount = esc(String(tx.amount));
     let actions;
-    if (isPending) {
+    if (isWallet) {
+      actions = `<span style="font-size:11px;color:#7C3AED;font-weight:600;">Auto-Processed</span>`;
+    } else if (isPending) {
       actions = `<button class="action-btn approve" onclick="showModal('approve','${safeId}','${safePhone}',${safeAmount})">Approve</button>
          <button class="action-btn reject" onclick="showModal('reject','${safeId}','${safePhone}',${safeAmount})">Reject</button>`;
     } else if (isRetryable) {

@@ -404,6 +404,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/recharge/instant", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const parsed = createRechargeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+
+      const { type, operatorId, subscriberNumber, amount, planId } = parsed.data;
+
+      const amountValidation = validateAmount(amount);
+      if (!amountValidation.valid) {
+        return res.status(400).json({ error: amountValidation.error });
+      }
+
+      let user = await storage.getUser((req as any).userId);
+      if (!user) {
+        user = await storage.createUserWithId((req as any).userId, (req as any).phone);
+      }
+
+      const operator = await storage.getOperator(operatorId);
+      if (!operator) {
+        return res.status(400).json({ error: "Invalid operator" });
+      }
+
+      const wallet = await storage.getOrCreateWallet((req as any).userId);
+      if (wallet.balance < amount) {
+        return res.status(400).json({
+          error: "Insufficient balance. Please add money to your wallet.",
+          code: "INSUFFICIENT_BALANCE",
+          walletBalance: wallet.balance,
+        });
+      }
+
+      let planDescription: string | undefined;
+      if (planId) {
+        const plans = await storage.getPlans(operatorId);
+        const plan = plans.find((p) => p.id === planId);
+        if (plan) planDescription = plan.description;
+      }
+
+      const newBalance = wallet.balance - amount;
+      await storage.updateWalletBalance((req as any).userId, -amount);
+      await storage.createWalletTransaction({
+        userId: (req as any).userId,
+        type: "DEBIT",
+        amount,
+        balanceBefore: wallet.balance,
+        balanceAfter: newBalance,
+        reference: `recharge-${Date.now()}`,
+        description: `${type === "MOBILE" ? "Mobile" : "DTH"} Recharge ₹${amount} - ${subscriberNumber} (${operator.name})`,
+        status: "COMPLETED",
+      });
+
+      const transaction = await storage.createTransaction({
+        userId: (req as any).userId,
+        type,
+        operatorId,
+        operatorName: operator.name,
+        subscriberNumber,
+        amount,
+        planId,
+        planDescription,
+        paymentStatus: "WALLET_PAYMENT",
+        rechargeStatus: "RECHARGE_PROCESSING",
+      });
+
+      const rechargeResult = await initiateRecharge({
+        operator: operatorId,
+        canumber: subscriberNumber,
+        amount,
+        recharge_type: type === "MOBILE" ? "prepaid" : "dth",
+        referenceid: transaction.id,
+      });
+
+      if (rechargeResult.status) {
+        await storage.updateTransaction(transaction.id, {
+          paysprintRefId: rechargeResult.data?.ackno as string,
+          rechargeStatus: "RECHARGE_SUCCESS",
+        });
+        try {
+          const serviceType = type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+          const alreadyCredited = await storage.hasCommissionCredit(transaction.id, serviceType);
+          if (!alreadyCredited) {
+            const commissionConfigs = await storage.getCommissionConfig();
+            const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+            if (commCfg && commCfg.commissionAmount > 0) {
+              await storage.creditCommission(
+                (req as any).userId, commCfg.commissionAmount, serviceType,
+                transaction.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${amount} - ${subscriberNumber}`
+              );
+            }
+          }
+        } catch (commErr: any) {
+          console.error("Commission credit error (instant recharge):", commErr.message);
+        }
+        const updatedTx = await storage.getTransaction(transaction.id);
+        return res.json({ success: true, transaction: updatedTx, message: "Recharge successful!" });
+      } else {
+        await storage.updateWalletBalance((req as any).userId, amount);
+        await storage.createWalletTransaction({
+          userId: (req as any).userId,
+          type: "CREDIT",
+          amount,
+          balanceBefore: newBalance,
+          balanceAfter: newBalance + amount,
+          reference: `refund-${transaction.id}`,
+          description: `Refund for failed recharge ₹${amount} - ${subscriberNumber}`,
+          status: "COMPLETED",
+        });
+        await storage.updateTransaction(transaction.id, {
+          rechargeStatus: "RECHARGE_FAILED",
+        });
+        return res.status(400).json({
+          success: false,
+          error: rechargeResult.message || "Recharge failed. Your amount has been refunded to your wallet.",
+        });
+      }
+    } catch (error) {
+      console.error("Instant recharge error:", error);
+      res.status(500).json({ error: "Failed to process recharge" });
+    }
+  });
+
   app.get("/api/transactions", authMiddleware, async (req: Request, res: Response) => {
     try {
       const transactions = await storage.getUserTransactions((req as any).userId);

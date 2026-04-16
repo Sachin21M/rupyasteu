@@ -139,8 +139,13 @@ export default function PlansScreen() {
 
       if (res.success) {
         setShowConfirm(false);
-        setResult({ success: true, message: `₹${selectedPlan.amount} recharge for ${subscriberNumber} was successful!` });
         setSelectedPlan(null);
+        const txStatus = res.transaction?.rechargeStatus;
+        if (txStatus === "RECHARGE_PROCESSING" && res.transaction?.id) {
+          router.replace(`/recharge/detail?id=${res.transaction.id}`);
+        } else {
+          setResult({ success: true, message: res.message || `₹${selectedPlan.amount} recharge for ${subscriberNumber} was successful!` });
+        }
       } else {
         setResult({ success: false, message: res.error || "Recharge failed. Please try again." });
       }

@@ -485,6 +485,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         if (rechargeResult.status) {
+          const paysprintDataStatus = (rechargeResult.data?.status as string || "").toUpperCase();
+          const isPending = rechargeResult.response_code === 2 || paysprintDataStatus === "PENDING";
+
+          if (isPending) {
+            await storage.updateTransaction(transaction.id, {
+              paysprintRefId: rechargeResult.data?.ackno as string,
+              rechargeStatus: "RECHARGE_PROCESSING",
+            });
+            const updatedTx = await storage.getTransaction(transaction.id);
+            return res.json({ success: true, transaction: updatedTx, message: "Recharge submitted and is being processed. Status will update automatically." });
+          }
+
           await storage.updateTransaction(transaction.id, {
             paysprintRefId: rechargeResult.data?.ackno as string,
             rechargeStatus: "RECHARGE_SUCCESS",
@@ -568,9 +580,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/transactions/:id", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const transaction = await storage.getTransaction(req.params.id);
+      let transaction = await storage.getTransaction(req.params.id);
       if (!transaction) return res.status(404).json({ error: "Transaction not found" });
       if (transaction.userId !== (req as any).userId) return res.status(403).json({ error: "Unauthorized" });
+
+      if (transaction.rechargeStatus === "RECHARGE_PROCESSING") {
+        try {
+          const statusResult = await checkRechargeStatus(req.params.id);
+          const psStatus = (statusResult.data?.status as string || "").toUpperCase();
+          const isSuccess = statusResult.status && (psStatus === "SUCCESS" || (statusResult.response_code === 1 && psStatus !== "PENDING"));
+          const isFailed = psStatus === "FAILED" || (!statusResult.status && statusResult.response_code !== 500 && statusResult.response_code !== 502);
+
+          if (isSuccess) {
+            await storage.updateTransaction(req.params.id, { rechargeStatus: "RECHARGE_SUCCESS" });
+            try {
+              const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+              const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
+              if (!alreadyCredited) {
+                const commissionConfigs = await storage.getCommissionConfig();
+                const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+                if (commCfg && commCfg.commissionAmount > 0) {
+                  await storage.creditCommission(
+                    transaction.userId, commCfg.commissionAmount, serviceType,
+                    req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+                  );
+                }
+              }
+            } catch (commErr: any) {
+              console.error("Commission credit error (status poll):", commErr.message);
+            }
+            transaction = await storage.getTransaction(req.params.id) ?? transaction;
+          } else if (isFailed) {
+            const wallet = await storage.getOrCreateWallet(transaction.userId);
+            await storage.updateWalletBalance(transaction.userId, transaction.amount);
+            await storage.createWalletTransaction({
+              userId: transaction.userId,
+              type: "CREDIT",
+              amount: transaction.amount,
+              balanceBefore: wallet.balance,
+              balanceAfter: wallet.balance + transaction.amount,
+              reference: `refund-${req.params.id}`,
+              description: `Refund for failed recharge ₹${transaction.amount} - ${transaction.subscriberNumber}`,
+              status: "COMPLETED",
+            });
+            await storage.updateTransaction(req.params.id, { rechargeStatus: "RECHARGE_FAILED" });
+            transaction = await storage.getTransaction(req.params.id) ?? transaction;
+          }
+        } catch (pollErr: any) {
+          console.error("PaySprint status poll error:", pollErr.message);
+        }
+      }
+
       res.json({ transaction });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch transaction" });
@@ -646,25 +706,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (rechargeResult.status) {
-        await storage.updateTransaction(req.params.id, {
-          paysprintRefId: rechargeResult.data?.ackno as string,
-          rechargeStatus: "RECHARGE_SUCCESS",
-        });
-        try {
-          const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
-          const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
-          if (!alreadyCredited) {
-            const commissionConfigs = await storage.getCommissionConfig();
-            const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
-            if (commCfg && commCfg.commissionAmount > 0) {
-              await storage.creditCommission(
-                transaction.userId, commCfg.commissionAmount, serviceType,
-                req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
-              );
+        const paysprintDataStatus = (rechargeResult.data?.status as string || "").toUpperCase();
+        const isPending = rechargeResult.response_code === 2 || paysprintDataStatus === "PENDING";
+
+        if (isPending) {
+          await storage.updateTransaction(req.params.id, {
+            paysprintRefId: rechargeResult.data?.ackno as string,
+            rechargeStatus: "RECHARGE_PROCESSING",
+          });
+        } else {
+          await storage.updateTransaction(req.params.id, {
+            paysprintRefId: rechargeResult.data?.ackno as string,
+            rechargeStatus: "RECHARGE_SUCCESS",
+          });
+          try {
+            const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+            const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
+            if (!alreadyCredited) {
+              const commissionConfigs = await storage.getCommissionConfig();
+              const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+              if (commCfg && commCfg.commissionAmount > 0) {
+                await storage.creditCommission(
+                  transaction.userId, commCfg.commissionAmount, serviceType,
+                  req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+                );
+              }
             }
+          } catch (commErr: any) {
+            console.error("Commission credit error (approve):", commErr.message);
           }
-        } catch (commErr: any) {
-          console.error("Commission credit error (approve):", commErr.message);
         }
       } else if (rechargeResult.response_code === 403) {
         await storage.updateTransaction(req.params.id, {
@@ -709,25 +779,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (rechargeResult.status) {
-        await storage.updateTransaction(req.params.id, {
-          paysprintRefId: rechargeResult.data?.ackno as string,
-          rechargeStatus: "RECHARGE_SUCCESS",
-        });
-        try {
-          const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
-          const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
-          if (!alreadyCredited) {
-            const commissionConfigs = await storage.getCommissionConfig();
-            const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
-            if (commCfg && commCfg.commissionAmount > 0) {
-              await storage.creditCommission(
-                transaction.userId, commCfg.commissionAmount, serviceType,
-                req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
-              );
+        const paysprintDataStatus = (rechargeResult.data?.status as string || "").toUpperCase();
+        const isPending = rechargeResult.response_code === 2 || paysprintDataStatus === "PENDING";
+
+        if (isPending) {
+          await storage.updateTransaction(req.params.id, {
+            paysprintRefId: rechargeResult.data?.ackno as string,
+            rechargeStatus: "RECHARGE_PROCESSING",
+          });
+        } else {
+          await storage.updateTransaction(req.params.id, {
+            paysprintRefId: rechargeResult.data?.ackno as string,
+            rechargeStatus: "RECHARGE_SUCCESS",
+          });
+          try {
+            const serviceType = transaction.type === "MOBILE" ? "MOBILE_RECHARGE" : "DTH_RECHARGE";
+            const alreadyCredited = await storage.hasCommissionCredit(req.params.id, serviceType);
+            if (!alreadyCredited) {
+              const commissionConfigs = await storage.getCommissionConfig();
+              const commCfg = commissionConfigs.find(c => c.serviceType === serviceType);
+              if (commCfg && commCfg.commissionAmount > 0) {
+                await storage.creditCommission(
+                  transaction.userId, commCfg.commissionAmount, serviceType,
+                  req.params.id, `Commission for ${serviceType.replace(/_/g, " ")} ₹${transaction.amount} - ${transaction.subscriberNumber}`
+                );
+              }
             }
+          } catch (commErr: any) {
+            console.error("Commission credit error (retry):", commErr.message);
           }
-        } catch (commErr: any) {
-          console.error("Commission credit error (retry):", commErr.message);
         }
       } else if (rechargeResult.response_code === 403) {
         await storage.updateTransaction(req.params.id, {

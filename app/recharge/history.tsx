@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   Platform,
   RefreshControl,
   ActivityIndicator,
+  TextInput,
+  Modal,
+  ScrollView,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,7 +20,44 @@ import Colors from "@/constants/colors";
 import { getTransactions } from "@/lib/api";
 import type { Transaction } from "@/shared/schema";
 
-const FILTERS = ["All", "Mobile", "DTH"] as const;
+const TYPE_FILTERS = ["All", "Mobile", "DTH"] as const;
+const DATE_FILTERS = ["All time", "7 days", "This month", "Custom"] as const;
+
+type TypeFilter = typeof TYPE_FILTERS[number];
+type DateFilter = typeof DATE_FILTERS[number];
+
+function getDateRange(dateFilter: DateFilter): { from: Date | null; to: Date | null } {
+  const now = new Date();
+  if (dateFilter === "7 days") {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 7);
+    from.setHours(0, 0, 0, 0);
+    return { from, to: now };
+  }
+  if (dateFilter === "This month") {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from, to: now };
+  }
+  return { from: null, to: null };
+}
+
+function parseCustomDate(str: string): Date | null {
+  const trimmed = str.trim();
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) return null;
+  const parts = trimmed.split("/");
+  const [d, m, y] = parts.map(Number);
+  if (m < 1 || m > 12) return null;
+  if (d < 1 || d > 31) return null;
+  if (y < 2000 || y > 2100) return null;
+  const date = new Date(y, m - 1, d);
+  if (
+    isNaN(date.getTime()) ||
+    date.getFullYear() !== y ||
+    date.getMonth() !== m - 1 ||
+    date.getDate() !== d
+  ) return null;
+  return date;
+}
 
 function statusInfo(tx: Transaction) {
   const isSuccess = tx.rechargeStatus === "RECHARGE_SUCCESS";
@@ -79,10 +119,107 @@ function RechargeHistoryCard({ tx }: { tx: Transaction }) {
   );
 }
 
+function CustomDateModal({
+  visible,
+  fromValue,
+  toValue,
+  onFromChange,
+  onToChange,
+  onApply,
+  onClose,
+}: {
+  visible: boolean;
+  fromValue: string;
+  toValue: string;
+  onFromChange: (v: string) => void;
+  onToChange: (v: string) => void;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  const fromDate = parseCustomDate(fromValue);
+  const toDate = parseCustomDate(toValue);
+  const hasFromError = fromValue.length === 10 && !fromDate;
+  const hasToError = toValue.length === 10 && !toDate;
+  const hasRangeError = !!(fromDate && toDate && fromDate > toDate);
+  const canApply = !hasFromError && !hasToError && !hasRangeError && (!!fromDate || !!toDate);
+
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable style={styles.modalCard} onPress={() => {}}>
+          <Text style={styles.modalTitle}>Custom Date Range</Text>
+          <Text style={styles.modalHint}>Enter dates as DD/MM/YYYY</Text>
+
+          <View style={styles.modalFieldRow}>
+            <View style={styles.modalField}>
+              <Text style={styles.modalLabel}>From</Text>
+              <TextInput
+                testID="custom-date-from"
+                style={[styles.modalInput, hasFromError && styles.modalInputError]}
+                placeholder="DD/MM/YYYY"
+                placeholderTextColor={Colors.textTertiary}
+                value={fromValue}
+                onChangeText={onFromChange}
+                keyboardType="numbers-and-punctuation"
+                maxLength={10}
+              />
+              {hasFromError && (
+                <Text style={styles.modalFieldError}>Invalid date</Text>
+              )}
+            </View>
+            <View style={styles.modalField}>
+              <Text style={styles.modalLabel}>To</Text>
+              <TextInput
+                testID="custom-date-to"
+                style={[styles.modalInput, hasToError && styles.modalInputError]}
+                placeholder="DD/MM/YYYY"
+                placeholderTextColor={Colors.textTertiary}
+                value={toValue}
+                onChangeText={onToChange}
+                keyboardType="numbers-and-punctuation"
+                maxLength={10}
+              />
+              {hasToError && (
+                <Text style={styles.modalFieldError}>Invalid date</Text>
+              )}
+            </View>
+          </View>
+
+          {hasRangeError && (
+            <Text testID="custom-date-range-error" style={styles.modalRangeError}>
+              "From" date must be before "To" date
+            </Text>
+          )}
+
+          <View style={styles.modalActions}>
+            <Pressable style={styles.modalCancelBtn} onPress={onClose}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modalApplyBtn, !canApply && styles.modalApplyBtnDisabled]}
+              onPress={canApply ? onApply : undefined}
+              testID="custom-date-apply"
+            >
+              <Text style={styles.modalApplyText}>Apply</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 export default function RechargeHistoryScreen() {
   const insets = useSafeAreaInsets();
-  const [filter, setFilter] = useState<typeof FILTERS[number]>("All");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("All time");
+  const [searchQuery, setSearchQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [appliedCustomFrom, setAppliedCustomFrom] = useState<Date | null>(null);
+  const [appliedCustomTo, setAppliedCustomTo] = useState<Date | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["transactions"],
@@ -91,12 +228,42 @@ export default function RechargeHistoryScreen() {
 
   const allTransactions: Transaction[] = data?.transactions || [];
 
-  const filtered = allTransactions.filter((tx) => {
-    if (filter === "All") return true;
-    if (filter === "Mobile") return tx.type === "MOBILE";
-    if (filter === "DTH") return tx.type === "DTH";
-    return true;
-  });
+  const filtered = useMemo(() => {
+    let result = allTransactions;
+
+    if (typeFilter === "Mobile") result = result.filter((tx) => tx.type === "MOBILE");
+    else if (typeFilter === "DTH") result = result.filter((tx) => tx.type === "DTH");
+
+    if (dateFilter !== "All time") {
+      let from: Date | null = null;
+      let to: Date | null = null;
+      if (dateFilter === "Custom") {
+        from = appliedCustomFrom;
+        to = appliedCustomTo;
+      } else {
+        ({ from, to } = getDateRange(dateFilter));
+      }
+      if (from) {
+        result = result.filter((tx) => new Date(tx.createdAt) >= from!);
+      }
+      if (to) {
+        const toEnd = new Date(to);
+        toEnd.setHours(23, 59, 59, 999);
+        result = result.filter((tx) => new Date(tx.createdAt) <= toEnd);
+      }
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter(
+        (tx) =>
+          tx.subscriberNumber?.toLowerCase().includes(q) ||
+          tx.operatorName?.toLowerCase().includes(q)
+      );
+    }
+
+    return result;
+  }, [allTransactions, typeFilter, dateFilter, searchQuery, appliedCustomFrom, appliedCustomTo]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -104,7 +271,38 @@ export default function RechargeHistoryScreen() {
     setRefreshing(false);
   }, [refetch]);
 
+  const handleDateFilterPress = (f: DateFilter) => {
+    if (f === "Custom") {
+      setShowCustomModal(true);
+    } else {
+      setDateFilter(f);
+      setAppliedCustomFrom(null);
+      setAppliedCustomTo(null);
+    }
+  };
+
+  const handleApplyCustom = () => {
+    const from = parseCustomDate(customFrom);
+    const to = parseCustomDate(customTo);
+    setAppliedCustomFrom(from);
+    setAppliedCustomTo(to);
+    setDateFilter("Custom");
+    setShowCustomModal(false);
+  };
+
+  const activeFiltersCount =
+    (typeFilter !== "All" ? 1 : 0) +
+    (dateFilter !== "All time" ? 1 : 0) +
+    (searchQuery.trim() ? 1 : 0);
+
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
+
+  const getEmptyMessage = () => {
+    if (searchQuery.trim()) return `No results for "${searchQuery.trim()}"`;
+    if (dateFilter !== "All time") return "No recharges in this period";
+    if (typeFilter !== "All") return `No ${typeFilter} recharges yet`;
+    return "Your mobile and DTH recharges will appear here";
+  };
 
   return (
     <View style={styles.container}>
@@ -120,20 +318,89 @@ export default function RechargeHistoryScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <View style={styles.filterRow}>
-        {FILTERS.map((f) => (
-          <Pressable
-            key={f}
-            testID={`filter-${f}`}
-            style={[styles.filterChip, filter === f && styles.filterChipActive]}
-            onPress={() => setFilter(f)}
-          >
-            <Text style={[styles.filterChipText, filter === f && styles.filterChipTextActive]}>
-              {f}
-            </Text>
-          </Pressable>
-        ))}
+      <View style={styles.searchRow}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={Colors.textTertiary} style={styles.searchIcon} />
+          <TextInput
+            testID="recharge-search-input"
+            style={styles.searchInput}
+            placeholder="Search by number or operator"
+            placeholderTextColor={Colors.textTertiary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {searchQuery.length > 0 && Platform.OS !== "ios" && (
+            <Pressable onPress={() => setSearchQuery("")} testID="search-clear">
+              <Ionicons name="close-circle" size={18} color={Colors.textTertiary} />
+            </Pressable>
+          )}
+        </View>
       </View>
+
+      <View style={styles.filterSection}>
+        <View style={styles.filterRow}>
+          {TYPE_FILTERS.map((f) => (
+            <Pressable
+              key={f}
+              testID={`type-filter-${f}`}
+              style={[styles.filterChip, typeFilter === f && styles.filterChipActive]}
+              onPress={() => setTypeFilter(f)}
+            >
+              <Text style={[styles.filterChipText, typeFilter === f && styles.filterChipTextActive]}>
+                {f}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.dateFilterScrollContent}
+          style={styles.dateFilterScroll}
+        >
+          {DATE_FILTERS.map((f) => {
+            const isActive = dateFilter === f;
+            return (
+              <Pressable
+                key={f}
+                testID={`date-filter-${f.replace(" ", "-")}`}
+                style={[styles.filterChip, styles.dateChip, isActive && styles.filterChipActive]}
+                onPress={() => handleDateFilterPress(f)}
+              >
+                {f === "Custom" && isActive && (appliedCustomFrom || appliedCustomTo) ? (
+                  <Ionicons name="calendar" size={13} color="#fff" style={{ marginRight: 4 }} />
+                ) : null}
+                <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                  {f}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {activeFiltersCount > 0 && (
+        <View style={styles.activeFiltersRow}>
+          <Text style={styles.resultCount}>
+            {filtered.length} {filtered.length === 1 ? "result" : "results"}
+          </Text>
+          <Pressable
+            testID="clear-filters"
+            onPress={() => {
+              setTypeFilter("All");
+              setDateFilter("All time");
+              setSearchQuery("");
+              setAppliedCustomFrom(null);
+              setAppliedCustomTo(null);
+            }}
+          >
+            <Text style={styles.clearFiltersText}>Clear filters</Text>
+          </Pressable>
+        </View>
+      )}
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
@@ -166,17 +433,29 @@ export default function RechargeHistoryScreen() {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="receipt-outline" size={56} color={Colors.textTertiary} />
-              <Text style={styles.emptyText}>No recharge history</Text>
-              <Text style={styles.emptySubtext}>
-                {filter === "All"
-                  ? "Your mobile and DTH recharges will appear here"
-                  : `No ${filter} recharges yet`}
+              <Ionicons
+                name={searchQuery.trim() ? "search-outline" : "receipt-outline"}
+                size={56}
+                color={Colors.textTertiary}
+              />
+              <Text style={styles.emptyText}>
+                {searchQuery.trim() ? "No results found" : "No recharge history"}
               </Text>
+              <Text style={styles.emptySubtext}>{getEmptyMessage()}</Text>
             </View>
           }
         />
       )}
+
+      <CustomDateModal
+        visible={showCustomModal}
+        fromValue={customFrom}
+        toValue={customTo}
+        onFromChange={setCustomFrom}
+        onToChange={setCustomTo}
+        onApply={handleApplyCustom}
+        onClose={() => setShowCustomModal(false)}
+      />
     </View>
   );
 }
@@ -191,7 +470,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingBottom: 12,
   },
   backBtn: {
     width: 40,
@@ -206,19 +485,52 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: Colors.text,
   },
+  searchRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  searchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    height: 44,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.text,
+    paddingVertical: 0,
+  },
+  filterSection: {
+    gap: 8,
+    marginBottom: 4,
+  },
   filterRow: {
     flexDirection: "row",
-    paddingHorizontal: 20,
-    gap: 10,
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    gap: 8,
+    flexWrap: "nowrap",
   },
   filterChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 24,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  dateChip: {
+    paddingHorizontal: 12,
   },
   filterChipActive: {
     backgroundColor: Colors.primary,
@@ -231,6 +543,23 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: "#fff",
+  },
+  activeFiltersRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  resultCount: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textSecondary,
+  },
+  clearFiltersText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.primary,
   },
   loadingContainer: {
     flex: 1,
@@ -336,6 +665,7 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.textTertiary,
     textAlign: "center",
+    paddingHorizontal: 32,
   },
   retryBtn: {
     marginTop: 16,
@@ -348,5 +678,111 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
     color: "#fff",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    padding: 24,
+    width: "100%",
+    gap: 16,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+  },
+  modalHint: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textTertiary,
+    marginTop: -8,
+  },
+  modalFieldRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  modalField: {
+    flex: 1,
+    gap: 6,
+  },
+  modalLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.textSecondary,
+  },
+  modalInput: {
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.text,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 4,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: Colors.background,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.textSecondary,
+  },
+  modalApplyBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+  },
+  modalApplyText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
+  },
+  modalApplyBtnDisabled: {
+    backgroundColor: Colors.textTertiary,
+  },
+  modalInputError: {
+    borderColor: Colors.error,
+  },
+  modalFieldError: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.error,
+    marginTop: 2,
+  },
+  modalRangeError: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.error,
+    marginTop: -8,
+  },
+  dateFilterScroll: {
+    flexShrink: 0,
+  },
+  dateFilterScrollContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+    flexDirection: "row",
   },
 });

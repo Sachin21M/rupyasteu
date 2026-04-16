@@ -1,14 +1,8 @@
 import jwt from "jsonwebtoken";
-import { encryptPayload } from "../utils/encryption";
 
 const PAYSPRINT_BASE_URL = process.env.PAYSPRINT_BASE_URL || "https://api.paysprint.in/api/v1";
 const PAYSPRINT_PARTNER_ID = process.env.PAYSPRINT_PARTNER_ID || "";
-const PAYSPRINT_ENV = process.env.PAYSPRINT_ENV || "PRODUCTION";
 const PAYSPRINT_PROXY_URL = process.env.PAYSPRINT_PROXY_URL || "";
-
-function isProductionEnv(): boolean {
-  return PAYSPRINT_ENV === "PRODUCTION" || PAYSPRINT_ENV === "LIVE";
-}
 
 function generateUniqueReqId(): number {
   return Math.floor(Math.random() * 1000000000);
@@ -49,8 +43,6 @@ async function makePaysprintRequest(
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
 
   try {
-    const useEncryption = isProductionEnv();
-
     const timestamp = Math.floor(Date.now() / 1000);
     const reqid = generateUniqueReqId();
 
@@ -78,25 +70,11 @@ async function makePaysprintRequest(
 
     let requestBody: string;
 
+    requestBody = JSON.stringify(fullPayload);
     if (PAYSPRINT_PROXY_URL) {
-      requestBody = JSON.stringify(fullPayload);
       console.log("[STEP 3] AES ENCRYPTION: SKIPPED (proxy mode — plaintext sent to trusted proxy)");
-    } else if (useEncryption) {
-      try {
-        const encrypted = encryptPayload(fullPayload);
-        requestBody = JSON.stringify({ data: encrypted });
-        console.log("[STEP 3] AES ENCRYPTION:");
-        console.log("  Algorithm: AES-128-CBC");
-        console.log("  Output encoding: Base64");
-        console.log("  Encrypted length:", encrypted.length, "chars");
-        console.log("  Encrypted (first 40 chars):", encrypted.substring(0, 40) + "...");
-      } catch (encErr) {
-        console.warn("[STEP 3] AES encryption FAILED:", encErr);
-        requestBody = JSON.stringify(fullPayload);
-      }
     } else {
-      requestBody = JSON.stringify(fullPayload);
-      console.log("[STEP 3] AES ENCRYPTION: SKIPPED (non-production env)");
+      console.log("[STEP 3] AES ENCRYPTION: SKIPPED (direct mode — VPS IP is whitelisted by PaySprint)");
     }
 
     console.log("[STEP 4] REQUEST HEADERS:");

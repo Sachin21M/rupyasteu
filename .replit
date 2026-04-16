@@ -69,3 +69,7 @@ EXPO_PUBLIC_API_URL = "https://rupyasetuapi.site"
 EXPO_PUBLIC_DOMAIN = "rupyasetuapi.site"
 
 [userenv.development]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000

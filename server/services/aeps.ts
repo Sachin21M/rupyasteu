@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-import { encryptPayload } from "../utils/encryption";
 import { storage } from "../storage";
 
 const SENSITIVE_KEYS = new Set([
@@ -115,8 +114,7 @@ async function logAepsApiCall(
 
 async function makeAepsRequest(
   endpoint: string,
-  payload: Record<string, unknown>,
-  options?: { skipEncryption?: boolean }
+  payload: Record<string, unknown>
 ): Promise<AepsResponse> {
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
   if (!jwtTokenEnv) {
@@ -138,33 +136,19 @@ async function makeAepsRequest(
   };
 
   try {
-    const shouldEncrypt = !PAYSPRINT_PROXY_URL && process.env.PAYSPRINT_ENCRYPT === "true" && !options?.skipEncryption;
-
     console.log(`[AEPS] Request to ${endpoint}`);
 
     const jwtResult = generatePaysprintJWT();
     const jwtToken = jwtResult.token;
 
-    let requestBody: string;
-
-    if (shouldEncrypt) {
-      const encrypted = encryptPayload(fullPayload);
-      requestBody = JSON.stringify({ body: encrypted });
-      console.log(`[AEPS] AES ENCRYPTION: APPLIED (PAYSPRINT_ENCRYPT=true, direct mode)`);
-    } else if (PAYSPRINT_PROXY_URL) {
-      requestBody = JSON.stringify(fullPayload);
-      console.log(`[AEPS] AES ENCRYPTION: SKIPPED (proxy mode — plaintext sent to trusted proxy)`);
-    } else {
-      requestBody = JSON.stringify(fullPayload);
-      console.log(`[AEPS] AES ENCRYPTION: SKIPPED (direct mode — VPS IP is whitelisted by PaySprint)`);
-    }
+    const requestBody = JSON.stringify(fullPayload);
 
     const PAYSPRINT_AUTHORIZED_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
       // Authorisedkey is only required in UAT (not in LIVE when using dedicated IP whitelist)
-      ...(process.env.PAYSPRINT_ENCRYPT !== "true" && !isProductionEnv() && PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
+      ...(!isProductionEnv() && PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
     };
 
     let rawText: string;
@@ -342,7 +326,7 @@ export async function getOnboardingUrl(params: {
     email: params.email || `${params.mobile}@rupyasetu.in`,
     firm: params.firmName || "RupyaSetu",
     callback: params.callbackUrl || "https://rupyasetuapi.site/api/paysprint/aeps-callback",
-  }, { skipEncryption: true });
+  });
 
   // PaySprint returns redirecturl as a top-level field (not inside data)
   if (result.redirecturl) {

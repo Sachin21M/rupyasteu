@@ -1,8 +1,6 @@
 import { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LOW_BALANCE_KEY, DEFAULT_THRESHOLD } from "@/constants/wallet";
-import { useAuth } from "@/contexts/AuthContext";
-import { getUserProfile } from "@/lib/api";
 
 interface ThresholdContextValue {
   threshold: number;
@@ -11,9 +9,26 @@ interface ThresholdContextValue {
 
 const ThresholdContext = createContext<ThresholdContextValue | null>(null);
 
+let _setThresholdExternal: ((value: number) => void) | null = null;
+
+export function applyServerThreshold(value: number) {
+  if (_setThresholdExternal) {
+    _setThresholdExternal(value);
+  }
+}
+
 function ThresholdProviderInner({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
   const [threshold, setThresholdState] = useState(DEFAULT_THRESHOLD);
+
+  useEffect(() => {
+    _setThresholdExternal = (value: number) => {
+      setThresholdState(value);
+      AsyncStorage.setItem(LOW_BALANCE_KEY, String(value));
+    };
+    return () => {
+      _setThresholdExternal = null;
+    };
+  }, []);
 
   useEffect(() => {
     AsyncStorage.getItem(LOW_BALANCE_KEY).then((val) => {
@@ -26,23 +41,9 @@ function ThresholdProviderInner({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    async function syncFromServer() {
-      try {
-        const profile = await getUserProfile();
-        if (profile?.user?.lowBalanceThreshold) {
-          const serverVal = profile.user.lowBalanceThreshold;
-          setThresholdState(serverVal);
-          await AsyncStorage.setItem(LOW_BALANCE_KEY, String(serverVal));
-        }
-      } catch {}
-    }
-    syncFromServer();
-  }, [isAuthenticated]);
-
   function setThreshold(value: number) {
     setThresholdState(value);
+    AsyncStorage.setItem(LOW_BALANCE_KEY, String(value));
   }
 
   const contextValue = useMemo(

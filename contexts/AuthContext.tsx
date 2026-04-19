@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import { fetch } from "expo/fetch";
 import { LOW_BALANCE_KEY } from "@/constants/wallet";
+import { applyServerThreshold } from "@/contexts/ThresholdContext";
 
 interface User {
   id: string;
@@ -68,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
         if (data.user?.lowBalanceThreshold) {
           await AsyncStorage.setItem(LOW_BALANCE_KEY, String(data.user.lowBalanceThreshold));
+          applyServerThreshold(data.user.lowBalanceThreshold);
         }
       } else {
         await clearAuth();

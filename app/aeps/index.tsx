@@ -236,8 +236,13 @@ export default function AepsServicesScreen() {
         if (result.success && result.redirectUrl) {
           url = result.redirectUrl;
           setKycRedirectUrl(result.redirectUrl);
-        } else if (result.response_code === 12001) {
-          // Already registered on PaySprint — just verify status
+        } else if (
+          result.response_code === 12001 ||
+          result.response_code === 2 ||
+          result.alreadyRegistered ||
+          (result.error || result.message || "").toLowerCase().includes("already registered")
+        ) {
+          // Merchant already exists in PaySprint — check if KYC is complete
           setOnboardingLoading(false);
           await verifyKycFromPaySprint();
           return;

@@ -139,8 +139,13 @@ export default function KycScreen() {
         if (result.success && result.redirectUrl) {
           url = result.redirectUrl;
           setKycRedirectUrl(url);
-        } else if (result.response_code === 12001) {
-          // Already registered — just verify current status
+        } else if (
+          result.response_code === 12001 ||
+          result.response_code === 2 ||
+          result.alreadyRegistered ||
+          (result.error || result.message || "").toLowerCase().includes("already registered")
+        ) {
+          // Merchant already exists in PaySprint — check if KYC is complete
           setInitiating(false);
           await verifyKycFromPaySprint();
           return;

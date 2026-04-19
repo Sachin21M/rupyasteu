@@ -1211,15 +1211,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mobile: user.phone,
         isNew: true,
       });
+      console.log(`[Onboard] is_new=1 response: code=${result.response_code} status=${result.status} msg="${result.message}" hasUrl=${!!(result.redirecturl || result.data?.redirecturl)}`);
+
       if (!(result.redirecturl || result.data?.redirecturl)) {
         result = await aepsService.getOnboardingUrl({
           merchantCode,
           mobile: user.phone,
           isNew: false,
         });
+        console.log(`[Onboard] is_new=0 response: code=${result.response_code} status=${result.status} msg="${result.message}" hasUrl=${!!(result.redirecturl || result.data?.redirecturl)}`);
       }
 
-      const kycUrl = result.redirecturl || result.data?.redirecturl;
+      let kycUrl = result.redirecturl || result.data?.redirecturl;
+
+      // PaySprint sometimes rejects both is_new calls for already-registered merchants
+      // but the merchant may have a valid stored URL. Use it as a last resort.
+      if (!kycUrl) {
+        const existingMerchant = await storage.getAepsMerchant((req as any).userId);
+        if (existingMerchant?.kycRedirectUrl) {
+          console.log(`[Onboard] PaySprint gave no URL; using stored kycRedirectUrl as fallback`);
+          kycUrl = existingMerchant.kycRedirectUrl;
+        }
+      }
+
       if (kycUrl) {
         const merchant = await storage.getAepsMerchant((req as any).userId);
         if (!merchant) {
@@ -1233,7 +1247,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         res.json({ success: true, redirectUrl: kycUrl });
       } else {
-        res.json({ success: false, response_code: result.response_code ?? null, error: result.message });
+        // Check if message indicates merchant is already fully registered (KYC complete)
+        const msg = (result.message || "").toLowerCase();
+        const alreadyRegistered = msg.includes("already registered") || msg.includes("already exist") || result.response_code === 2;
+        res.json({
+          success: false,
+          response_code: result.response_code ?? null,
+          error: result.message,
+          alreadyRegistered,
+        });
       }
     } catch (error) {
       console.error("AEPS onboard error:", error);

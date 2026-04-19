@@ -117,9 +117,10 @@ export default function AepsServicesScreen() {
     useCallback(() => {
       if (kycWebviewUsedRef.current) {
         kycWebviewUsedRef.current = false;
-        // Verify + poll on any return from the in-app KYC WebView screen
+        // Single verification check when returning from the in-app KYC screen.
+        // We do not start infinite polling here — the user can reopen KYC or
+        // pull-to-refresh if PaySprint's status is still propagating.
         verifyKycFromPaySprint();
-        startKycPolling();
       }
     }, [])
   );

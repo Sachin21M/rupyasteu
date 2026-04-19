@@ -64,7 +64,7 @@ export default function KycWebViewScreen() {
     if (!state.url || completedRef.current) return;
     try {
       const host = new URL(state.url).hostname;
-      const isOnKycDomain = host.includes(KYC_DOMAIN);
+      const isOnKycDomain = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
       if (!isOnKycDomain && state.url.startsWith("http")) {
         completedRef.current = true;
         router.back();
@@ -151,11 +151,11 @@ export default function KycWebViewScreen() {
     );
   }
 
-  // Security: only allow merchantkyc.com URLs
+  // Security: only allow merchantkyc.com (exact or subdomain)
   let isValidKycUrl = false;
   try {
     const host = new URL(url ?? "").hostname;
-    isValidKycUrl = host.includes(KYC_DOMAIN);
+    isValidKycUrl = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
   } catch {
     isValidKycUrl = false;
   }

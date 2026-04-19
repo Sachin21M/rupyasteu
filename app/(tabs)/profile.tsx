@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -17,9 +17,9 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-
-import { LOW_BALANCE_KEY, DEFAULT_THRESHOLD } from "@/constants/wallet";
-import { getUserProfile, updateLowBalanceThreshold } from "@/lib/api";
+import { useThreshold } from "@/contexts/ThresholdContext";
+import { LOW_BALANCE_KEY } from "@/constants/wallet";
+import { updateLowBalanceThreshold } from "@/lib/api";
 
 const PRESETS = [25, 50, 100, 200, 500];
 
@@ -48,30 +48,10 @@ function MenuItem({ icon, label, onPress, danger }: {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
-  const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
+  const { threshold, setThreshold } = useThreshold();
   const [showThresholdModal, setShowThresholdModal] = useState(false);
   const [customInput, setCustomInput] = useState("");
   const [inputError, setInputError] = useState("");
-
-  useEffect(() => {
-    async function loadThreshold() {
-      try {
-        const profile = await getUserProfile();
-        if (profile?.user?.lowBalanceThreshold) {
-          const serverVal = profile.user.lowBalanceThreshold;
-          setThreshold(serverVal);
-          await AsyncStorage.setItem(LOW_BALANCE_KEY, String(serverVal));
-          return;
-        }
-      } catch {}
-      const local = await AsyncStorage.getItem(LOW_BALANCE_KEY);
-      if (local) {
-        const parsed = parseInt(local, 10);
-        if (!isNaN(parsed) && parsed > 0) setThreshold(parsed);
-      }
-    }
-    loadThreshold();
-  }, []);
 
   async function handleLogout() {
     await logout();
@@ -89,8 +69,8 @@ export default function ProfileScreen() {
       setInputError("Please enter an amount between ₹1 and ₹10,000.");
       return;
     }
-    await AsyncStorage.setItem(LOW_BALANCE_KEY, String(value));
     setThreshold(value);
+    await AsyncStorage.setItem(LOW_BALANCE_KEY, String(value));
     try {
       await updateLowBalanceThreshold(value);
       setShowThresholdModal(false);

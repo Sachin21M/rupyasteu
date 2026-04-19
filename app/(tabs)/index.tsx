@@ -10,16 +10,15 @@ import {
   ActivityIndicator,
   Dimensions,
 } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type React from "react";
 import { useQuery } from "@tanstack/react-query";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
+import { useThreshold } from "@/contexts/ThresholdContext";
 import { getAepsTransactions, getWallet } from "@/lib/api";
-import { LOW_BALANCE_KEY, DEFAULT_THRESHOLD } from "@/constants/wallet";
 import type { AepsTransaction } from "@/shared/schema";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -92,21 +91,8 @@ function AepsTransactionItem({ tx }: { tx: AepsTransaction }) {
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { threshold: lowBalanceThreshold } = useThreshold();
   const [refreshing, setRefreshing] = useState(false);
-  const [lowBalanceThreshold, setLowBalanceThreshold] = useState(DEFAULT_THRESHOLD);
-
-  useFocusEffect(
-    useCallback(() => {
-      AsyncStorage.getItem(LOW_BALANCE_KEY).then((val) => {
-        if (val) {
-          const parsed = parseInt(val, 10);
-          if (!isNaN(parsed) && parsed > 0) setLowBalanceThreshold(parsed);
-        } else {
-          setLowBalanceThreshold(DEFAULT_THRESHOLD);
-        }
-      });
-    }, [])
-  );
 
   const { data: aepsData, isLoading, refetch } = useQuery({
     queryKey: ["aeps-transactions"],

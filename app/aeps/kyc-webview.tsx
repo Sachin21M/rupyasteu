@@ -151,6 +151,33 @@ export default function KycWebViewScreen() {
     );
   }
 
+  // Security: only allow merchantkyc.com URLs
+  let isValidKycUrl = false;
+  try {
+    const host = new URL(url ?? "").hostname;
+    isValidKycUrl = host.includes(KYC_DOMAIN);
+  } catch {
+    isValidKycUrl = false;
+  }
+
+  if (!isValidKycUrl) {
+    return (
+      <View style={styles.container}>
+        <Header />
+        <View style={styles.centered}>
+          <Ionicons name="warning-outline" size={48} color="#E53E3E" />
+          <Text style={styles.deniedTitle}>Invalid KYC URL</Text>
+          <Text style={styles.deniedText}>
+            The KYC link appears to be invalid. Please go back and try again.
+          </Text>
+          <Pressable style={styles.cancelLink} onPress={handleBack}>
+            <Text style={styles.cancelLinkText}>Go Back</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Header />

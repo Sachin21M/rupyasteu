@@ -117,7 +117,9 @@ export default function AepsServicesScreen() {
     useCallback(() => {
       if (kycWebviewUsedRef.current) {
         kycWebviewUsedRef.current = false;
+        // Immediate check + polling so delayed PaySprint status propagation is handled
         verifyKycFromPaySprint();
+        startKycPolling();
       }
     }, [])
   );

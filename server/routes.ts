@@ -239,7 +239,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
-      res.json({ user: { id: user.id, phone: user.phone, name: user.name } });
+      res.json({ user: { id: user.id, phone: user.phone, name: user.name, lowBalanceThreshold: user.lowBalanceThreshold } });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch profile" });
     }
@@ -247,15 +247,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/user/profile", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { name } = req.body;
-      const user = await storage.updateUser((req as any).userId, { name });
+      const { name, lowBalanceThreshold } = req.body;
+      const updateData: { name?: string; lowBalanceThreshold?: number } = {};
+      if (name !== undefined) updateData.name = name;
+      if (lowBalanceThreshold !== undefined) {
+        const parsed = parseInt(lowBalanceThreshold, 10);
+        if (isNaN(parsed) || parsed < 1 || parsed > 10000) {
+          return res.status(400).json({ error: "lowBalanceThreshold must be between 1 and 10000" });
+        }
+        updateData.lowBalanceThreshold = parsed;
+      }
+      const user = await storage.updateUser((req as any).userId, updateData);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      autoOnboardMerchant(user.id, user.phone, name || "RupyaSetu").catch((err) => {
-        console.error("Auto-onboard after profile update failed:", err.message);
-      });
+      if (name !== undefined) {
+        autoOnboardMerchant(user.id, user.phone, name || "RupyaSetu").catch((err) => {
+          console.error("Auto-onboard after profile update failed:", err.message);
+        });
+      }
 
-      res.json({ user: { id: user.id, phone: user.phone, name: user.name } });
+      res.json({ user: { id: user.id, phone: user.phone, name: user.name, lowBalanceThreshold: user.lowBalanceThreshold } });
     } catch (error) {
       res.status(500).json({ error: "Failed to update profile" });
     }

@@ -118,6 +118,18 @@ export async function updateUserProfile(name: string) {
   return res.json();
 }
 
+export async function updateLowBalanceThreshold(threshold: number) {
+  const res = await authFetch("/api/user/profile", {
+    method: "PUT",
+    body: JSON.stringify({ lowBalanceThreshold: threshold }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to save threshold (${res.status})`);
+  }
+  return res.json();
+}
+
 async function handleAepsResponse(res: Response) {
   const data = await res.json();
   if (!res.ok) {

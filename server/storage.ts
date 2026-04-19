@@ -177,6 +177,7 @@ async function initAepsTables() {
       )
     `);
     await pool.query(`ALTER TABLE commission_withdrawals ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS low_balance_threshold INTEGER`);
     console.log("AEPS tables initialized successfully");
     console.log("Wallet tables initialized successfully");
     console.log("Commission tables initialized successfully");
@@ -304,6 +305,7 @@ function rowToUser(row: any): User {
     id: row.id,
     phone: row.phone,
     name: row.name || undefined,
+    lowBalanceThreshold: row.low_balance_threshold != null ? parseInt(row.low_balance_threshold, 10) : undefined,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
   };
 }
@@ -418,6 +420,10 @@ export class PgStorage implements IStorage {
     if (data.phone !== undefined) {
       fields.push(`phone = $${idx++}`);
       values.push(data.phone);
+    }
+    if (data.lowBalanceThreshold !== undefined) {
+      fields.push(`low_balance_threshold = $${idx++}`);
+      values.push(data.lowBalanceThreshold);
     }
 
     if (fields.length === 0) return this.getUser(id);

@@ -25,6 +25,7 @@ export interface User {
   id: string;
   phone: string;
   name?: string;
+  lowBalanceThreshold?: number;
   createdAt: string;
 }
 

@@ -19,6 +19,7 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 
 import { LOW_BALANCE_KEY, DEFAULT_THRESHOLD } from "@/constants/wallet";
+import { getUserProfile, updateLowBalanceThreshold } from "@/lib/api";
 
 const PRESETS = [25, 50, 100, 200, 500];
 
@@ -53,12 +54,23 @@ export default function ProfileScreen() {
   const [inputError, setInputError] = useState("");
 
   useEffect(() => {
-    AsyncStorage.getItem(LOW_BALANCE_KEY).then((val) => {
-      if (val) {
-        const parsed = parseInt(val, 10);
+    async function loadThreshold() {
+      try {
+        const profile = await getUserProfile();
+        if (profile?.user?.lowBalanceThreshold) {
+          const serverVal = profile.user.lowBalanceThreshold;
+          setThreshold(serverVal);
+          await AsyncStorage.setItem(LOW_BALANCE_KEY, String(serverVal));
+          return;
+        }
+      } catch {}
+      const local = await AsyncStorage.getItem(LOW_BALANCE_KEY);
+      if (local) {
+        const parsed = parseInt(local, 10);
         if (!isNaN(parsed) && parsed > 0) setThreshold(parsed);
       }
-    });
+    }
+    loadThreshold();
   }, []);
 
   async function handleLogout() {
@@ -79,7 +91,12 @@ export default function ProfileScreen() {
     }
     await AsyncStorage.setItem(LOW_BALANCE_KEY, String(value));
     setThreshold(value);
-    setShowThresholdModal(false);
+    try {
+      await updateLowBalanceThreshold(value);
+      setShowThresholdModal(false);
+    } catch {
+      setInputError("Saved on this device. Could not sync to server — check your connection.");
+    }
   }
 
   async function handleCustomSave() {

@@ -65,13 +65,26 @@ export default function KycScreen() {
   async function loadMerchantStatus(silent = false) {
     if (!silent) setLoading(true);
     try {
-      const result = await getAepsMerchant();
-      setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
-      if (result.merchant?.merchantCode) {
-        setMerchantCode(result.merchant.merchantCode);
+      // Fetch both in parallel: merchant gives redirect URL + merchant code,
+      // getAepsKycStatus is the authoritative status source per spec.
+      const [merchantResult, kycResult] = await Promise.allSettled([
+        getAepsMerchant(),
+        getAepsKycStatus(),
+      ]);
+
+      if (merchantResult.status === "fulfilled") {
+        const r = merchantResult.value;
+        if (r.merchant?.merchantCode) setMerchantCode(r.merchant.merchantCode);
+        if (r.merchant?.kycRedirectUrl) setKycRedirectUrl(r.merchant.kycRedirectUrl);
+        // Use merchant status as fallback
+        if (r.merchant?.kycStatus) setKycStatus(r.merchant.kycStatus);
       }
-      if (result.merchant?.kycRedirectUrl) {
-        setKycRedirectUrl(result.merchant.kycRedirectUrl);
+
+      // getAepsKycStatus overrides merchant status if available
+      if (kycResult.status === "fulfilled") {
+        const ks = kycResult.value;
+        if (ks?.status) setKycStatus(ks.status);
+        else if (ks?.onboarded) setKycStatus("COMPLETED");
       }
     } catch {
       setKycStatus("NOT_STARTED");
@@ -175,7 +188,7 @@ export default function KycScreen() {
         icon: "shield-checkmark" as const,
         color: Colors.success,
         bg: Colors.successLight,
-        title: "KYC Verified",
+        title: "Verified",
         subtitle: "Your AEPS account is active and ready for transactions.",
       }
     : isInProgress
@@ -183,14 +196,14 @@ export default function KycScreen() {
         icon: "time" as const,
         color: Colors.warning,
         bg: Colors.warningLight,
-        title: "KYC In Progress",
+        title: "Pending",
         subtitle: "Your KYC verification is being processed. Please check back soon.",
       }
     : {
         icon: "shield-outline" as const,
         color: Colors.textSecondary,
         bg: Colors.surface,
-        title: "KYC Not Completed",
+        title: "Not Started",
         subtitle: "Complete your KYC to activate AEPS banking services.",
       };
 

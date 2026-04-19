@@ -85,6 +85,7 @@ export default function AepsServicesScreen() {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const kycUrlOpenedRef = useRef(false);
   const kycWebviewUsedRef = useRef(false);
+  const [kycVerifyingBanner, setKycVerifyingBanner] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authAadhaar, setAuthAadhaar] = useState("");
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
@@ -117,7 +118,9 @@ export default function AepsServicesScreen() {
     useCallback(() => {
       if (kycWebviewUsedRef.current) {
         kycWebviewUsedRef.current = false;
-        // Mirror browser flow: stop background polling, then do a final check
+        // Show the "submitted" banner immediately, then do a final check
+        setKycVerifyingBanner(true);
+        setKycIncompleteWarning(false);
         stopKycPolling();
         verifyKycFromPaySprint();
       }
@@ -181,12 +184,15 @@ export default function AepsServicesScreen() {
         setOnboarded(true);
         setKycStatus("COMPLETED");
         setKycIncompleteWarning(false);
+        setKycVerifyingBanner(false);
         Alert.alert("KYC Verified!", "Your AEPS merchant account is now active. You can perform AEPS transactions.");
       } else {
+        setKycVerifyingBanner(false);
         setKycIncompleteWarning(true);
       }
     } catch {
       // Silent fail for background checks
+      setKycVerifyingBanner(false);
     }
   }
 
@@ -347,6 +353,13 @@ export default function AepsServicesScreen() {
               <Ionicons name="refresh" size={18} color={rdDevice ? "#2E9E5B" : "#F59E0B"} />
             </Pressable>
           </View>
+        </View>
+      )}
+
+      {kycVerifyingBanner && (
+        <View style={styles.kycVerifyingBanner}>
+          <ActivityIndicator size="small" color={Colors.primary} />
+          <Text style={styles.kycVerifyingBannerText}>KYC submitted — verifying with PaySprint…</Text>
         </View>
       )}
 
@@ -715,6 +728,25 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "#888",
     textAlign: "center" as const,
+  },
+  kycVerifyingBanner: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.primary + "60",
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  kycVerifyingBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.primary,
   },
   kycWarningBox: {
     flexDirection: "row" as const,

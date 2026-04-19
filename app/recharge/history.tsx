@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   View,
   Text,
@@ -265,6 +266,8 @@ function CustomDateModal({
   );
 }
 
+const FILTER_STORAGE_KEY = "recharge_history_filters";
+
 export default function RechargeHistoryScreen() {
   const insets = useSafeAreaInsets();
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
@@ -278,6 +281,53 @@ export default function RechargeHistoryScreen() {
   const [appliedCustomTo, setAppliedCustomTo] = useState<Date | null>(null);
 
   const [isExporting, setIsExporting] = useState(false);
+  const hasLoadedFilters = useRef(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(FILTER_STORAGE_KEY).then((raw) => {
+      if (raw) {
+        try {
+          const saved = JSON.parse(raw);
+          if (saved.typeFilter && TYPE_FILTERS.includes(saved.typeFilter)) {
+            setTypeFilter(saved.typeFilter);
+          }
+          if (saved.dateFilter && DATE_FILTERS.includes(saved.dateFilter)) {
+            setDateFilter(saved.dateFilter);
+          }
+          if (typeof saved.searchQuery === "string") {
+            setSearchQuery(saved.searchQuery);
+          }
+          if (typeof saved.customFrom === "string") {
+            setCustomFrom(saved.customFrom);
+          }
+          if (typeof saved.customTo === "string") {
+            setCustomTo(saved.customTo);
+          }
+          if (saved.appliedCustomFromISO) {
+            setAppliedCustomFrom(new Date(saved.appliedCustomFromISO));
+          }
+          if (saved.appliedCustomToISO) {
+            setAppliedCustomTo(new Date(saved.appliedCustomToISO));
+          }
+        } catch {}
+      }
+      hasLoadedFilters.current = true;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedFilters.current) return;
+    const payload = {
+      typeFilter,
+      dateFilter,
+      searchQuery,
+      customFrom,
+      customTo,
+      appliedCustomFromISO: appliedCustomFrom ? appliedCustomFrom.toISOString() : null,
+      appliedCustomToISO: appliedCustomTo ? appliedCustomTo.toISOString() : null,
+    };
+    AsyncStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
+  }, [typeFilter, dateFilter, searchQuery, customFrom, customTo, appliedCustomFrom, appliedCustomTo]);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["transactions"],
@@ -474,6 +524,8 @@ export default function RechargeHistoryScreen() {
               setTypeFilter("All");
               setDateFilter("All time");
               setSearchQuery("");
+              setCustomFrom("");
+              setCustomTo("");
               setAppliedCustomFrom(null);
               setAppliedCustomTo(null);
             }}

@@ -83,6 +83,8 @@ export default function AepsServicesScreen() {
   const [onboardingLoading, setOnboardingLoading] = useState(false);
   const [kycIncompleteWarning, setKycIncompleteWarning] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const kycVerifyingRef = useRef(false);
   const kycUrlOpenedRef = useRef(false);
   const kycWebviewUsedRef = useRef(false);
   const [kycVerifyingBanner, setKycVerifyingBanner] = useState(false);
@@ -98,11 +100,13 @@ export default function AepsServicesScreen() {
     checkMerchantStatus();
     checkRdDevice();
 
-    // Web fallback: when Chrome returns from KYC URL, auto-check PaySprint status
+    // Web fallback: when Chrome returns from KYC URL, start a fresh polling loop
     const appStateSub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active" && kycUrlOpenedRef.current && Platform.OS === "web") {
         kycUrlOpenedRef.current = false;
-        stopKycPolling();
+        setKycVerifyingBanner(true);
+        setKycIncompleteWarning(false);
+        startKycPolling();
         verifyKycFromPaySprint();
       }
     });
@@ -113,15 +117,15 @@ export default function AepsServicesScreen() {
     };
   }, []);
 
-  // When returning from the in-app KYC WebView screen, verify KYC status
+  // When returning from the in-app KYC WebView screen, poll for up to 60 s
   useFocusEffect(
     useCallback(() => {
       if (kycWebviewUsedRef.current) {
         kycWebviewUsedRef.current = false;
-        // Show the "submitted" banner immediately, then do a final check
         setKycVerifyingBanner(true);
         setKycIncompleteWarning(false);
-        stopKycPolling();
+        // Start a fresh 60-second polling loop; also do an immediate check
+        startKycPolling();
         verifyKycFromPaySprint();
       }
     }, [])
@@ -167,6 +171,10 @@ export default function AepsServicesScreen() {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
     }
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
+    }
   }
 
   function startKycPolling() {
@@ -174,9 +182,21 @@ export default function AepsServicesScreen() {
     pollingRef.current = setInterval(() => {
       verifyKycFromPaySprint();
     }, 5000);
+    // Stop polling after 60 s and show the "not yet completed" fallback
+    pollingTimeoutRef.current = setTimeout(() => {
+      const wasPolling = pollingRef.current !== null;
+      stopKycPolling();
+      if (wasPolling) {
+        setKycVerifyingBanner(false);
+        setKycIncompleteWarning(true);
+      }
+    }, 60000);
   }
 
   async function verifyKycFromPaySprint() {
+    // Deduplicate concurrent calls (e.g. immediate check + first interval tick)
+    if (kycVerifyingRef.current) return;
+    kycVerifyingRef.current = true;
     try {
       const result = await getAepsKycStatus();
       if (result.onboarded) {
@@ -187,12 +207,20 @@ export default function AepsServicesScreen() {
         setKycVerifyingBanner(false);
         Alert.alert("KYC Verified!", "Your AEPS merchant account is now active. You can perform AEPS transactions.");
       } else {
-        setKycVerifyingBanner(false);
-        setKycIncompleteWarning(true);
+        // While a polling loop is running, stay silent — keep the banner visible
+        // and let the next poll or the 60-second timeout handle the final verdict.
+        if (!pollingRef.current) {
+          setKycVerifyingBanner(false);
+          setKycIncompleteWarning(true);
+        }
       }
     } catch {
-      // Silent fail for background checks
-      setKycVerifyingBanner(false);
+      // Silent fail; keep the banner if polling is still active
+      if (!pollingRef.current) {
+        setKycVerifyingBanner(false);
+      }
+    } finally {
+      kycVerifyingRef.current = false;
     }
   }
 

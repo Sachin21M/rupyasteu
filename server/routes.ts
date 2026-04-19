@@ -125,10 +125,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { phone } = parsed.data;
-      const DEMO_PHONE = "7067018549";
+      const DEMO_PHONES = ["7067018549", "9425101077"];
       const DEMO_OTP = "123456";
 
-      if (phone === DEMO_PHONE) {
+      if (DEMO_PHONES.includes(phone)) {
         await storage.saveOtp({
           phone,
           otp: DEMO_OTP,

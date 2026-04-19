@@ -12,7 +12,7 @@ import {
   TextInput,
   AppState,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
@@ -84,6 +84,7 @@ export default function AepsServicesScreen() {
   const [kycIncompleteWarning, setKycIncompleteWarning] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const kycUrlOpenedRef = useRef(false);
+  const kycWebviewUsedRef = useRef(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authAadhaar, setAuthAadhaar] = useState("");
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
@@ -96,9 +97,9 @@ export default function AepsServicesScreen() {
     checkMerchantStatus();
     checkRdDevice();
 
-    // When user comes back from browser (after KYC), auto-check PaySprint status
+    // Web fallback: when Chrome returns from KYC URL, auto-check PaySprint status
     const appStateSub = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active" && kycUrlOpenedRef.current) {
+      if (nextState === "active" && kycUrlOpenedRef.current && Platform.OS === "web") {
         kycUrlOpenedRef.current = false;
         stopKycPolling();
         verifyKycFromPaySprint();
@@ -110,6 +111,16 @@ export default function AepsServicesScreen() {
       stopKycPolling();
     };
   }, []);
+
+  // When returning from the in-app KYC WebView screen, verify KYC status
+  useFocusEffect(
+    useCallback(() => {
+      if (kycWebviewUsedRef.current) {
+        kycWebviewUsedRef.current = false;
+        verifyKycFromPaySprint();
+      }
+    }, [])
+  );
 
   async function checkRdDevice() {
     if (Platform.OS === "web") return;
@@ -207,11 +218,19 @@ export default function AepsServicesScreen() {
         return;
       }
 
-      kycUrlOpenedRef.current = true;
-      startKycPolling(); // Poll every 5s while browser is open
-      await Linking.openURL(url);
+      if (Platform.OS === "web") {
+        // Web fallback: open in system browser
+        kycUrlOpenedRef.current = true;
+        startKycPolling();
+        await Linking.openURL(url);
+      } else {
+        // Native: open inside the app with location pre-granted
+        kycWebviewUsedRef.current = true;
+        router.push(`/aeps/kyc-webview?url=${encodeURIComponent(url)}`);
+      }
     } catch (err: any) {
       kycUrlOpenedRef.current = false;
+      kycWebviewUsedRef.current = false;
       stopKycPolling();
       Alert.alert("Error", err.message || "Failed to open KYC setup.");
     } finally {

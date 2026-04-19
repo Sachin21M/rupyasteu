@@ -40,6 +40,13 @@
       "expo-font",
       "expo-web-browser",
       "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "RupyaSetu needs your location for AEPS merchant KYC verification.",
+          "locationWhenInUsePermission": "RupyaSetu needs your location for AEPS merchant KYC verification."
+        }
+      ],
       "./plugins/withNetworkSecurityConfig"
     ],
     "experiments": {

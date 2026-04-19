@@ -91,32 +91,32 @@ export default function LoginScreen() {
               />
             </View>
             <Text style={styles.heroAppName}>RupyaSetu</Text>
-            <Text style={styles.heroSubtitle}>Recharge. Banking. Done.</Text>
+            <Text style={styles.heroSubtitle}>Banking. Powered by Aadhaar.</Text>
 
             <View style={styles.serviceCards}>
               <View style={styles.serviceCard}>
                 <View style={styles.serviceIconWrap}>
-                  <Ionicons name="phone-portrait" size={22} color="#2E9E5B" />
-                </View>
-                <Text style={styles.serviceLabel}>Mobile</Text>
-              </View>
-              <View style={styles.serviceCard}>
-                <View style={styles.serviceIconWrap}>
-                  <MaterialCommunityIcons name="television" size={22} color="#2E9E5B" />
-                </View>
-                <Text style={styles.serviceLabel}>DTH</Text>
-              </View>
-              <View style={styles.serviceCard}>
-                <View style={styles.serviceIconWrap}>
                   <MaterialCommunityIcons name="fingerprint" size={22} color="#2E9E5B" />
                 </View>
-                <Text style={styles.serviceLabel}>AEPS</Text>
+                <Text style={styles.serviceLabel}>Biometric</Text>
+              </View>
+              <View style={styles.serviceCard}>
+                <View style={styles.serviceIconWrap}>
+                  <Ionicons name="business" size={22} color="#2E9E5B" />
+                </View>
+                <Text style={styles.serviceLabel}>Banking</Text>
               </View>
               <View style={styles.serviceCard}>
                 <View style={styles.serviceIconWrap}>
                   <Ionicons name="shield-checkmark" size={22} color="#2E9E5B" />
                 </View>
                 <Text style={styles.serviceLabel}>Secure</Text>
+              </View>
+              <View style={styles.serviceCard}>
+                <View style={styles.serviceIconWrap}>
+                  <MaterialCommunityIcons name="cash" size={22} color="#2E9E5B" />
+                </View>
+                <Text style={styles.serviceLabel}>Cash Out</Text>
               </View>
             </View>
 
@@ -130,7 +130,7 @@ export default function LoginScreen() {
             ]}
           >
             <Text style={styles.headline}>
-              India's Fastest Recharge{"\n"}& Banking Platform
+              Aadhaar-Enabled{"\n"}Banking Services
             </Text>
 
             <Text style={styles.subLabel}>Log in or sign up</Text>

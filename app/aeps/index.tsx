@@ -228,8 +228,10 @@ export default function AepsServicesScreen() {
     setKycIncompleteWarning(false);
     setOnboardingLoading(true);
     try {
-      let url = kycRedirectUrl;
-      if (!url && merchantCode) {
+      // Always fetch a fresh URL — PaySprint KYC links expire quickly,
+      // so we must never reuse a previously cached URL.
+      let url = "";
+      if (merchantCode) {
         const result = await aepsOnboard(merchantCode);
         if (result.success && result.redirectUrl) {
           url = result.redirectUrl;
@@ -249,7 +251,7 @@ export default function AepsServicesScreen() {
         }
       }
       if (!url) {
-        Alert.alert("Error", "No KYC URL available. Please try again.");
+        Alert.alert("Error", "Merchant account not found. Please contact support.");
         setOnboardingLoading(false);
         return;
       }

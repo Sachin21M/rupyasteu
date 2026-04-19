@@ -130,14 +130,17 @@ export default function KycScreen() {
     setKycIncompleteWarning(false);
     setInitiating(true);
     try {
-      let url = kycRedirectUrl;
+      // Always fetch a fresh URL — PaySprint KYC links expire quickly,
+      // so we must never reuse a previously cached URL.
+      let url = "";
 
-      if (!url && merchantCode) {
+      if (merchantCode) {
         const result = await aepsOnboard(merchantCode);
         if (result.success && result.redirectUrl) {
           url = result.redirectUrl;
           setKycRedirectUrl(url);
         } else if (result.response_code === 12001) {
+          // Already registered — just verify current status
           setInitiating(false);
           await verifyKycFromPaySprint();
           return;
@@ -154,7 +157,7 @@ export default function KycScreen() {
       if (!url) {
         Alert.alert(
           "KYC Unavailable",
-          "No KYC link is available yet. Please ensure your AEPS account is onboarded first, then try again."
+          "Your merchant account is not set up yet. Please contact support to get onboarded first."
         );
         setInitiating(false);
         return;

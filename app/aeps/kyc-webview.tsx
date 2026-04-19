@@ -12,11 +12,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
+import type { WebView as WebViewType, WebViewNavigation } from "react-native-webview";
 
-let WebView: any = null;
-if (Platform.OS !== "web") {
-  WebView = require("react-native-webview").WebView;
-}
+const NativeWebView: typeof WebViewType | null =
+  Platform.OS !== "web" ? require("react-native-webview").WebView : null;
+
+const KYC_DOMAIN = "merchantkyc.com";
+
 
 type PermissionState = "requesting" | "granted" | "denied";
 
@@ -28,6 +30,7 @@ export default function KycWebViewScreen() {
   const [permState, setPermState] = useState<PermissionState>("requesting");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [webviewLoading, setWebviewLoading] = useState(true);
+  const completedRef = useRef(false);
   const retryCount = useRef(0);
 
   useEffect(() => {
@@ -45,30 +48,40 @@ export default function KycWebViewScreen() {
           });
           setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         } catch {
-          // Could not get exact position (emulator, etc.) — still grant access
-          // WebView's native geolocation will handle it
+          // Position unavailable (emulator) — still proceed; WebView native
+          // geolocation will attempt its own resolution
         }
         setPermState("granted");
       } else {
         setPermState("denied");
       }
     } catch {
-      // Unexpected error — proceed anyway; WebView will prompt natively
+      // Unexpected error — proceed anyway
       setPermState("granted");
     }
   }
 
-  const injectedJs = coords
-    ? `(function(){
-  var _loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};
-  navigator.geolocation.getCurrentPosition=function(s){s(_loc);};
-  navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(_loc);},50);return 1;};
-})();true;`
-    : undefined;
+  function handleNavigationStateChange(state: WebViewNavigation) {
+    if (!state.url || completedRef.current) return;
+    try {
+      const host = new URL(state.url).hostname;
+      const isOnKycDomain = host.includes(KYC_DOMAIN);
+      if (!isOnKycDomain && state.url.startsWith("http")) {
+        completedRef.current = true;
+        router.back();
+      }
+    } catch {
+      // URL parsing error — ignore
+    }
+  }
 
   function handleBack() {
     router.back();
   }
+
+  const injectedJs = coords
+    ? `(function(){var loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};navigator.geolocation.getCurrentPosition=function(s){s(loc);};navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(loc);},50);return 1;}; })();true;`
+    : undefined;
 
   const Header = () => (
     <View style={[styles.header, { paddingTop: topPadding }]}>
@@ -123,13 +136,14 @@ export default function KycWebViewScreen() {
     );
   }
 
-  if (Platform.OS === "web" || !WebView) {
+  if (Platform.OS === "web" || !NativeWebView) {
     return (
       <View style={styles.container}>
         <Header />
         <View style={styles.centered}>
+          <Ionicons name="globe-outline" size={48} color={Colors.textSecondary} />
           <Text style={styles.loadingText}>
-            WebView not available on web. Use the app on your phone.
+            Please open this feature on your mobile device.
           </Text>
         </View>
       </View>
@@ -146,18 +160,17 @@ export default function KycWebViewScreen() {
             <Text style={styles.loadingText}>Loading KYC page…</Text>
           </View>
         )}
-        <WebView
-          source={{ uri: url }}
+        <NativeWebView
+          source={{ uri: url ?? "" }}
           geolocationEnabled
           javaScriptEnabled
           domStorageEnabled
           allowsFullscreenVideo
-          setSupportMultipleWindows={false}
           mediaPlaybackRequiresUserAction={false}
+          setSupportMultipleWindows={false}
+          mediaCapturePermissionGrantType="grant"
           injectedJavaScriptBeforeContentLoaded={injectedJs}
-          onPermissionRequest={(e: any) => {
-            e.nativeEvent.grant(e.nativeEvent.resources);
-          }}
+          onNavigationStateChange={handleNavigationStateChange}
           onLoadEnd={() => setWebviewLoading(false)}
           style={styles.webview}
           testID="kyc-webview"

@@ -12,7 +12,7 @@ import {
   TextInput,
   AppState,
 } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
@@ -226,7 +226,7 @@ export default function AepsServicesScreen() {
       } else {
         // Native: open inside the app with location pre-granted
         kycWebviewUsedRef.current = true;
-        router.push(`/aeps/kyc-webview?url=${encodeURIComponent(url)}`);
+        router.push(`/aeps/kyc-webview?url=${encodeURIComponent(url)}` as Href);
       }
     } catch (err: any) {
       kycUrlOpenedRef.current = false;

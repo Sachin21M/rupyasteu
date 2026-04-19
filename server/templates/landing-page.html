@@ -60,6 +60,39 @@
         display: block;
       }
 
+      .features-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+        margin-bottom: 32px;
+      }
+      .feature-card {
+        flex: 1 1 calc(50% - 12px);
+        min-width: 130px;
+        max-width: 200px;
+        padding: 16px 12px;
+        border: 1px solid #ddd;
+        border-radius: 12px;
+        background: #fafafa;
+        text-align: center;
+      }
+      .feature-icon {
+        font-size: 28px;
+        margin-bottom: 8px;
+      }
+      .feature-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #222;
+        margin-bottom: 4px;
+      }
+      .feature-desc {
+        font-size: 12px;
+        color: #666;
+        line-height: 1.4;
+      }
+
       .steps-container {
         display: flex;
         flex-direction: column;
@@ -279,6 +312,16 @@
         .loading-text {
           color: #aaa;
         }
+        .feature-card {
+          border-color: #333;
+          background: #1a1a1a;
+        }
+        .feature-title {
+          color: #f0f0f0;
+        }
+        .feature-desc {
+          color: #888;
+        }
         .step {
           border-color: #333;
           background: #1a1a1a;
@@ -338,7 +381,35 @@
       <div class="content" id="content">
         <img src="/assets/images/rupyasetu-logo.jpeg" alt="RupyaSetu" style="width: 120px; height: auto; margin-bottom: 12px;" />
         <h1>APP_NAME_PLACEHOLDER</h1>
-        <p class="subtitle">Fast & Secure Mobile Recharge</p>
+        <p class="subtitle">Aadhaar-Enabled Banking Services, Anytime Anywhere</p>
+
+        <div class="features-container">
+          <div class="feature-card">
+            <div class="feature-icon">💵</div>
+            <div class="feature-title">Cash Withdrawal</div>
+            <div class="feature-desc">Withdraw cash instantly using your Aadhaar</div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">💳</div>
+            <div class="feature-title">Balance Enquiry</div>
+            <div class="feature-desc">Check your bank balance with a fingerprint</div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">📋</div>
+            <div class="feature-title">Mini Statement</div>
+            <div class="feature-desc">View your recent transactions on the spot</div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔒</div>
+            <div class="feature-title">Aadhaar Pay</div>
+            <div class="feature-desc">Make secure payments via Aadhaar authentication</div>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🏦</div>
+            <div class="feature-title">Cash Deposit</div>
+            <div class="feature-desc">Deposit cash directly into any bank account</div>
+          </div>
+        </div>
 
         <div class="steps-container">
           <div class="step">

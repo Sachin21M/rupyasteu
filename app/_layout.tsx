@@ -25,26 +25,6 @@ function RootLayoutNav() {
       <Stack.Screen name="edit-profile" options={{ headerShown: false, animation: "slide_from_right" }} />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen
-        name="recharge/mobile"
-        options={{ headerShown: false, animation: "slide_from_right" }}
-      />
-      <Stack.Screen
-        name="recharge/dth"
-        options={{ headerShown: false, animation: "slide_from_right" }}
-      />
-      <Stack.Screen
-        name="recharge/plans"
-        options={{ headerShown: false, animation: "slide_from_right" }}
-      />
-      <Stack.Screen
-        name="recharge/history"
-        options={{ headerShown: false, animation: "slide_from_right" }}
-      />
-      <Stack.Screen
-        name="recharge/detail"
-        options={{ headerShown: false, animation: "slide_from_right" }}
-      />
-      <Stack.Screen
         name="payment/utr"
         options={{ headerShown: false, animation: "slide_from_bottom" }}
       />
@@ -71,6 +51,10 @@ function RootLayoutNav() {
       <Stack.Screen
         name="aeps/index"
         options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="aeps/kyc-webview"
+        options={{ headerShown: false, animation: "slide_from_bottom" }}
       />
       <Stack.Screen
         name="aeps/transaction"

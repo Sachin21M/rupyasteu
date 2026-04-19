@@ -17,9 +17,9 @@ import { useQuery } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-import { getTransactions, getWallet } from "@/lib/api";
+import { getAepsTransactions, getWallet } from "@/lib/api";
 import { LOW_BALANCE_KEY, DEFAULT_THRESHOLD } from "@/constants/wallet";
-import type { Transaction } from "@/shared/schema";
+import type { AepsTransaction } from "@/shared/schema";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const AEPS_CARD_WIDTH = (SCREEN_WIDTH - 32 - 20) / 3;
@@ -44,37 +44,45 @@ function ServiceCard({ icon, label, color, onPress, cardStyle }: {
   );
 }
 
-function TransactionItem({ tx }: { tx: Transaction }) {
-  const isSuccess = tx.rechargeStatus === "RECHARGE_SUCCESS";
-  const isFailed = tx.rechargeStatus === "RECHARGE_FAILED";
+const TYPE_LABELS: Record<string, string> = {
+  BALANCE_ENQUIRY: "Balance Enquiry",
+  MINI_STATEMENT: "Mini Statement",
+  CASH_WITHDRAWAL: "Cash Withdrawal",
+  AADHAAR_PAY: "Aadhaar Pay",
+  CASH_DEPOSIT: "Cash Deposit",
+};
+
+const TYPE_ICONS: Record<string, { name: string; color: string }> = {
+  BALANCE_ENQUIRY: { name: "wallet", color: "#2E9E5B" },
+  MINI_STATEMENT: { name: "document-text", color: "#6366F1" },
+  CASH_WITHDRAWAL: { name: "cash", color: "#F59E0B" },
+  AADHAAR_PAY: { name: "finger-print", color: "#EF4444" },
+  CASH_DEPOSIT: { name: "arrow-down-circle", color: "#2563EB" },
+};
+
+function AepsTransactionItem({ tx }: { tx: AepsTransaction }) {
+  const isSuccess = tx.status === "AEPS_SUCCESS";
+  const isFailed = tx.status === "AEPS_FAILED";
+  const icon = TYPE_ICONS[tx.type] || { name: "finger-print", color: Colors.primary };
 
   return (
-    <Pressable
-      style={({ pressed }) => [styles.txItem, pressed && { opacity: 0.7 }]}
-      onPress={() => router.push({ pathname: "/payment/status", params: { transactionId: tx.id } })}
-    >
-      <View style={[styles.txIcon, {
-        backgroundColor: tx.type === "MOBILE" ? Colors.primaryLight : Colors.pendingLight,
-      }]}>
-        <Ionicons
-          name={tx.type === "MOBILE" ? "phone-portrait" : "tv"}
-          size={20}
-          color={tx.type === "MOBILE" ? Colors.primary : Colors.pending}
-        />
+    <View style={styles.txItem}>
+      <View style={[styles.txIcon, { backgroundColor: icon.color + "15" }]}>
+        <Ionicons name={icon.name as any} size={20} color={icon.color} />
       </View>
       <View style={styles.txInfo}>
-        <Text style={styles.txOperator}>{tx.operatorName}</Text>
-        <Text style={styles.txNumber}>{tx.subscriberNumber}</Text>
+        <Text style={styles.txOperator}>{TYPE_LABELS[tx.type] || tx.type}</Text>
+        <Text style={styles.txNumber}>{tx.bankName}</Text>
       </View>
       <View style={styles.txAmountContainer}>
-        <Text style={styles.txAmount}>₹{tx.amount}</Text>
+        {tx.amount > 0 && <Text style={styles.txAmount}>₹{tx.amount}</Text>}
         <Text style={[styles.txStatus, {
           color: isSuccess ? Colors.success : isFailed ? Colors.error : Colors.warning,
         }]}>
           {isSuccess ? "Success" : isFailed ? "Failed" : "Pending"}
         </Text>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -97,9 +105,9 @@ export default function HomeScreen() {
     }, [])
   );
 
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ["transactions"],
-    queryFn: getTransactions,
+  const { data: aepsData, isLoading, refetch } = useQuery({
+    queryKey: ["aeps-transactions"],
+    queryFn: getAepsTransactions,
   });
 
   const { data: walletData, refetch: refetchWallet } = useQuery({
@@ -108,8 +116,8 @@ export default function HomeScreen() {
   });
 
   const walletBalance = walletData?.wallet?.balance || 0;
-  const transactions: Transaction[] = data?.transactions || [];
-  const recentTx = transactions.slice(0, 5);
+  const aepsTransactions: AepsTransaction[] = aepsData?.transactions || [];
+  const recentTx = aepsTransactions.slice(0, 5);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -131,7 +139,7 @@ export default function HomeScreen() {
           <Text style={styles.greeting}>
             Hello, {user?.name || "User"}
           </Text>
-          <Text style={styles.subtitle}>What would you like to do today?</Text>
+          <Text style={styles.subtitle}>Your AEPS banking dashboard</Text>
         </View>
         <View style={styles.avatarCircle}>
           <Ionicons name="person" size={20} color={Colors.primary} />
@@ -140,13 +148,13 @@ export default function HomeScreen() {
 
       <View style={styles.bannerCard}>
         <View style={styles.bannerContent}>
-          <Text style={styles.bannerTitle} numberOfLines={1}>RupyaSetu Services</Text>
+          <Text style={styles.bannerTitle} numberOfLines={1}>RupyaSetu AEPS</Text>
           <Text style={styles.bannerSubtitle}>
-            Recharge, banking & payments — all in one place
+            Aadhaar-enabled banking services — fast, secure & reliable
           </Text>
         </View>
         <View style={styles.bannerIcon}>
-          <Ionicons name="flash" size={36} color="rgba(255,255,255,0.9)" />
+          <MaterialCommunityIcons name="fingerprint" size={36} color="rgba(255,255,255,0.9)" />
         </View>
       </View>
 
@@ -181,7 +189,7 @@ export default function HomeScreen() {
           <View style={styles.lowBalanceTextWrap}>
             <Text style={styles.lowBalanceTitle}>Low Wallet Balance</Text>
             <Text style={styles.lowBalanceSubtitle}>
-              Your balance is ₹{walletBalance.toFixed(2)}. Tap to add money before recharging.
+              Your balance is ₹{walletBalance.toFixed(2)}. Tap to add money.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={Colors.warning} />
@@ -189,32 +197,7 @@ export default function HomeScreen() {
       )}
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Recharge</Text>
-        <Pressable onPress={() => router.push("/recharge/history")}>
-          <Text style={styles.seeAll}>History</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.servicesRow}>
-        <ServiceCard
-          icon={<Ionicons name="phone-portrait" size={24} color={Colors.primary} />}
-          label="Mobile"
-          color={Colors.primary}
-          onPress={() => router.push("/recharge/mobile")}
-        />
-        <ServiceCard
-          icon={<MaterialCommunityIcons name="satellite-uplink" size={24} color={Colors.pending} />}
-          label="DTH"
-          color={Colors.pending}
-          onPress={() => router.push("/recharge/dth")}
-        />
-      </View>
-
-      <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>AEPS Banking</Text>
-        <View style={styles.newBadge}>
-          <Text style={styles.newBadgeText}>NEW</Text>
-        </View>
       </View>
 
       <View style={styles.aepsGrid}>
@@ -261,8 +244,8 @@ export default function HomeScreen() {
       >
         <MaterialCommunityIcons name="fingerprint" size={28} color="#fff" />
         <View style={{ flex: 1 }}>
-          <Text style={styles.aepsBannerTitle}>All AEPS Services</Text>
-          <Text style={styles.aepsBannerSub}>Explore more banking services</Text>
+          <Text style={styles.aepsBannerTitle}>AEPS Services</Text>
+          <Text style={styles.aepsBannerSub}>Setup, 2FA & full banking controls</Text>
         </View>
         <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.7)" />
       </Pressable>
@@ -273,10 +256,10 @@ export default function HomeScreen() {
 
       <View style={styles.servicesRow}>
         <ServiceCard
-          icon={<Ionicons name="time" size={24} color={Colors.accent} />}
-          label="History"
-          color={Colors.accent}
-          onPress={() => router.push("/(tabs)/history")}
+          icon={<Ionicons name="shield" size={24} color={Colors.primary} />}
+          label="KYC"
+          color={Colors.primary}
+          onPress={() => router.push("/(tabs)/kyc")}
         />
         <ServiceCard
           icon={<Ionicons name="help-circle" size={24} color="#8B5CF6" />}
@@ -287,7 +270,7 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Recent Transactions</Text>
+        <Text style={styles.sectionTitle}>Recent AEPS Activity</Text>
         {recentTx.length > 0 && (
           <Pressable onPress={() => router.push("/(tabs)/history")}>
             <Text style={styles.seeAll}>See All</Text>
@@ -301,14 +284,14 @@ export default function HomeScreen() {
         </View>
       ) : recentTx.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="receipt-outline" size={48} color={Colors.textTertiary} />
-          <Text style={styles.emptyText}>No transactions yet</Text>
-          <Text style={styles.emptySubtext}>Your recharge & AEPS history will appear here</Text>
+          <MaterialCommunityIcons name="fingerprint" size={48} color={Colors.textTertiary} />
+          <Text style={styles.emptyText}>No AEPS activity yet</Text>
+          <Text style={styles.emptySubtext}>Your AEPS transactions will appear here</Text>
         </View>
       ) : (
         <View style={styles.txList}>
           {recentTx.map((tx) => (
-            <TransactionItem key={tx.id} tx={tx} />
+            <AepsTransactionItem key={tx.id} tx={tx} />
           ))}
         </View>
       )}
@@ -446,18 +429,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_500Medium",
     color: Colors.primary,
-  },
-  newBadge: {
-    backgroundColor: Colors.error,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  newBadgeText: {
-    fontSize: 10,
-    fontFamily: "Inter_700Bold",
-    color: "#fff",
-    letterSpacing: 0.5,
   },
   servicesRow: {
     flexDirection: "row",

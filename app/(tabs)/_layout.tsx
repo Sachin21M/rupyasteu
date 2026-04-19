@@ -14,6 +14,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "house", selected: "house.fill" }} />
         <Label>Home</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="kyc">
+        <Icon sf={{ default: "shield", selected: "shield.fill" }} />
+        <Label>KYC</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="history">
         <Icon sf={{ default: "clock", selected: "clock.fill" }} />
         <Label>History</Label>
@@ -66,6 +70,15 @@ function ClassicTabLayout() {
           title: "Home",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? "home" : "home-outline"} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="kyc"
+        options={{
+          title: "KYC",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "shield" : "shield-outline"} size={24} color={color} />
           ),
         }}
       />

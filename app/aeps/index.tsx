@@ -117,9 +117,8 @@ export default function AepsServicesScreen() {
     useCallback(() => {
       if (kycWebviewUsedRef.current) {
         kycWebviewUsedRef.current = false;
-        // Single verification check when returning from the in-app KYC screen.
-        // We do not start infinite polling here — the user can reopen KYC or
-        // pull-to-refresh if PaySprint's status is still propagating.
+        // Mirror browser flow: stop background polling, then do a final check
+        stopKycPolling();
         verifyKycFromPaySprint();
       }
     }, [])
@@ -227,8 +226,10 @@ export default function AepsServicesScreen() {
         startKycPolling();
         await Linking.openURL(url);
       } else {
-        // Native: open inside the app with location pre-granted
+        // Native: open inside the app with location pre-granted.
+        // Start polling while the WebView is open (mirrors browser flow).
         kycWebviewUsedRef.current = true;
+        startKycPolling();
         router.push(`/aeps/kyc-webview?url=${encodeURIComponent(url)}` as Href);
       }
     } catch (err: any) {

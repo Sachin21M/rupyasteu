@@ -119,7 +119,7 @@ export default function KycWebViewScreen() {
           </View>
           <Text style={styles.deniedTitle}>Location Access Needed</Text>
           <Text style={styles.deniedText}>
-            PaySprint's KYC verification requires your location to confirm your
+            PaySprint KYC verification requires your location to confirm your
             presence. Please allow location access and tap Retry.
           </Text>
           <Pressable

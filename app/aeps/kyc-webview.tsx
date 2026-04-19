@@ -31,7 +31,6 @@ export default function KycWebViewScreen() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [webviewLoading, setWebviewLoading] = useState(true);
   const completedRef = useRef(false);
-  const retryCount = useRef(0);
 
   useEffect(() => {
     requestLocation();
@@ -56,8 +55,8 @@ export default function KycWebViewScreen() {
         setPermState("denied");
       }
     } catch {
-      // Unexpected error — proceed anyway
-      setPermState("granted");
+      // Unexpected error requesting permission — treat as denied
+      setPermState("denied");
     }
   }
 
@@ -79,9 +78,12 @@ export default function KycWebViewScreen() {
     router.back();
   }
 
-  const injectedJs = coords
-    ? `(function(){var loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};navigator.geolocation.getCurrentPosition=function(s){s(loc);};navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(loc);},50);return 1;}; })();true;`
-    : undefined;
+  // Inject coords override on Android only — iOS WebView resolves geolocation via
+  // native CoreLocation; Android WebView benefits from the pre-fetched coord shim.
+  const injectedJs =
+    Platform.OS === "android" && coords
+      ? `(function(){var loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};navigator.geolocation.getCurrentPosition=function(s){s(loc);};navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(loc);},50);return 1;}; })();true;`
+      : undefined;
 
   const Header = () => (
     <View style={[styles.header, { paddingTop: topPadding }]}>
@@ -121,7 +123,6 @@ export default function KycWebViewScreen() {
           <Pressable
             style={styles.retryBtn}
             onPress={() => {
-              retryCount.current += 1;
               requestLocation();
             }}
             testID="kyc-retry-location"

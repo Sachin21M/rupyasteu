@@ -13,6 +13,7 @@ import {
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import type React from "react";
 import { useQuery } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
@@ -52,7 +53,9 @@ const TYPE_LABELS: Record<string, string> = {
   CASH_DEPOSIT: "Cash Deposit",
 };
 
-const TYPE_ICONS: Record<string, { name: string; color: string }> = {
+type IoniconsName = React.ComponentProps<typeof Ionicons>["name"];
+
+const TYPE_ICONS: Record<string, { name: IoniconsName; color: string }> = {
   BALANCE_ENQUIRY: { name: "wallet", color: "#2E9E5B" },
   MINI_STATEMENT: { name: "document-text", color: "#6366F1" },
   CASH_WITHDRAWAL: { name: "cash", color: "#F59E0B" },
@@ -68,7 +71,7 @@ function AepsTransactionItem({ tx }: { tx: AepsTransaction }) {
   return (
     <View style={styles.txItem}>
       <View style={[styles.txIcon, { backgroundColor: icon.color + "15" }]}>
-        <Ionicons name={icon.name as any} size={20} color={icon.color} />
+        <Ionicons name={icon.name} size={20} color={icon.color} />
       </View>
       <View style={styles.txInfo}>
         <Text style={styles.txOperator}>{TYPE_LABELS[tx.type] || tx.type}</Text>

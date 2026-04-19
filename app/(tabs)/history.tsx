@@ -10,11 +10,35 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import type React from "react";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { getAepsTransactions } from "@/lib/api";
 import type { AepsTransaction } from "@/shared/schema";
 import { useState } from "react";
+
+type IoniconsName = React.ComponentProps<typeof Ionicons>["name"];
+
+const TYPE_LABELS: Record<string, string> = {
+  BALANCE_ENQUIRY: "Balance Enquiry",
+  MINI_STATEMENT: "Mini Statement",
+  CASH_WITHDRAWAL: "Cash Withdrawal",
+  AADHAAR_PAY: "Aadhaar Pay",
+  CASH_DEPOSIT: "Cash Deposit",
+};
+
+const TYPE_ICONS: Record<string, { name: IoniconsName; color: string }> = {
+  BALANCE_ENQUIRY: { name: "wallet", color: "#2E9E5B" },
+  MINI_STATEMENT: { name: "document-text", color: "#6366F1" },
+  CASH_WITHDRAWAL: { name: "cash", color: "#F59E0B" },
+  AADHAAR_PAY: { name: "finger-print", color: "#EF4444" },
+  CASH_DEPOSIT: { name: "arrow-down-circle", color: "#2563EB" },
+};
+
+const FALLBACK_ICON: { name: IoniconsName; color: string } = {
+  name: "finger-print",
+  color: Colors.primary,
+};
 
 function AepsCard({ tx }: { tx: AepsTransaction }) {
   const isSuccess = tx.status === "AEPS_SUCCESS";
@@ -24,23 +48,7 @@ function AepsCard({ tx }: { tx: AepsTransaction }) {
   const statusBg = isSuccess ? Colors.successLight : isFailed ? Colors.errorLight : Colors.warningLight;
   const statusText = isSuccess ? "Success" : isFailed ? "Failed" : "Processing";
 
-  const typeLabels: Record<string, string> = {
-    BALANCE_ENQUIRY: "Balance Enquiry",
-    MINI_STATEMENT: "Mini Statement",
-    CASH_WITHDRAWAL: "Cash Withdrawal",
-    AADHAAR_PAY: "Aadhaar Pay",
-    CASH_DEPOSIT: "Cash Deposit",
-  };
-
-  const typeIcons: Record<string, { name: string; color: string }> = {
-    BALANCE_ENQUIRY: { name: "wallet", color: "#2E9E5B" },
-    MINI_STATEMENT: { name: "document-text", color: "#6366F1" },
-    CASH_WITHDRAWAL: { name: "cash", color: "#F59E0B" },
-    AADHAAR_PAY: { name: "finger-print", color: "#EF4444" },
-    CASH_DEPOSIT: { name: "arrow-down-circle", color: "#2563EB" },
-  };
-
-  const icon = typeIcons[tx.type] || { name: "finger-print", color: Colors.primary };
+  const icon = TYPE_ICONS[tx.type] ?? FALLBACK_ICON;
   const date = new Date(tx.createdAt);
   const formattedDate = `${date.getDate()} ${date.toLocaleDateString("en-IN", { month: "short" })}, ${date.getFullYear()}`;
   const formattedTime = date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
@@ -49,10 +57,10 @@ function AepsCard({ tx }: { tx: AepsTransaction }) {
     <View style={styles.txCard}>
       <View style={styles.txCardTop}>
         <View style={[styles.txTypeIcon, { backgroundColor: icon.color + "15" }]}>
-          <Ionicons name={icon.name as any} size={20} color={icon.color} />
+          <Ionicons name={icon.name} size={20} color={icon.color} />
         </View>
         <View style={styles.txCardInfo}>
-          <Text style={styles.txCardOperator}>{typeLabels[tx.type] || tx.type}</Text>
+          <Text style={styles.txCardOperator}>{TYPE_LABELS[tx.type] || tx.type}</Text>
           <Text style={styles.txCardNumber}>{tx.bankName}</Text>
         </View>
         <View style={styles.txCardRight}>

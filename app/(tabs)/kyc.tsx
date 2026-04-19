@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,95 +9,157 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Linking,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { Href } from "expo-router";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, getAepsKycStatus } from "@/lib/api";
+import { getAepsMerchant, aepsOnboard, getAepsKycStatus } from "@/lib/api";
 
 type KycStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | string;
 
 export default function KycScreen() {
   const insets = useSafeAreaInsets();
   const [kycStatus, setKycStatus] = useState<KycStatusValue>("NOT_STARTED");
+  const [merchantCode, setMerchantCode] = useState("");
   const [kycRedirectUrl, setKycRedirectUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [initiating, setInitiating] = useState(false);
   const [kycIncompleteWarning, setKycIncompleteWarning] = useState(false);
 
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const kycUrlOpenedRef = useRef(false);
   const kycWebviewUsedRef = useRef(false);
-  const appStateRef = useRef(AppState.currentState);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
+  useEffect(() => {
+    loadMerchantStatus();
+
+    const appStateSub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active" && kycUrlOpenedRef.current && Platform.OS === "web") {
+        kycUrlOpenedRef.current = false;
+        stopKycPolling();
+        verifyKycFromPaySprint();
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+      stopKycPolling();
+    };
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      loadKycStatus();
-
-      const sub = AppState.addEventListener("change", (nextState) => {
-        if (nextState === "active" && kycWebviewUsedRef.current) {
-          kycWebviewUsedRef.current = false;
-          loadKycStatus(true);
-        }
-        appStateRef.current = nextState;
-      });
-
-      return () => sub.remove();
+      if (kycWebviewUsedRef.current) {
+        kycWebviewUsedRef.current = false;
+        stopKycPolling();
+        verifyKycFromPaySprint();
+      }
     }, [])
   );
 
-  async function loadKycStatus(silent = false) {
+  async function loadMerchantStatus(silent = false) {
     if (!silent) setLoading(true);
     try {
       const result = await getAepsMerchant();
-      if (result.merchant) {
-        setKycStatus(result.merchant.kycStatus || "NOT_STARTED");
-        if (result.merchant.kycRedirectUrl) {
-          setKycRedirectUrl(result.merchant.kycRedirectUrl);
-        }
-      } else {
-        setKycStatus("NOT_STARTED");
+      setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
+      if (result.merchant?.merchantCode) {
+        setMerchantCode(result.merchant.merchantCode);
+      }
+      if (result.merchant?.kycRedirectUrl) {
+        setKycRedirectUrl(result.merchant.kycRedirectUrl);
       }
     } catch {
-      try {
-        const ks = await getAepsKycStatus();
-        setKycStatus(ks?.status || "NOT_STARTED");
-      } catch {
-        // silently ignore
-      }
+      setKycStatus("NOT_STARTED");
     } finally {
       if (!silent) setLoading(false);
     }
   }
 
+  function stopKycPolling() {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }
+
+  function startKycPolling() {
+    stopKycPolling();
+    pollingRef.current = setInterval(() => {
+      verifyKycFromPaySprint();
+    }, 5000);
+  }
+
+  async function verifyKycFromPaySprint() {
+    try {
+      const result = await getAepsKycStatus();
+      if (result.onboarded) {
+        stopKycPolling();
+        setKycStatus("COMPLETED");
+        setKycIncompleteWarning(false);
+        Alert.alert(
+          "KYC Verified!",
+          "Your AEPS merchant account is now active. You can perform AEPS transactions."
+        );
+      } else {
+        setKycIncompleteWarning(true);
+      }
+    } catch {
+      // Silent fail for background checks
+    }
+  }
+
   async function handleStartKyc() {
-    setInitiating(true);
     setKycIncompleteWarning(false);
+    setInitiating(true);
     try {
       let url = kycRedirectUrl;
-      if (!url) {
-        const result = await getAepsMerchant();
-        if (result.merchant?.kycRedirectUrl) {
-          url = result.merchant.kycRedirectUrl;
+
+      if (!url && merchantCode) {
+        const result = await aepsOnboard(merchantCode);
+        if (result.success && result.redirectUrl) {
+          url = result.redirectUrl;
           setKycRedirectUrl(url);
-          setKycStatus(result.merchant.kycStatus || kycStatus);
+        } else if (result.response_code === 12001) {
+          setInitiating(false);
+          await verifyKycFromPaySprint();
+          return;
+        } else {
+          Alert.alert(
+            "Setup Failed",
+            result.error || result.message || "PaySprint could not generate a KYC link. Please try again."
+          );
+          setInitiating(false);
+          return;
         }
       }
 
       if (!url) {
         Alert.alert(
           "KYC Unavailable",
-          "No KYC link is available yet. Please ensure your AEPS account is onboarded first."
+          "No KYC link is available yet. Please ensure your AEPS account is onboarded first, then try again."
         );
+        setInitiating(false);
         return;
       }
 
-      kycWebviewUsedRef.current = true;
-      router.push(`/aeps/kyc-webview?url=${encodeURIComponent(url)}` as Href);
+      if (Platform.OS === "web") {
+        kycUrlOpenedRef.current = true;
+        startKycPolling();
+        await Linking.openURL(url);
+      } else {
+        kycWebviewUsedRef.current = true;
+        startKycPolling();
+        router.push(`/aeps/kyc-webview?url=${encodeURIComponent(url)}` as Href);
+      }
     } catch (err: unknown) {
+      kycUrlOpenedRef.current = false;
       kycWebviewUsedRef.current = false;
+      stopKycPolling();
       const message = err instanceof Error ? err.message : "Failed to open KYC setup.";
       Alert.alert("Error", message);
     } finally {
@@ -152,7 +214,11 @@ export default function KycScreen() {
     >
       <View style={[styles.header, { paddingTop: topPadding + 16 }]}>
         <Text style={styles.headerTitle}>KYC Verification</Text>
-        <Pressable onPress={() => loadKycStatus(false)} style={styles.refreshBtn}>
+        <Pressable
+          onPress={() => loadMerchantStatus(false)}
+          style={styles.refreshBtn}
+          testID="kyc-refresh-btn"
+        >
           <Ionicons name="refresh" size={22} color={Colors.primary} />
         </Pressable>
       </View>
@@ -177,12 +243,14 @@ export default function KycScreen() {
       {!isVerified && (
         <View style={styles.stepsCard}>
           <Text style={styles.stepsTitle}>How KYC Works</Text>
-          {[
-            { icon: "person-circle-outline" as const, text: "Provide your Aadhaar and PAN details" },
-            { icon: "location-outline" as const, text: "Allow location access when prompted" },
-            { icon: "camera-outline" as const, text: "Complete biometric or photo verification" },
-            { icon: "checkmark-circle-outline" as const, text: "Get instantly verified on PaySprint" },
-          ].map((step, i) => (
+          {(
+            [
+              { icon: "person-circle-outline", text: "Provide your Aadhaar and PAN details" },
+              { icon: "location-outline", text: "Allow location access when prompted" },
+              { icon: "camera-outline", text: "Complete biometric or photo verification" },
+              { icon: "checkmark-circle-outline", text: "Get instantly verified on PaySprint" },
+            ] as const
+          ).map((step, i) => (
             <View key={i} style={styles.stepRow}>
               <View style={styles.stepNum}>
                 <Text style={styles.stepNumText}>{i + 1}</Text>

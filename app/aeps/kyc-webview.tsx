@@ -78,8 +78,6 @@ export default function KycWebViewScreen() {
   }
 
   function handleBack() {
-    // Signal that user left without the WebView fully loading
-    setKycWebviewDidLoad(false);
     router.back();
   }
 

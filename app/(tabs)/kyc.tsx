@@ -107,7 +107,7 @@ export default function KycScreen() {
     }, 5000);
   }
 
-  async function verifyKycFromPaySprint() {
+  async function verifyKycFromPaySprint(allowRedirect = false) {
     try {
       const result = await getAepsKycStatus();
       if (result.onboarded) {
@@ -118,6 +118,18 @@ export default function KycScreen() {
           "KYC Verified!",
           "Your AEPS merchant account is now active. You can perform AEPS transactions."
         );
+      } else if (allowRedirect && result.redirectUrl) {
+        // PaySprint has an active KYC session for this merchant — resume it
+        setKycIncompleteWarning(false);
+        if (Platform.OS === "web") {
+          kycUrlOpenedRef.current = true;
+          startKycPolling();
+          await Linking.openURL(result.redirectUrl);
+        } else {
+          kycWebviewUsedRef.current = true;
+          startKycPolling();
+          router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
+        }
       } else {
         setKycIncompleteWarning(true);
       }
@@ -145,9 +157,9 @@ export default function KycScreen() {
           result.alreadyRegistered ||
           (result.error || result.message || "").toLowerCase().includes("already registered")
         ) {
-          // Merchant already exists in PaySprint — check if KYC is complete
+          // Merchant already exists in PaySprint — check status and resume if URL available
           setInitiating(false);
-          await verifyKycFromPaySprint();
+          await verifyKycFromPaySprint(true);
           return;
         } else {
           Alert.alert(

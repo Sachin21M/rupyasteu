@@ -1185,10 +1185,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = new Date().toISOString().split("T")[0];
       const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);
 
+      const resumeUrl = !psCompleted
+        ? (verifyResult.redirecturl || verifyResult.data?.redirecturl || null)
+        : null;
+
+      // If PaySprint returned no resume URL but we have a stored one, use that
+      const storedUrl = !psCompleted && !resumeUrl ? (merchant.kycRedirectUrl || null) : null;
+
       res.json({
         kycStatus: newStatus,
         onboarded: psCompleted,
         dailyAuthenticated: dailyAuth?.authenticated || false,
+        redirectUrl: resumeUrl || storedUrl || undefined,
         paySprint: { response_code: verifyResult.response_code, message: verifyResult.message },
       });
     } catch (error) {

@@ -25,7 +25,11 @@
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -57,7 +61,10 @@
       "router": {
         "origin": "https://replit.com/"
       },
-      "eas": {}
-    }
+      "eas": {
+        "projectId": "6a9ec689-5432-4f49-a3a9-850f0fd05d3f"
+      }
+    },
+    "owner": "sachin_21"
   }
 }

@@ -193,7 +193,7 @@ export default function AepsServicesScreen() {
     }, 60000);
   }
 
-  async function verifyKycFromPaySprint() {
+  async function verifyKycFromPaySprint(allowRedirect = false) {
     // Deduplicate concurrent calls (e.g. immediate check + first interval tick)
     if (kycVerifyingRef.current) return;
     kycVerifyingRef.current = true;
@@ -206,6 +206,19 @@ export default function AepsServicesScreen() {
         setKycIncompleteWarning(false);
         setKycVerifyingBanner(false);
         Alert.alert("KYC Verified!", "Your AEPS merchant account is now active. You can perform AEPS transactions.");
+      } else if (allowRedirect && result.redirectUrl) {
+        // PaySprint has an active KYC session — open it so the merchant can resume
+        setKycIncompleteWarning(false);
+        setKycVerifyingBanner(false);
+        if (Platform.OS === "web") {
+          kycUrlOpenedRef.current = true;
+          startKycPolling();
+          await Linking.openURL(result.redirectUrl);
+        } else {
+          kycWebviewUsedRef.current = true;
+          startKycPolling();
+          router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
+        }
       } else {
         // While a polling loop is running, stay silent — keep the banner visible
         // and let the next poll or the 60-second timeout handle the final verdict.
@@ -242,9 +255,9 @@ export default function AepsServicesScreen() {
           result.alreadyRegistered ||
           (result.error || result.message || "").toLowerCase().includes("already registered")
         ) {
-          // Merchant already exists in PaySprint — check if KYC is complete
+          // Merchant already exists in PaySprint — check status and resume if URL available
           setOnboardingLoading(false);
-          await verifyKycFromPaySprint();
+          await verifyKycFromPaySprint(true);
           return;
         } else {
           Alert.alert(

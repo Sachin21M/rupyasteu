@@ -11,6 +11,7 @@ import {
   TextInput,
   Modal,
   ScrollView,
+  Alert,
 } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,6 +20,8 @@ import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { getTransactions } from "@/lib/api";
 import type { Transaction } from "@/shared/schema";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 
 const TYPE_FILTERS = ["All", "Mobile", "DTH"] as const;
 const DATE_FILTERS = ["All time", "7 days", "This month", "Custom"] as const;
@@ -57,6 +60,59 @@ function parseCustomDate(str: string): Date | null {
     date.getDate() !== d
   ) return null;
   return date;
+}
+
+function buildCsv(transactions: Transaction[]): string {
+  const headers = ["Date", "Time", "Type", "Operator", "Subscriber Number", "Plan", "Amount (INR)", "Status"];
+  const escape = (val: string) => `"${val.replace(/"/g, '""')}"`;
+  const rows = transactions.map((tx) => {
+    const date = new Date(tx.createdAt);
+    const formattedDate = date.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const formattedTime = date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    const status = tx.rechargeStatus === "RECHARGE_SUCCESS" ? "Success" : tx.rechargeStatus === "RECHARGE_FAILED" ? "Failed" : "Pending";
+    return [
+      escape(formattedDate),
+      escape(formattedTime),
+      escape(tx.type === "MOBILE" ? "Mobile" : "DTH"),
+      escape(tx.operatorName || ""),
+      escape(tx.subscriberNumber || ""),
+      escape(tx.planDescription || "Custom amount"),
+      String(tx.amount),
+      escape(status),
+    ].join(",");
+  });
+  return [headers.map((h) => `"${h}"`).join(","), ...rows].join("\n");
+}
+
+async function exportCsv(transactions: Transaction[]) {
+  if (transactions.length === 0) {
+    Alert.alert("Nothing to export", "There are no transactions matching the current filters.");
+    return;
+  }
+  const csv = buildCsv(transactions);
+  const filename = `recharge-history-${Date.now()}.csv`;
+
+  if (Platform.OS === "web") {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  const fileUri = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + filename;
+  await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+  const canShare = await Sharing.isAvailableAsync();
+  if (canShare) {
+    await Sharing.shareAsync(fileUri, { mimeType: "text/csv", dialogTitle: "Export Recharge History" });
+  } else {
+    Alert.alert("Exported", `File saved to: ${fileUri}`);
+  }
 }
 
 function statusInfo(tx: Transaction) {
@@ -221,6 +277,8 @@ export default function RechargeHistoryScreen() {
   const [appliedCustomFrom, setAppliedCustomFrom] = useState<Date | null>(null);
   const [appliedCustomTo, setAppliedCustomTo] = useState<Date | null>(null);
 
+  const [isExporting, setIsExporting] = useState(false);
+
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["transactions"],
     queryFn: getTransactions,
@@ -290,6 +348,18 @@ export default function RechargeHistoryScreen() {
     setShowCustomModal(false);
   };
 
+  const handleExport = useCallback(async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      await exportCsv(filtered);
+    } catch (err) {
+      Alert.alert("Export failed", "Something went wrong while exporting. Please try again.");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [filtered, isExporting]);
+
   const activeFiltersCount =
     (typeFilter !== "All" ? 1 : 0) +
     (dateFilter !== "All time" ? 1 : 0) +
@@ -315,7 +385,18 @@ export default function RechargeHistoryScreen() {
           <Ionicons name="chevron-back" size={24} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Recharge History</Text>
-        <View style={{ width: 40 }} />
+        <Pressable
+          testID="export-history-btn"
+          style={({ pressed }) => [styles.exportBtn, pressed && { opacity: 0.7 }]}
+          onPress={handleExport}
+          disabled={isExporting || isLoading}
+        >
+          {isExporting ? (
+            <ActivityIndicator size="small" color={Colors.primary} />
+          ) : (
+            <Ionicons name="download-outline" size={22} color={Colors.primary} />
+          )}
+        </Pressable>
       </View>
 
       <View style={styles.searchRow}>
@@ -473,6 +554,14 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  exportBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,

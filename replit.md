@@ -193,6 +193,15 @@ shared/
 - Paysprint runs in simulation mode when JWT token not configured
 - **Current status**: Authentication WORKING — balance API responds correctly
 
+## Recharge History Export
+- Export button (download icon) in the header of the Recharge History screen (`app/recharge/history.tsx`)
+- Exports currently filtered/searched transactions as a CSV file
+- CSV columns: Date, Time, Type, Operator, Subscriber Number, Plan, Amount (INR), Status
+- On **web**: triggers browser download via Blob URL (no extra library needed)
+- On **mobile** (iOS/Android): writes CSV to cache directory via `expo-file-system`, then shares via `expo-sharing`
+- If no transactions match current filters, shows "Nothing to export" alert
+- Packages: `expo-file-system@~19.0.21`, `expo-sharing@~14.0.8`
+
 ## Notes
 - Payment mode is configurable via PAYMENT_MODE env var
 - Code structured for easy gateway integration later

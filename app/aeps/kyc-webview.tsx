@@ -12,10 +12,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
-import type { WebView as WebViewType, WebViewNavigation } from "react-native-webview";
+import type { WebView as WebViewClass, WebViewNavigation } from "react-native-webview";
 
-const NativeWebView: typeof WebViewType | null =
-  Platform.OS !== "web" ? require("react-native-webview").WebView : null;
+const NativeWebView =
+  Platform.OS !== "web"
+    ? (require("react-native-webview") as { WebView: typeof WebViewClass }).WebView
+    : null;
 
 const KYC_DOMAIN = "merchantkyc.com";
 

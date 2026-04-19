@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
+import { setKycWebviewDidLoad } from "@/lib/kyc-webview-state";
 import type { WebView as WebViewClass, WebViewNavigation } from "react-native-webview";
 
 const NativeWebView =
@@ -77,6 +78,8 @@ export default function KycWebViewScreen() {
   }
 
   function handleBack() {
+    // Signal that user left without the WebView fully loading
+    setKycWebviewDidLoad(false);
     router.back();
   }
 
@@ -201,7 +204,10 @@ export default function KycWebViewScreen() {
           mediaCapturePermissionGrantType="grant"
           injectedJavaScriptBeforeContentLoaded={injectedJs}
           onNavigationStateChange={handleNavigationStateChange}
-          onLoadEnd={() => setWebviewLoading(false)}
+          onLoadEnd={() => {
+            setWebviewLoading(false);
+            setKycWebviewDidLoad(true);
+          }}
           style={styles.webview}
           testID="kyc-webview"
         />

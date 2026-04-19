@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
+import { getKycWebviewDidLoad, setKycWebviewDidLoad } from "@/lib/kyc-webview-state";
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
@@ -117,9 +118,13 @@ export default function AepsServicesScreen() {
     useCallback(() => {
       if (kycWebviewUsedRef.current) {
         kycWebviewUsedRef.current = false;
-        // Immediate check + polling so delayed PaySprint status propagation is handled
-        verifyKycFromPaySprint();
-        startKycPolling();
+        const didLoad = getKycWebviewDidLoad();
+        setKycWebviewDidLoad(false);
+        if (didLoad) {
+          // WebView actually loaded the KYC page — check + poll for completion
+          verifyKycFromPaySprint();
+          startKycPolling();
+        }
       }
     }, [])
   );

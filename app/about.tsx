@@ -29,23 +29,33 @@ export default function AboutScreen() {
         />
 
         <Text style={styles.appName}>RupyaSetu</Text>
-        <Text style={styles.tagline}>Recharge. Relax. Done.</Text>
+        <Text style={styles.tagline}>Banking. Powered by Aadhaar.</Text>
         <Text style={styles.version}>Version 1.0.0</Text>
 
         <View style={styles.descCard}>
           <Text style={styles.descText}>
-            RupyaSetu is India's fastest mobile and DTH recharge platform. We make it simple to recharge your prepaid mobile or DTH connection in seconds with secure UPI payments.
+            RupyaSetu is India's trusted Aadhaar-enabled banking platform. We empower merchants and customers to perform secure banking transactions using biometric authentication — no card required.
           </Text>
         </View>
 
         <View style={styles.featuresList}>
           <View style={styles.featureItem}>
             <View style={styles.featureIcon}>
-              <Ionicons name="flash" size={18} color={Colors.primary} />
+              <Ionicons name="finger-print" size={18} color={Colors.primary} />
             </View>
             <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Instant Recharges</Text>
-              <Text style={styles.featureSub}>Process recharges in under 10 seconds</Text>
+              <Text style={styles.featureTitle}>Biometric Authentication</Text>
+              <Text style={styles.featureSub}>Secure Aadhaar-based identity verification</Text>
+            </View>
+          </View>
+
+          <View style={styles.featureItem}>
+            <View style={styles.featureIcon}>
+              <Ionicons name="cash" size={18} color={Colors.primary} />
+            </View>
+            <View style={styles.featureContent}>
+              <Text style={styles.featureTitle}>Cash Withdrawal & Deposit</Text>
+              <Text style={styles.featureSub}>Instant AEPS cash transactions at your doorstep</Text>
             </View>
           </View>
 
@@ -61,21 +71,11 @@ export default function AboutScreen() {
 
           <View style={styles.featureItem}>
             <View style={styles.featureIcon}>
-              <Ionicons name="phone-portrait" size={18} color={Colors.primary} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>All Operators</Text>
-              <Text style={styles.featureSub}>Jio, Airtel, Vi, BSNL, and all DTH providers</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
               <Ionicons name="wallet" size={18} color={Colors.primary} />
             </View>
             <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>UPI Payments</Text>
-              <Text style={styles.featureSub}>Pay securely with any UPI app</Text>
+              <Text style={styles.featureTitle}>Balance & Mini Statement</Text>
+              <Text style={styles.featureSub}>Check account balance and view recent transactions</Text>
             </View>
           </View>
         </View>

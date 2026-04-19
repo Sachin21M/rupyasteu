@@ -276,7 +276,7 @@ export default function WalletScreen() {
                   {rechargeMutation.isPending ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Text style={styles.submitBtnText}>Submit Recharge Request</Text>
+                    <Text style={styles.submitBtnText}>Submit Add Money Request</Text>
                   )}
                 </TouchableOpacity>
               </View>

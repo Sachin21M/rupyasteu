@@ -21,21 +21,21 @@ const ONBOARDING_KEY = "rupyasetu_onboarding_seen";
 const slides = [
   {
     id: "1",
-    icon: "flash" as const,
-    headline: "Recharge in Seconds",
-    subtext: "Fast, simple and hassle-free mobile & DTH recharges.",
+    icon: "finger-print" as const,
+    headline: "Aadhaar-Enabled Banking",
+    subtext: "Use your Aadhaar biometric to access banking services instantly — no card needed.",
   },
   {
     id: "2",
-    icon: "finger-print" as const,
-    headline: "AEPS Banking",
-    subtext: "Aadhaar-enabled payments — balance, withdrawal, mini statement & more.",
+    icon: "cash" as const,
+    headline: "Cash Withdrawal & More",
+    subtext: "Withdraw cash, check balance, view mini statements and make Aadhaar Pay transactions.",
   },
   {
     id: "3",
     icon: "shield-checkmark" as const,
     headline: "100% Secure",
-    subtext: "Your payments and data are protected with advanced security.",
+    subtext: "Your payments and data are protected with biometric authentication and advanced security.",
   },
 ];
 

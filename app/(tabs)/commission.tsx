@@ -193,8 +193,6 @@ export default function CommissionScreen() {
         <View style={styles.ratesCard}>
           <Text style={styles.ratesTitle}>Commission Rates</Text>
           {[
-            { label: "Mobile Recharge", rate: "₹1 per recharge" },
-            { label: "DTH Recharge", rate: "₹12 per recharge" },
             { label: "Cash Withdrawal", rate: "₹5 per transaction" },
             { label: "Cash Deposit", rate: "₹5 per transaction" },
             { label: "Mini Statement", rate: "₹0.50 per query" },
@@ -234,7 +232,7 @@ export default function CommissionScreen() {
               <View style={styles.emptyState}>
                 <Ionicons name="wallet-outline" size={48} color="#ccc" />
                 <Text style={styles.emptyText}>No earnings yet</Text>
-                <Text style={styles.emptySubText}>Complete recharges and AEPS transactions to earn commission</Text>
+                <Text style={styles.emptySubText}>Complete AEPS transactions to earn commission</Text>
               </View>
             ) : (
               transactions.map((tx: CommissionTransaction) => (

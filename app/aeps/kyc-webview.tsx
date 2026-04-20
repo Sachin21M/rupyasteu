@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
-import type { WebView as WebViewClass, WebViewNavigation } from "react-native-webview";
+import type { WebView as WebViewClass, WebViewNavigation, WebViewErrorEvent } from "react-native-webview";
 
 const NativeWebView =
   Platform.OS !== "web"
@@ -32,6 +32,7 @@ export default function KycWebViewScreen() {
   const [permState, setPermState] = useState<PermissionState>("requesting");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [webviewLoading, setWebviewLoading] = useState(true);
+  const [webviewError, setWebviewError] = useState<string | null>(null);
   const completedRef = useRef(false);
 
   useEffect(() => {
@@ -78,6 +79,14 @@ export default function KycWebViewScreen() {
 
   function handleBack() {
     router.back();
+  }
+
+  function handleWebViewError(e: WebViewErrorEvent) {
+    const desc = e.nativeEvent?.description || "";
+    const domain = e.nativeEvent?.url || "";
+    console.warn("[KYC WebView] Load error:", desc, domain);
+    setWebviewLoading(false);
+    setWebviewError("Your KYC session has expired or is unavailable. Please go back and ask your admin to regenerate your KYC link, then try again immediately.");
   }
 
   // Inject coords override on Android only — iOS WebView resolves geolocation via
@@ -180,6 +189,24 @@ export default function KycWebViewScreen() {
     );
   }
 
+  if (webviewError) {
+    return (
+      <View style={styles.container}>
+        <Header />
+        <View style={styles.centered}>
+          <View style={[styles.iconCircle, { backgroundColor: "#FEE2E2" }]}>
+            <Ionicons name="time-outline" size={40} color="#EF4444" />
+          </View>
+          <Text style={styles.deniedTitle}>Session Expired</Text>
+          <Text style={styles.deniedText}>{webviewError}</Text>
+          <Pressable style={styles.cancelLink} onPress={handleBack}>
+            <Text style={[styles.cancelLinkText, { color: Colors.primary }]}>Go Back</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Header />
@@ -202,6 +229,7 @@ export default function KycWebViewScreen() {
           injectedJavaScriptBeforeContentLoaded={injectedJs}
           onNavigationStateChange={handleNavigationStateChange}
           onLoadEnd={() => setWebviewLoading(false)}
+          onError={handleWebViewError}
           style={styles.webview}
           testID="kyc-webview"
         />

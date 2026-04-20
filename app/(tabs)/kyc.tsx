@@ -130,6 +130,12 @@ export default function KycScreen() {
           startKycPolling();
           router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
         }
+      } else if (allowRedirect && result.sessionExpired) {
+        // PaySprint session expired — admin must regenerate the KYC link
+        Alert.alert(
+          "KYC Session Expired",
+          "Your KYC session has expired. Please ask your admin to regenerate your KYC link from the admin panel, then try again."
+        );
       } else {
         setKycIncompleteWarning(true);
       }
@@ -160,6 +166,14 @@ export default function KycScreen() {
           // Merchant already exists in PaySprint — check status and resume if URL available
           setInitiating(false);
           await verifyKycFromPaySprint(true);
+          return;
+        } else if (result.sessionExpired) {
+          // PaySprint session has expired for this merchant
+          Alert.alert(
+            "KYC Session Expired",
+            "Your KYC session has expired. Please ask your admin to regenerate your KYC link from the admin panel, then try again immediately."
+          );
+          setInitiating(false);
           return;
         } else {
           Alert.alert(

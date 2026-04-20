@@ -219,6 +219,13 @@ export default function AepsServicesScreen() {
           startKycPolling();
           router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
         }
+      } else if (allowRedirect && result.sessionExpired) {
+        // PaySprint session expired — admin must regenerate the KYC link
+        setKycVerifyingBanner(false);
+        Alert.alert(
+          "KYC Session Expired",
+          "Your KYC session has expired. Please ask your admin to regenerate your KYC link from the admin panel, then try again immediately."
+        );
       } else {
         // While a polling loop is running, stay silent — keep the banner visible
         // and let the next poll or the 60-second timeout handle the final verdict.
@@ -258,6 +265,13 @@ export default function AepsServicesScreen() {
           // Merchant already exists in PaySprint — check status and resume if URL available
           setOnboardingLoading(false);
           await verifyKycFromPaySprint(true);
+          return;
+        } else if (result.sessionExpired) {
+          Alert.alert(
+            "KYC Session Expired",
+            "Your KYC session has expired. Please ask your admin to regenerate your KYC link from the admin panel, then try again immediately."
+          );
+          setOnboardingLoading(false);
           return;
         } else {
           Alert.alert(

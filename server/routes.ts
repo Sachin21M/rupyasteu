@@ -1185,18 +1185,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = new Date().toISOString().split("T")[0];
       const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);
 
-      const resumeUrl = !psCompleted
+      // Only return a URL if PaySprint actively provides one right now.
+      // Never fall back to stored URLs — they expire and cause silent failures in the WebView.
+      const freshUrl = !psCompleted
         ? (verifyResult.redirecturl || verifyResult.data?.redirecturl || null)
         : null;
-
-      // If PaySprint returned no resume URL but we have a stored one, use that
-      const storedUrl = !psCompleted && !resumeUrl ? (merchant.kycRedirectUrl || null) : null;
 
       res.json({
         kycStatus: newStatus,
         onboarded: psCompleted,
         dailyAuthenticated: dailyAuth?.authenticated || false,
-        redirectUrl: resumeUrl || storedUrl || undefined,
+        redirectUrl: freshUrl || undefined,
+        sessionExpired: !psCompleted && !freshUrl,
         paySprint: { response_code: verifyResult.response_code, message: verifyResult.message },
       });
     } catch (error) {
@@ -1230,17 +1230,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[Onboard] is_new=0 response: code=${result.response_code} status=${result.status} msg="${result.message}" hasUrl=${!!(result.redirecturl || result.data?.redirecturl)}`);
       }
 
-      let kycUrl = result.redirecturl || result.data?.redirecturl;
-
-      // PaySprint sometimes rejects both is_new calls for already-registered merchants
-      // but the merchant may have a valid stored URL. Use it as a last resort.
-      if (!kycUrl) {
-        const existingMerchant = await storage.getAepsMerchant((req as any).userId);
-        if (existingMerchant?.kycRedirectUrl) {
-          console.log(`[Onboard] PaySprint gave no URL; using stored kycRedirectUrl as fallback`);
-          kycUrl = existingMerchant.kycRedirectUrl;
-        }
-      }
+      const kycUrl = result.redirecturl || result.data?.redirecturl;
 
       if (kycUrl) {
         const merchant = await storage.getAepsMerchant((req as any).userId);
@@ -1258,11 +1248,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Check if message indicates merchant is already fully registered (KYC complete)
         const msg = (result.message || "").toLowerCase();
         const alreadyRegistered = msg.includes("already registered") || msg.includes("already exist") || result.response_code === 2;
+        // sessionExpired = registered but no URL → stale session, admin must regenerate
+        const sessionExpired = !alreadyRegistered && !kycUrl;
         res.json({
           success: false,
           response_code: result.response_code ?? null,
           error: result.message,
           alreadyRegistered,
+          sessionExpired,
         });
       }
     } catch (error) {

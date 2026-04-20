@@ -1407,7 +1407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         longitude: longitude || "0.0",
         referenceno: referenceNo,
         submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
-        data: biometricData,
+        body: biometricData,
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
         is_iris: "No",

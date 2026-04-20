@@ -346,7 +346,7 @@ export async function twoFactorRegistration(params: {
   longitude: string;
   referenceno: string;
   submerchantid: string;
-  data: string;
+  body: string;
   ipaddress: string;
   timestamp: string;
   is_iris: string;
@@ -362,7 +362,7 @@ export async function twoFactorAuthentication(params: {
   longitude: string;
   referenceno: string;
   submerchantid: string;
-  data: string;
+  body: string;
   ipaddress: string;
   timestamp: string;
   is_iris: string;

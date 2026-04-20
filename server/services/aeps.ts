@@ -1,5 +1,30 @@
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { storage } from "../storage";
+
+// PaySprint requires PID data to be AES-128-CBC encrypted then base64 encoded.
+// Encryption logic (matches PHP reference):
+//   $ciphertext_raw = openssl_encrypt($piddata, "AES-128-CBC", $key, OPENSSL_RAW_DATA, $iv);
+//   $enctoken = base64_encode($ciphertext_raw);
+// Key/IV are taken as raw bytes (PHP truncates to 16 bytes for AES-128).
+export function encryptPidForPaySprint(pidData: string): string {
+  const keyStr = process.env.PAYSPRINT_AES_KEY || "";
+  const ivStr  = process.env.PAYSPRINT_AES_IV  || "";
+  if (!keyStr || !ivStr) {
+    // No credentials → return plain base64 (simulation / dev mode)
+    return Buffer.from(pidData).toString("base64");
+  }
+  try {
+    const key = Buffer.from(keyStr).slice(0, 16);
+    const iv  = Buffer.from(ivStr).slice(0, 16);
+    const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
+    const encrypted = Buffer.concat([cipher.update(Buffer.from(pidData)), cipher.final()]);
+    return encrypted.toString("base64");
+  } catch (err) {
+    console.error("[AEPS] PID encryption error:", err);
+    return Buffer.from(pidData).toString("base64");
+  }
+}
 
 const SENSITIVE_KEYS = new Set([
   "adhaarnumber", "aadhaar", "aadhar", "aadharnumber",

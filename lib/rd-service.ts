@@ -37,11 +37,23 @@ export type RdDiscoveryResult = {
 const RD_INFO_ACTION = "in.gov.uidai.rdservice.fp.INFO";
 const RD_CAPTURE_ACTION = "in.gov.uidai.rdservice.fp.CAPTURE";
 
-const CAPTURE_XML = `<?xml version="1.0"?>
+// PaySprint WADH values — required per bank for biometric capture.
+// The RD device embeds this value into the signed PID data so PaySprint
+// can verify the capture was authorised by their system.
+export const PAYSPRINT_WADH: Record<string, string> = {
+  bank2: "18f4CEiXeXcfGXvgWA/blxD+w2pw7hfQPY45JMytkPw=",
+  bank3: "18f4CEiXeXcfGXvgWA/blxD+w2pw7hfQPY45JMytkPw=", // bank3 uses same as bank2
+  bank5: "E0jzJ/P8UopUHAieZn8CKqS4WPMi5ZSYXgfnlfkWjrc=",
+  bank6: "E0jzJ/P8UopUHAieZn8CKqS4WPMi5ZSYXgfnlfkWjrc=",
+};
+
+function buildCaptureXml(wadh: string): string {
+  return `<?xml version="1.0"?>
 <PidOptions ver="1.0">
-  <Opts fCount="1" fType="2" iCount="0" pCount="0" format="0" pidVer="2.0" timeout="20000" otp="" wadh="" posh="UNKNOWN" env="P" />
+  <Opts fCount="1" fType="2" iCount="0" pCount="0" format="0" pidVer="2.0" timeout="20000" otp="" wadh="${wadh}" posh="UNKNOWN" env="P" />
   <CustOpts><Param name="mantrakey" value="" /></CustOpts>
 </PidOptions>`;
+}
 
 const SIMULATED_PID = `<PidData><Resp errCode="0" fCount="1" fType="2" iCount="0" pCount="0" errInfo="Success" /><DeviceInfo dpId="MANTRA.MSIPL" rdsId="MANTRA.WIN.001" rdsVer="1.0.8" mi="MFS110" mc="MIIEGDCCAwCgAwIBAgIEA" dc="9519866" /><Skey ci="20250101">SIMULATED_KEY</Skey><Hmac>SIMULATED_HMAC</Hmac><Data type="X">SIMULATED_BIOMETRIC_DATA</Data></PidData>`;
 
@@ -234,7 +246,8 @@ export async function discoverRdDevice(): Promise<RdDiscoveryResult> {
 
 export async function captureFingerprint(
   port?: number,
-  host?: string
+  host?: string,
+  wadh?: string
 ): Promise<RdCaptureResult> {
   if (Platform.OS === "web") {
     return {
@@ -262,8 +275,9 @@ export async function captureFingerprint(
   }
 
   try {
+    const captureXml = buildCaptureXml(wadh || "");
     const result = await startActivityAsync(RD_CAPTURE_ACTION, {
-      extra: { PID_OPTIONS: CAPTURE_XML },
+      extra: { PID_OPTIONS: captureXml },
     });
 
     const code = result.resultCode;

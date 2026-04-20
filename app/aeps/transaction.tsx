@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getAepsBanks, getAepsMerchant, performAepsTransaction } from "@/lib/api";
-import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
+import { discoverRdDevice, captureFingerprint, isSimulated, PAYSPRINT_WADH } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 import type { AepsBank } from "@/shared/schema";
 
@@ -103,7 +103,7 @@ export default function AepsTransactionScreen() {
   async function handleCaptureBiometric() {
     setCapturingBiometric(true);
     try {
-      const result = await captureFingerprint();
+      const result = await captureFingerprint(undefined, undefined, PAYSPRINT_WADH.bank2);
       if (result.success) {
         setBiometricData(result.pidData);
         setBiometricCaptured(true);

@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
-import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
+import { discoverRdDevice, captureFingerprint, isSimulated, PAYSPRINT_WADH } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
 type ServiceType = {
@@ -317,7 +317,7 @@ export default function AepsServicesScreen() {
     }
     setAuthLoading(true);
     try {
-      const captureResult = await captureFingerprint();
+      const captureResult = await captureFingerprint(undefined, undefined, PAYSPRINT_WADH.bank2);
       if (!captureResult.success) {
         Alert.alert(
           "Scan Failed",

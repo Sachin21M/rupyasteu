@@ -87,7 +87,7 @@ function generateUniqueReqId(): number {
 }
 
 function generatePaysprintJWT(): { token: string; payload: Record<string, unknown> } {
-  const timestamp = Math.floor(Date.now() / 1000);
+  const timestamp = Date.now(); // PaySprint expects milliseconds (e.g. 1541044257000)
   const reqid = generateUniqueReqId();
   const payload = {
     timestamp,
@@ -95,7 +95,8 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
     reqid: String(reqid),
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
+  // noTimestamp: true prevents jsonwebtoken from auto-adding 'iat' claim
+  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256", noTimestamp: true });
   return { token, payload };
 }
 

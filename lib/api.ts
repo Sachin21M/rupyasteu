@@ -204,6 +204,14 @@ export async function getAepsKycStatus() {
   return handleAepsResponse(res);
 }
 
+export async function kycWebviewComplete() {
+  const res = await authFetch("/api/aeps/kyc-webview-complete", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return handleAepsResponse(res);
+}
+
 export async function getAepsTransactionStatus(id: string) {
   const res = await authFetch(`/api/aeps/transaction/${id}/status`);
   return handleAepsResponse(res);

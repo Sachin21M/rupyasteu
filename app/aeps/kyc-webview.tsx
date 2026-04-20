@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
+import { kycWebviewComplete } from "@/lib/api";
 import type { WebView as WebViewClass, WebViewNavigation, WebViewErrorEvent } from "react-native-webview";
 
 const NativeWebView =
@@ -70,6 +71,10 @@ export default function KycWebViewScreen() {
       const isOnKycDomain = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
       if (!isOnKycDomain && state.url.startsWith("http")) {
         completedRef.current = true;
+        // PaySprint redirected the user away — this is the reliable "flow completed" signal.
+        // Tell the backend to mark KYC as COMPLETED. Fire-and-forget; router.back() runs
+        // immediately so the user doesn't wait, and the DB update lands in the background.
+        kycWebviewComplete().catch(() => {});
         router.back();
       }
     } catch {

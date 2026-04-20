@@ -175,9 +175,12 @@ async function makeAepsRequest(
   try {
     console.log(`[AEPS] Request to ${endpoint}`);
 
+    const jwtTokenSecret = process.env.PAYSPRINT_JWT_TOKEN || "";
+    console.log(`[AEPS] JWT secret: len=${jwtTokenSecret.length} prefix=${jwtTokenSecret.substring(0,6)} looksLikeJWT=${jwtTokenSecret.startsWith("eyJ")}`);
     const jwtResult = generatePaysprintJWT();
     const jwtToken = jwtResult.token;
     console.log(`[AEPS] JWT payload: ${JSON.stringify(jwtResult.payload)}`);
+    console.log(`[AEPS] Signed JWT (first 40): ${jwtToken.substring(0, 40)}...`);
 
     const requestBody = JSON.stringify(fullPayload);
 
@@ -187,7 +190,7 @@ async function makeAepsRequest(
       "Token": jwtToken,
       ...(PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
     };
-    console.log(`[AEPS] Headers: Token=<set> Authorisedkey=${PAYSPRINT_AUTHORIZED_KEY ? "SET(len=" + PAYSPRINT_AUTHORIZED_KEY.length + ")" : "MISSING"}`);
+    console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey=${PAYSPRINT_AUTHORIZED_KEY ? "SET(len=" + PAYSPRINT_AUTHORIZED_KEY.length + ")" : "MISSING"}`);
 
     let rawText: string;
     let httpStatus: number;

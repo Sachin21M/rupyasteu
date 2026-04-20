@@ -13,9 +13,9 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const payload = {
-    iss: "PAYSPRINT",
+    iss: PAYSPRINT_PARTNER_ID,
     timestamp,
-    partnerId: PAYSPRINT_PARTNER_ID,
+    partnerid: PAYSPRINT_PARTNER_ID,
     product: "WALLET",
     reqid,
   };

@@ -82,6 +82,7 @@ export interface AepsMerchant {
   bankPipes: string;
   kycRedirectUrl?: string;
   createdBy?: string;
+  twoFaRegistered?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -90,6 +90,7 @@ export default function AepsServicesScreen() {
   const [kycVerifyingBanner, setKycVerifyingBanner] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authAadhaar, setAuthAadhaar] = useState("");
+  const [twoFaRegistered, setTwoFaRegistered] = useState(false);
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
   const [rdChecking, setRdChecking] = useState(false);
   const [rdDiagnostics, setRdDiagnostics] = useState<string[]>([]);
@@ -150,6 +151,7 @@ export default function AepsServicesScreen() {
       const result = await getAepsMerchant();
       setOnboarded(result.onboarded || false);
       setDailyAuthenticated(result.dailyAuthenticated || false);
+      setTwoFaRegistered(result.twoFaRegistered || false);
       setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
       if (result.merchant?.merchantCode) {
         setMerchantCode(result.merchant.merchantCode);
@@ -310,6 +312,11 @@ export default function AepsServicesScreen() {
     }
   }
 
+  function isAlreadyRegisteredMsg(msg: string): boolean {
+    const m = (msg || "").toLowerCase();
+    return m.includes("already registered") || m.includes("already exist") || m.includes("already done");
+  }
+
   async function handleDailyAuth() {
     if (Platform.OS !== "web" && authAadhaar.length !== 12) {
       Alert.alert("Aadhaar Required", "Enter your 12-digit Aadhaar number before scanning.");
@@ -332,18 +339,40 @@ export default function AepsServicesScreen() {
       }
       if (captureResult.deviceInfo) setRdDevice(captureResult.deviceInfo);
 
-      const result = await aeps2faAuthenticate({
+      const bioPayload = {
         aadhaarNumber: authAadhaar,
         data: captureResult.pidData,
         latitude: "0.0",
         longitude: "0.0",
-      });
-      if (result.success) {
+      };
+
+      // Step 1: Registration — only for merchants who haven't registered yet.
+      // If registration succeeds OR PaySprint says "already registered",
+      // immediately proceed to authentication with the same biometric scan.
+      if (!twoFaRegistered) {
+        const regResult = await aeps2faRegister(bioPayload);
+        const alreadyReg = regResult.alreadyRegistered || isAlreadyRegisteredMsg(regResult.message || "");
+
+        if (regResult.success || alreadyReg) {
+          // Mark registered locally so future sessions skip this step
+          setTwoFaRegistered(true);
+          // Fall through to authentication with same PID below
+        } else {
+          // Registration outright failed — show error and stop
+          Alert.alert("Registration Failed", regResult.message || "Biometric registration failed. Please try again.");
+          setAuthLoading(false);
+          return;
+        }
+      }
+
+      // Step 2: Daily authentication
+      const authResult = await aeps2faAuthenticate(bioPayload);
+      if (authResult.success) {
         setDailyAuthenticated(true);
         const devMsg = isSimulated() ? "" : `\n\nDevice: ${captureResult.deviceInfo?.manufacturer} ${captureResult.deviceInfo?.model}`;
         Alert.alert("Authenticated", `Daily 2FA authentication completed. You can now perform AEPS transactions.${devMsg}`);
       } else {
-        Alert.alert("Failed", result.message || "Authentication failed. Please try again.");
+        Alert.alert("Failed", authResult.message || "Authentication failed. Please try again.");
       }
     } catch (err: any) {
       Alert.alert("Error", err.message || "Authentication failed");

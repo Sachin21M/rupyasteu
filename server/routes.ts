@@ -1147,6 +1147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         merchant,
         onboarded: merchant.kycStatus === "COMPLETED",
         dailyAuthenticated: dailyAuth?.authenticated || false,
+        twoFaRegistered: merchant.twoFaRegistered || false,
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch merchant info" });
@@ -1171,6 +1172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           kycStatus: "COMPLETED",
           onboarded: true,
           dailyAuthenticated: dailyAuth?.authenticated || false,
+          twoFaRegistered: merchant.twoFaRegistered || false,
         });
       }
 
@@ -1212,6 +1214,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         kycStatus: psCompleted ? "COMPLETED" : "PENDING",
         onboarded: psCompleted,
         dailyAuthenticated: dailyAuth?.authenticated || false,
+        twoFaRegistered: merchant.twoFaRegistered || false,
         redirectUrl: freshUrl || undefined,
         sessionExpired: !psCompleted && !freshUrl,
         paySprint: { response_code: verifyResult.response_code, message: verifyResult.message },
@@ -1372,8 +1375,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/2fa/register", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const result = await aepsService.twoFactorRegistration(req.body);
-      res.json({ success: result.status, message: result.message, data: result.data });
+      const { aadhaarNumber, data: biometricData, latitude, longitude } = req.body;
+      if (!biometricData) {
+        return res.status(400).json({ error: "Biometric data is required for 2FA registration" });
+      }
+
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "Complete merchant onboarding first" });
+      }
+
+      const _now = new Date();
+      const timestamp = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")} ${String(_now.getHours()).padStart(2,"0")}:${String(_now.getMinutes()).padStart(2,"0")}:${String(_now.getSeconds()).padStart(2,"0")}`;
+      const referenceNo = `REG${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+
+      const fullPayload = {
+        accessmodetype: "site",
+        adhaarnumber: aadhaarNumber || "",
+        mobilenumber: user.phone,
+        latitude: latitude || "0.0",
+        longitude: longitude || "0.0",
+        referenceno: referenceNo,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
+        body: aepsService.encryptPidForPaySprint(biometricData),
+        ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
+        timestamp,
+        is_iris: "No",
+      };
+
+      const result = await aepsService.twoFactorRegistration(fullPayload);
+      if (result.status) {
+        await storage.updateAepsMerchant((req as any).userId, { twoFaRegistered: true } as any);
+      }
+      res.json({ success: result.status, message: result.message, data: result.data, alreadyRegistered: false });
     } catch (error) {
       console.error("AEPS 2FA register error:", error);
       res.status(500).json({ error: "2FA registration failed" });

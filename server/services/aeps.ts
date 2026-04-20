@@ -2,24 +2,36 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { storage } from "../storage";
 
-// PaySprint requires PID data to be AES-128-CBC encrypted then base64 encoded.
-// Encryption logic (matches PHP reference):
-//   $ciphertext_raw = openssl_encrypt($piddata, "AES-128-CBC", $key, OPENSSL_RAW_DATA, $iv);
-//   $enctoken = base64_encode($ciphertext_raw);
-// Key/IV are taken as raw bytes (PHP truncates to 16 bytes for AES-128).
+// PaySprint AES-128-CBC encryption for PID body field.
+// The body field must contain ONLY the <Data> element value from the PID XML,
+// AES-128-CBC encrypted with PAYSPRINT_AES_KEY/IV, then base64 encoded.
+// PHP reference: openssl_encrypt($dataValue, "AES-128-CBC", $key, OPENSSL_RAW_DATA, $iv)
+function aes128cbcEncrypt(plaintext: string, keyStr: string, ivStr: string): string {
+  const key = Buffer.from(keyStr.trim()).slice(0, 16);
+  const iv  = Buffer.from(ivStr.trim()).slice(0, 16);
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(Buffer.from(plaintext, "utf8")),
+    cipher.final(),
+  ]);
+  return encrypted.toString("base64");
+}
+
 export function encryptPidForPaySprint(pidData: string): string {
   const keyStr = process.env.PAYSPRINT_AES_KEY || "";
   const ivStr  = process.env.PAYSPRINT_AES_IV  || "";
   if (!keyStr || !ivStr) {
-    // No credentials → return plain base64 (simulation / dev mode)
     return Buffer.from(pidData).toString("base64");
   }
   try {
-    const key = Buffer.from(keyStr).slice(0, 16);
-    const iv  = Buffer.from(ivStr).slice(0, 16);
-    const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
-    const encrypted = Buffer.concat([cipher.update(Buffer.from(pidData)), cipher.final()]);
-    return encrypted.toString("base64");
+    // PaySprint expects only the <Data> element value encrypted, not the full PID XML.
+    // Extract the base64 blob from <Data type="X">...</Data>
+    const dataMatch = pidData.match(/<Data[^>]*>([^<]+)<\/Data>/);
+    const toEncrypt = dataMatch ? dataMatch[1].trim() : pidData.trim();
+    console.log(`[AEPS] Encrypting PID: extracted=${!!dataMatch} inputLen=${toEncrypt.length} keyLen=${keyStr.trim().length} ivLen=${ivStr.trim().length}`);
+    const result = aes128cbcEncrypt(toEncrypt, keyStr, ivStr);
+    console.log(`[AEPS] Encrypted body length: ${result.length}`);
+    return result;
   } catch (err) {
     console.error("[AEPS] PID encryption error:", err);
     return Buffer.from(pidData).toString("base64");

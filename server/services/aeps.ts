@@ -181,7 +181,20 @@ async function makeAepsRequest(
     console.log(`[AEPS] JWT payload: ${JSON.stringify(jwtResult.payload)}`);
     console.log(`[AEPS] Signed JWT (first 40): ${jwtToken.substring(0, 40)}...`);
 
-    const requestBody = JSON.stringify(fullPayload);
+    // PaySprint LIVE (IP-BASED) requires the entire inner payload to be AES-128-CBC encrypted
+    // and sent as a single "body" field. JWT goes in the Token header only.
+    const aesKey = process.env.PAYSPRINT_AES_KEY || "";
+    const aesIv  = process.env.PAYSPRINT_AES_IV  || "";
+    let requestBody: string;
+    if (aesKey && aesIv) {
+      const encrypted = aes128cbcEncrypt(JSON.stringify(fullPayload), aesKey, aesIv);
+      requestBody = JSON.stringify({ body: encrypted });
+      console.log(`[AEPS] Body encrypted: keyLen=${aesKey.trim().length} ivLen=${aesIv.trim().length} keyLast4=${aesKey.trim().slice(-4)} encLen=${encrypted.length}`);
+    } else {
+      // Fallback: send plain JSON (no encryption configured)
+      requestBody = JSON.stringify(fullPayload);
+      console.log(`[AEPS] Body plain (no AES key configured)`);
+    }
 
     // IP BASED partners do NOT use Authorisedkey — authentication is via whitelisted IP only.
     const paysprintHeaders: Record<string, string> = {

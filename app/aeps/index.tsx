@@ -16,7 +16,7 @@ import { router, useFocusEffect, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
+import { getAepsMerchant, aepsOnboard, aeps2faRegister, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated, PAYSPRINT_WADH } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 

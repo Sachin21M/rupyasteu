@@ -1672,6 +1672,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Regenerate KYC URL for an existing merchant with incomplete KYC
+  app.post("/api/admin/merchants/:id/regenerate-kyc", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const merchant = await storage.getAepsMerchantById(id);
+      if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+
+      const user = await storage.getUser(merchant.userId);
+      const phone = user?.phone || merchant.phone;
+      if (!phone) return res.status(400).json({ error: "Merchant has no phone number on record" });
+
+      console.log(`[Admin] Regenerating KYC URL for merchant ${merchant.merchantCode} (phone: ${phone})`);
+
+      // Try is_new=0 first (existing merchant — get fresh URL)
+      let result = await aepsService.getOnboardingUrl({
+        merchantCode: merchant.merchantCode,
+        mobile: phone,
+        isNew: false,
+      });
+      console.log(`[Admin] is_new=0 response: code=${result.response_code} hasUrl=${!!(result.redirecturl || result.data?.redirecturl)} msg="${result.message}"`);
+
+      let freshUrl = result.redirecturl || result.data?.redirecturl || "";
+
+      // If is_new=0 gives no URL, try is_new=1 as fallback
+      if (!freshUrl) {
+        result = await aepsService.getOnboardingUrl({
+          merchantCode: merchant.merchantCode,
+          mobile: phone,
+          isNew: true,
+        });
+        console.log(`[Admin] is_new=1 response: code=${result.response_code} hasUrl=${!!(result.redirecturl || result.data?.redirecturl)} msg="${result.message}"`);
+        freshUrl = result.redirecturl || result.data?.redirecturl || "";
+      }
+
+      if (!freshUrl) {
+        return res.status(502).json({
+          error: "PaySprint did not return a KYC URL. The merchant may need manual intervention.",
+          paySprint: { response_code: result.response_code, message: result.message },
+        });
+      }
+
+      // Save the fresh URL to the database
+      await storage.updateAepsMerchant(merchant.userId, {
+        kycStatus: "PENDING",
+        kycRedirectUrl: freshUrl,
+      });
+
+      console.log(`[Admin] KYC URL regenerated for merchant ${merchant.merchantCode}`);
+      res.json({ success: true, redirectUrl: freshUrl, merchantCode: merchant.merchantCode });
+    } catch (error) {
+      console.error("Failed to regenerate KYC URL:", error);
+      res.status(500).json({ error: "Failed to regenerate KYC URL" });
+    }
+  });
+
   app.get("/api/wallet", authMiddleware, async (req: Request, res: Response) => {
     try {
       const userId = (req as any).userId;

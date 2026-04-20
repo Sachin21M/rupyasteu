@@ -28,7 +28,7 @@ export function encryptPidForPaySprint(pidData: string): string {
     // Extract the base64 blob from <Data type="X">...</Data>
     const dataMatch = pidData.match(/<Data[^>]*>([^<]+)<\/Data>/);
     const toEncrypt = dataMatch ? dataMatch[1].trim() : pidData.trim();
-    console.log(`[AEPS] Encrypting PID: extracted=${!!dataMatch} inputLen=${toEncrypt.length} keyLen=${keyStr.trim().length} ivLen=${ivStr.trim().length}`);
+    console.log(`[AEPS] Encrypting PID: extracted=${!!dataMatch} inputLen=${toEncrypt.length} keyLen=${keyStr.trim().length} ivLen=${ivStr.trim().length} keyLast4=${keyStr.trim().slice(-4)} ivLast4=${ivStr.trim().slice(-4)}`);
     const result = aes128cbcEncrypt(toEncrypt, keyStr, ivStr);
     console.log(`[AEPS] Encrypted body length: ${result.length}`);
     return result;
@@ -183,13 +183,12 @@ async function makeAepsRequest(
 
     const requestBody = JSON.stringify(fullPayload);
 
-    const PAYSPRINT_AUTHORIZED_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+    // IP BASED partners do NOT use Authorisedkey — authentication is via whitelisted IP only.
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
-      ...(PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
     };
-    console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey=${PAYSPRINT_AUTHORIZED_KEY ? "SET(len=" + PAYSPRINT_AUTHORIZED_KEY.length + ")" : "MISSING"}`);
+    console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) [IP-BASED: no Authorisedkey sent]`);
 
     let rawText: string;
     let httpStatus: number;
@@ -386,7 +385,7 @@ export async function twoFactorRegistration(params: {
   longitude: string;
   referenceno: string;
   submerchantid: string;
-  body: string;
+  data: string;
   ipaddress: string;
   timestamp: string;
   is_iris: string;
@@ -402,7 +401,7 @@ export async function twoFactorAuthentication(params: {
   longitude: string;
   referenceno: string;
   submerchantid: string;
-  body: string;
+  data: string;
   ipaddress: string;
   timestamp: string;
   is_iris: string;

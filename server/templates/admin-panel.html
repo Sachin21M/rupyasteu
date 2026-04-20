@@ -973,7 +973,7 @@ async function loadMerchants() {
       const statusColors = { PENDING: '#F59E0B', COMPLETED: '#10B981', FAILED: '#EF4444' };
       const statusColor = statusColors[m.kycStatus] || '#888';
       const kycBtn = m.kycRedirectUrl ? `<a href="${m.kycRedirectUrl}" target="_blank" style="color:#2E9E5B;text-decoration:none;font-size:12px;margin-right:6px;">KYC Link</a>` : '';
-      const regenBtn = m.kycStatus !== 'COMPLETED' ? `<button onclick="regenerateKyc('${m.id}')" style="padding:3px 8px;background:#6366F1;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">🔗 Regen URL</button>` : '';
+      const regenBtn = m.kycStatus !== 'COMPLETED' ? `<button onclick="regenerateKyc('${m.id}','${m.merchantCode||''}')" style="padding:3px 8px;background:#6366F1;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">🔗 Regen URL</button>` : '';
       const approveBtn = m.kycStatus !== 'COMPLETED' ? `<button onclick="updateMerchantStatus('${m.id}','COMPLETED')" style="padding:3px 8px;background:#10B981;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">Approve</button>` : '';
       const rejectBtn = m.kycStatus !== 'FAILED' ? `<button onclick="updateMerchantStatus('${m.id}','FAILED')" style="padding:3px 8px;background:#EF4444;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">Reject</button>` : '';
       const deleteBtn = `<button onclick="deleteMerchant('${m.id}')" style="padding:3px 8px;background:#666;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">Delete</button>`;
@@ -1060,20 +1060,29 @@ async function deleteMerchant(id) {
   }
 }
 
-async function regenerateKyc(id) {
-  if (!confirm('This will call PaySprint to generate a fresh KYC URL for this merchant and save it.\n\nProceed?')) return;
+async function regenerateKyc(id, storedCode) {
+  const override = prompt(
+    'Regenerate KYC URL for this merchant.\n\n' +
+    'Stored merchant code: ' + (storedCode || '(none)') + '\n\n' +
+    'If PaySprint shows a DIFFERENT merchant code in their panel for this phone, paste it below.\n' +
+    'Otherwise leave blank to use the stored code.',
+    ''
+  );
+  if (override === null) return; // cancelled
   try {
     const res = await fetch('/api/admin/merchants/' + id + '/regenerate-kyc', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + adminToken },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken },
+      body: JSON.stringify({ merchantCode: override.trim() }),
     });
     const data = await res.json();
     if (data.success) {
-      alert('✅ KYC URL regenerated for ' + data.merchantCode + '!\n\nThe merchant can now tap "Start KYC Verification" in the app to complete their KYC.\n\nURL (for reference):\n' + data.redirectUrl);
+      alert('✅ KYC URL regenerated for ' + data.merchantCode + '!\n\nThe merchant can now tap "Start KYC Verification" in the app to complete their KYC.\n\nURL saved to DB. Direct link:\n' + data.redirectUrl);
       loadMerchants();
     } else {
-      const ps = data.paySprint ? ('\n\nPaySprint: code=' + data.paySprint.response_code + ' msg=' + data.paySprint.message) : '';
-      alert('❌ Failed to regenerate URL:\n' + (data.error || 'Unknown error') + ps);
+      const attemptsLog = data.attempts ? ('\n\nAll attempts:\n' + data.attempts.join('\n')) : '';
+      const ps = data.paySprint ? ('\n\nPaySprint last response: code=' + data.paySprint.response_code + ' msg=' + data.paySprint.message) : '';
+      alert('❌ Failed to regenerate URL:\n' + (data.error || 'Unknown error') + ps + attemptsLog + '\n\n👉 Ask PaySprint support to reset the onboarding session for this merchant, or check their panel for the correct merchant code.');
     }
   } catch (err) {
     alert('❌ Request failed: ' + err.message);

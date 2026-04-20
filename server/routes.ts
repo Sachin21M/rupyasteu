@@ -1619,8 +1619,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           firmName: firmName,
           isNew: true,
         });
-        if (onboardResult.status && onboardResult.data?.redirecturl) {
-          kycRedirectUrl = onboardResult.data.redirecturl;
+        // PaySprint returns redirecturl at top level, NOT inside .data
+        const onboardUrl = onboardResult.redirecturl || onboardResult.data?.redirecturl;
+        if (onboardUrl) {
+          kycRedirectUrl = onboardUrl;
         }
       } catch (err: any) {
         console.error("Paysprint onboarding call failed:", err.message);
@@ -1683,44 +1685,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const phone = user?.phone || merchant.phone;
       if (!phone) return res.status(400).json({ error: "Merchant has no phone number on record" });
 
-      console.log(`[Admin] Regenerating KYC URL for merchant ${merchant.merchantCode} (phone: ${phone})`);
+      // Admin can supply a PaySprint-side merchant code to override the stored one
+      const overrideCode = (req.body.merchantCode || "").trim();
+      const codeToUse = overrideCode || merchant.merchantCode;
 
-      // Try is_new=0 first (existing merchant — get fresh URL)
-      let result = await aepsService.getOnboardingUrl({
-        merchantCode: merchant.merchantCode,
-        mobile: phone,
-        isNew: false,
-      });
-      console.log(`[Admin] is_new=0 response: code=${result.response_code} hasUrl=${!!(result.redirecturl || result.data?.redirecturl)} msg="${result.message}"`);
+      console.log(`[Admin] Regenerating KYC URL — stored code: ${merchant.merchantCode}, using code: ${codeToUse}, phone: ${phone}`);
 
-      let freshUrl = result.redirecturl || result.data?.redirecturl || "";
+      let freshUrl = "";
+      let lastResult: any = null;
+      const attempts: string[] = [];
 
-      // If is_new=0 gives no URL, try is_new=1 as fallback
-      if (!freshUrl) {
-        result = await aepsService.getOnboardingUrl({
-          merchantCode: merchant.merchantCode,
-          mobile: phone,
-          isNew: true,
-        });
-        console.log(`[Admin] is_new=1 response: code=${result.response_code} hasUrl=${!!(result.redirecturl || result.data?.redirecturl)} msg="${result.message}"`);
-        freshUrl = result.redirecturl || result.data?.redirecturl || "";
+      // Helper: try one PaySprint call and capture the result
+      async function tryOnboard(code: string, isNew: boolean): Promise<string> {
+        const r = await aepsService.getOnboardingUrl({ merchantCode: code, mobile: phone!, isNew });
+        const url = r.redirecturl || r.data?.redirecturl || "";
+        const allKeys = Object.keys(r).join(",");
+        console.log(`[Admin] is_new=${isNew ? 1 : 0} code="${code}" → response_code=${r.response_code} hasUrl=${!!url} keys=[${allKeys}] msg="${r.message}"`);
+        attempts.push(`is_new=${isNew ? 1 : 0} code="${code}": code=${r.response_code} url=${url ? "YES" : "NO"} msg="${r.message}"`);
+        lastResult = r;
+        return url;
       }
+
+      // Attempt 1: is_new=0 with the code we'll use
+      freshUrl = await tryOnboard(codeToUse, false);
+
+      // Attempt 2: is_new=1 with the code we'll use (if attempt 1 failed)
+      if (!freshUrl) freshUrl = await tryOnboard(codeToUse, true);
+
+      // Attempt 3: if an override was given, also try the stored code with is_new=0
+      if (!freshUrl && overrideCode && overrideCode !== merchant.merchantCode) {
+        freshUrl = await tryOnboard(merchant.merchantCode, false);
+      }
+
+      // Attempt 4: if override given, try stored code with is_new=1
+      if (!freshUrl && overrideCode && overrideCode !== merchant.merchantCode) {
+        freshUrl = await tryOnboard(merchant.merchantCode, true);
+      }
+
+      console.log(`[Admin] Regen attempts summary:\n  ${attempts.join("\n  ")}`);
 
       if (!freshUrl) {
         return res.status(502).json({
-          error: "PaySprint did not return a KYC URL. The merchant may need manual intervention.",
-          paySprint: { response_code: result.response_code, message: result.message },
+          error: "PaySprint did not return a KYC URL after all attempts. Please share the PaySprint panel merchant code with your PaySprint team and ask them to reset this merchant's onboarding session.",
+          attempts,
+          paySprint: { response_code: lastResult?.response_code, message: lastResult?.message },
         });
       }
 
-      // Save the fresh URL to the database
-      await storage.updateAepsMerchant(merchant.userId, {
-        kycStatus: "PENDING",
-        kycRedirectUrl: freshUrl,
-      });
+      // Save the fresh URL (and update merchant code if admin provided an override)
+      const updatePayload: any = { kycStatus: "PENDING", kycRedirectUrl: freshUrl };
+      if (overrideCode && overrideCode !== merchant.merchantCode) {
+        updatePayload.merchantCode = overrideCode;
+        console.log(`[Admin] Updating stored merchant code: ${merchant.merchantCode} → ${overrideCode}`);
+      }
+      await storage.updateAepsMerchant(merchant.userId, updatePayload);
 
-      console.log(`[Admin] KYC URL regenerated for merchant ${merchant.merchantCode}`);
-      res.json({ success: true, redirectUrl: freshUrl, merchantCode: merchant.merchantCode });
+      console.log(`[Admin] KYC URL regenerated for merchant ${codeToUse}`);
+      res.json({ success: true, redirectUrl: freshUrl, merchantCode: codeToUse, attempts });
     } catch (error) {
       console.error("Failed to regenerate KYC URL:", error);
       res.status(500).json({ error: "Failed to regenerate KYC URL" });

@@ -183,13 +183,11 @@ async function makeAepsRequest(
 
     const requestBody = JSON.stringify(fullPayload);
 
-    const PAYSPRINT_AUTHORIZED_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
-      ...(PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
     };
-    console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey=${PAYSPRINT_AUTHORIZED_KEY ? "SET(len=" + PAYSPRINT_AUTHORIZED_KEY.length + ")" : "MISSING"}`);
+    console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey=NOT_SENT`);
 
     let rawText: string;
     let httpStatus: number;

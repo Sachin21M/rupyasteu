@@ -13,11 +13,9 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const payload = {
-    iss: PAYSPRINT_PARTNER_ID,
     timestamp,
-    partnerid: PAYSPRINT_PARTNER_ID,
-    product: "WALLET",
-    reqid,
+    partnerId: PAYSPRINT_PARTNER_ID,
+    reqid: String(reqid),
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
   const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });

@@ -83,8 +83,10 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
 
 async function retryOnboarding(merchant: any, phone: string, firmName: string): Promise<void> {
   try {
+    // Strip non-alphanumeric from stored code — PaySprint only accepts alphanumeric submerchantid
+    const safeCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
     let onboardResult = await aepsService.getOnboardingUrl({
-      merchantCode: merchant.merchantCode,
+      merchantCode: safeCode,
       mobile: phone,
       email: "",
       firmName: firmName || "RupyaSetu",
@@ -93,7 +95,7 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
     if (!(onboardResult.redirecturl || onboardResult.data?.redirecturl)) {
       console.log(`[Auto-Onboard] is_new=1 failed (${onboardResult.message}), trying is_new=0...`);
       onboardResult = await aepsService.getOnboardingUrl({
-        merchantCode: merchant.merchantCode,
+        merchantCode: safeCode,
         mobile: phone,
         email: "",
         firmName: firmName || "RupyaSetu",
@@ -1179,9 +1181,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      // Call PaySprint with is_new=false to check if merchant is already registered
+      // Call PaySprint with is_new=false to check if merchant is already registered.
+      // Always strip non-alphanumeric from the stored code before sending to PaySprint.
+      const safeCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
       const verifyResult = await aepsService.getOnboardingUrl({
-        merchantCode: merchant.merchantCode,
+        merchantCode: safeCode,
         mobile: user.phone,
         isNew: false,
       });
@@ -1762,9 +1766,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const phone = user?.phone || merchant.phone;
       if (!phone) return res.status(400).json({ error: "Merchant has no phone number on record" });
 
-      // Admin can supply a PaySprint-side merchant code to override the stored one
-      const overrideCode = (req.body.merchantCode || "").trim();
-      const codeToUse = overrideCode || merchant.merchantCode;
+      // Admin can supply a PaySprint-side merchant code to override the stored one.
+      // Strip any non-alphanumeric characters — PaySprint only accepts alphanumeric submerchantid.
+      const overrideCode = (req.body.merchantCode || "").trim().replace(/[^a-zA-Z0-9]/g, "");
+      const sanitizedStoredCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
+      const codeToUse = overrideCode || sanitizedStoredCode;
 
       console.log(`[Admin] Regenerating KYC URL — stored code: ${merchant.merchantCode}, using code: ${codeToUse}, phone: ${phone}`);
 
@@ -1789,14 +1795,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Attempt 2: is_new=1 with the code we'll use (if attempt 1 failed)
       if (!freshUrl) freshUrl = await tryOnboard(codeToUse, true);
 
-      // Attempt 3: if an override was given, also try the stored code with is_new=0
-      if (!freshUrl && overrideCode && overrideCode !== merchant.merchantCode) {
-        freshUrl = await tryOnboard(merchant.merchantCode, false);
+      // Attempt 3: if an override was given, also try the sanitized stored code with is_new=0
+      if (!freshUrl && overrideCode && overrideCode !== sanitizedStoredCode) {
+        freshUrl = await tryOnboard(sanitizedStoredCode, false);
       }
 
-      // Attempt 4: if override given, try stored code with is_new=1
-      if (!freshUrl && overrideCode && overrideCode !== merchant.merchantCode) {
-        freshUrl = await tryOnboard(merchant.merchantCode, true);
+      // Attempt 4: if override given, try sanitized stored code with is_new=1
+      if (!freshUrl && overrideCode && overrideCode !== sanitizedStoredCode) {
+        freshUrl = await tryOnboard(sanitizedStoredCode, true);
       }
 
       console.log(`[Admin] Regen attempts summary:\n  ${attempts.join("\n  ")}`);
@@ -1809,11 +1815,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Save the fresh URL (and update merchant code if admin provided an override)
+      // Save the fresh URL (and update merchant code if admin provided an override or stored code had special chars)
       const updatePayload: any = { kycStatus: "PENDING", kycRedirectUrl: freshUrl };
-      if (overrideCode && overrideCode !== merchant.merchantCode) {
+      if (overrideCode && overrideCode !== sanitizedStoredCode) {
         updatePayload.merchantCode = overrideCode;
         console.log(`[Admin] Updating stored merchant code: ${merchant.merchantCode} → ${overrideCode}`);
+      } else if (sanitizedStoredCode !== merchant.merchantCode) {
+        updatePayload.merchantCode = sanitizedStoredCode;
+        console.log(`[Admin] Normalizing stored merchant code: ${merchant.merchantCode} → ${sanitizedStoredCode}`);
       }
       await storage.updateAepsMerchant(merchant.userId, updatePayload);
 

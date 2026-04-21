@@ -1177,16 +1177,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Do NOT call PaySprint here — PaySprint's is_new=0 response is unreliable and
       // causes false-positive COMPLETED marking (response_code=1 with no URL is returned
       // for brand-new merchants who haven't done KYC yet). KYC is only marked COMPLETED
-      // through two trusted signals:
-      //   1. /api/aeps/kyc-webview-complete — fired by the app when the WebView navigates
-      //      away from merchantkyc.com (reliable "user completed the form" signal)
-      //   2. /api/aeps/onboard/complete — explicit user action + PaySprint response_code=2 only
+      // through trusted signals:
+      //   1. /api/aeps/kyc-webview-complete — verifies with PaySprint after WebView redirect
+      //   2. /api/aeps/onboard/complete — PaySprint response_code=2 only
       //   3. Admin approve button in the admin panel
       // Just return stored DB state and the stored KYC URL.
-      const storedUrl = merchant.kycRedirectUrl || null;
-      const sessionExpired = !storedUrl && merchant.kycStatus !== "FAILED";
+      const rawUrl = merchant.kycRedirectUrl || null;
+      // "SUBMITTED" is a sentinel value set by kyc-webview-complete when the merchant
+      // completed the form but PaySprint has not yet confirmed (bank activation pending).
+      const kycFormSubmitted = rawUrl === "SUBMITTED";
+      const storedUrl = kycFormSubmitted ? null : rawUrl;
+      const sessionExpired = !storedUrl && !kycFormSubmitted && merchant.kycStatus !== "FAILED";
 
-      console.log(`[KYC-Status] merchant=${merchant.merchantCode} dbStatus=${merchant.kycStatus} hasUrl=${!!storedUrl}`);
+      console.log(`[KYC-Status] merchant=${merchant.merchantCode} dbStatus=${merchant.kycStatus} hasUrl=${!!storedUrl} submitted=${kycFormSubmitted}`);
 
       res.json({
         kycStatus: merchant.kycStatus || "PENDING",
@@ -1195,6 +1198,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         twoFaRegistered: merchant.twoFaRegistered || false,
         redirectUrl: storedUrl || undefined,
         sessionExpired,
+        kycFormSubmitted,
       });
     } catch (error) {
       console.error("KYC status check error:", error);
@@ -1305,15 +1309,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Called by the WebView when PaySprint redirects the user away from merchantkyc.com.
-  // We first try to verify completion with PaySprint (response_code=2).
-  // If PaySprint confirms → COMPLETED (strong signal).
-  // If PaySprint does not yet confirm (response_code≠2) → still mark COMPLETED because:
-  //   - PaySprint's background bank activation can lag the redirect by minutes
-  //   - This signal is fired only when the WebView navigates to a non-PaySprint URL,
-  //     which only happens after the PaySprint "Retailer Successfully Onboard" page
-  //   - Silent fallback is better than leaving the merchant stuck on PENDING forever
-  // The false-positive bug was in /api/aeps/kyc-status polling (now removed),
-  // not in this endpoint which is only triggered by a genuine WebView navigation event.
+  // This is a trusted app-side signal that the user went through the PaySprint KYC form.
+  // We verify with PaySprint before setting COMPLETED:
+  //   - If PaySprint confirms (response_code=2): mark COMPLETED (definitive).
+  //   - If PaySprint does not yet confirm: clear the stored KYC URL and return PENDING
+  //     with kycFormSubmitted=true so the app can show "awaiting activation" rather
+  //     than "session expired." Admin can then approve or the merchant retries via
+  //     /api/aeps/onboard/complete after PaySprint activates in the background.
   app.post("/api/aeps/kyc-webview-complete", authMiddleware, async (req: Request, res: Response) => {
     try {
       const merchant = await storage.getAepsMerchant((req as any).userId);
@@ -1338,16 +1340,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[KYC-WebView] merchant=${safeCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psVerified=${psVerified}`);
         }
       } catch (verifyErr: any) {
-        console.warn(`[KYC-WebView] PaySprint verify failed for ${safeCode}: ${verifyErr.message} — trusting WebView signal`);
+        console.warn(`[KYC-WebView] PaySprint verify failed for ${safeCode}: ${verifyErr.message}`);
       }
 
-      // Mark COMPLETED regardless: WebView navigation-away is a trusted app-side signal.
-      // psVerified=true means PaySprint also confirmed; psVerified=false means bank activation
-      // is still pending on PaySprint's side (normal — can take minutes).
-      await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
-      console.log(`[KYC-WebView] Marked ${safeCode} COMPLETED (psVerified=${psVerified})`);
+      if (psVerified) {
+        // PaySprint confirmed — mark fully COMPLETED
+        await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
+        console.log(`[KYC-WebView] Marked ${safeCode} COMPLETED (PaySprint confirmed)`);
+        return res.json({ success: true, kycStatus: "COMPLETED", verified: true });
+      }
 
-      res.json({ success: true, kycStatus: "COMPLETED", verified: psVerified });
+      // PaySprint not yet confirmed (bank activation runs in background on PaySprint's side).
+      // Clear the stored URL so kyc-status returns kycFormSubmitted=true instead of
+      // re-opening the WebView, and leave kycStatus as PENDING for admin/manual approval.
+      await storage.updateAepsMerchant((req as any).userId, { kycRedirectUrl: "SUBMITTED" });
+      console.log(`[KYC-WebView] Form submitted for ${safeCode} — awaiting PaySprint activation`);
+      res.json({ success: true, kycStatus: "PENDING", kycFormSubmitted: true, verified: false });
     } catch (error) {
       console.error("KYC webview complete error:", error);
       res.status(500).json({ error: "Failed to update KYC status" });

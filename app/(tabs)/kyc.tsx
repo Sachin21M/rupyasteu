@@ -130,6 +130,16 @@ export default function KycScreen() {
           startKycPolling();
           router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
         }
+      } else if (result.kycFormSubmitted) {
+        // Form submitted but PaySprint activation pending (background process on their side)
+        stopKycPolling();
+        setKycIncompleteWarning(false);
+        if (allowRedirect) {
+          Alert.alert(
+            "KYC Submitted",
+            "Your KYC form was submitted. PaySprint is activating your account — this usually takes a few minutes.\n\nPlease come back and tap \"Check KYC Status\" after a few minutes, or ask your admin to approve."
+          );
+        }
       } else if (allowRedirect && result.sessionExpired) {
         // PaySprint session expired — admin must regenerate the KYC link
         Alert.alert(

@@ -16,7 +16,7 @@ import { router, useFocusEffect, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, aepsOnboard, aeps2faRegister, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
+import { getAepsMerchant, aepsOnboard, aepsOnboardComplete, aeps2faRegister, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated, PAYSPRINT_WADH } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
@@ -221,6 +221,18 @@ export default function AepsServicesScreen() {
           startKycPolling();
           router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
         }
+      } else if (result.kycFormSubmitted) {
+        // Merchant completed the KYC form but PaySprint hasn't activated the account yet.
+        // This is normal — PaySprint bank activation runs in the background (minutes).
+        stopKycPolling();
+        setKycVerifyingBanner(false);
+        setKycIncompleteWarning(false);
+        if (allowRedirect) {
+          Alert.alert(
+            "KYC Submitted",
+            "Your KYC form was submitted successfully. PaySprint is activating your account — this usually takes a few minutes.\n\nPlease come back and tap \"Check KYC Status\" after a few minutes, or ask your admin to approve from the admin panel."
+          );
+        }
       } else if (allowRedirect && result.sessionExpired) {
         // PaySprint session expired — admin must regenerate the KYC link
         setKycVerifyingBanner(false);
@@ -264,7 +276,21 @@ export default function AepsServicesScreen() {
           result.alreadyRegistered ||
           (result.error || result.message || "").toLowerCase().includes("already registered")
         ) {
-          // Merchant already exists in PaySprint — check status and resume if URL available
+          // Merchant already exists in PaySprint — try onboard/complete to check if
+          // PaySprint has activated them (response_code=2). If yes → COMPLETED.
+          // If not yet → fall back to kyc-status to show appropriate pending message.
+          try {
+            const completeResult = await aepsOnboardComplete({ status: "completed" });
+            if (completeResult.success && completeResult.kycStatus === "COMPLETED") {
+              setOnboarded(true);
+              setKycStatus("COMPLETED");
+              setOnboardingLoading(false);
+              Alert.alert("KYC Verified!", "Your AEPS merchant account is now active. You can perform AEPS transactions.");
+              return;
+            }
+          } catch {
+            // ignore — fall through to verifyKycFromPaySprint
+          }
           setOnboardingLoading(false);
           await verifyKycFromPaySprint(true);
           return;

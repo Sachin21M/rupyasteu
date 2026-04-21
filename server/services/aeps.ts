@@ -181,19 +181,21 @@ async function makeAepsRequest(
     console.log(`[AEPS] JWT payload: ${JSON.stringify(jwtResult.payload)}`);
     console.log(`[AEPS] Signed JWT (first 40): ${jwtToken.substring(0, 40)}...`);
 
-    // PaySprint LIVE (IP-BASED) requires the entire inner payload to be AES-128-CBC encrypted
-    // and sent as a single "body" field. JWT goes in the Token header only.
+    // AEPS transaction endpoints (/service/aeps/) require the entire payload AES-128-CBC
+    // encrypted and sent as a single "body" field (IP-BASED mode).
+    // Onboarding endpoints (/service/onboard/) expect plain JSON — they do NOT decrypt
+    // the AES body wrapper and will reject the request saying fields are missing.
     const aesKey = process.env.PAYSPRINT_AES_KEY || "";
     const aesIv  = process.env.PAYSPRINT_AES_IV  || "";
+    const useBodyEncryption = !!(aesKey && aesIv && endpoint.includes("/service/aeps/"));
     let requestBody: string;
-    if (aesKey && aesIv) {
+    if (useBodyEncryption) {
       const encrypted = aes128cbcEncrypt(JSON.stringify(fullPayload), aesKey, aesIv);
       requestBody = JSON.stringify({ body: encrypted });
       console.log(`[AEPS] Body encrypted: keyLen=${aesKey.trim().length} ivLen=${aesIv.trim().length} keyLast4=${aesKey.trim().slice(-4)} encLen=${encrypted.length}`);
     } else {
-      // Fallback: send plain JSON (no encryption configured)
       requestBody = JSON.stringify(fullPayload);
-      console.log(`[AEPS] Body plain (no AES key configured)`);
+      console.log(`[AEPS] Body plain: endpoint=${endpoint} aesConfigured=${!!(aesKey && aesIv)}`);
     }
 
     // IP BASED partners do NOT use Authorisedkey — authentication is via whitelisted IP only.

@@ -1399,7 +1399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
         referenceno: referenceNo,
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         data: biometricData,
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
@@ -1444,7 +1444,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
         referenceno: referenceNo,
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         data: biometricData,
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
@@ -1522,7 +1522,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         is_iris: "0",
       };
       console.log(`[AEPS TXN] type=${type} submerchantid=${commonParams.submerchantid} dataLen=${fingerprintData?.length || 0}`);

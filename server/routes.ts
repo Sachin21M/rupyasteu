@@ -1305,21 +1305,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Called by the WebView when PaySprint redirects the user away from merchantkyc.com.
-  // This is a reliable "user completed the PaySprint flow" signal — distinct from the user
-  // pressing our own back button. We trust it and mark KYC as COMPLETED immediately.
-  // The is_new=0 API check is unreliable: PaySprint still returns a URL even after the
-  // "Retailer Successfully Onboard" page because bank activation is a background process.
+  // We first try to verify completion with PaySprint (response_code=2).
+  // If PaySprint confirms → COMPLETED (strong signal).
+  // If PaySprint does not yet confirm (response_code≠2) → still mark COMPLETED because:
+  //   - PaySprint's background bank activation can lag the redirect by minutes
+  //   - This signal is fired only when the WebView navigates to a non-PaySprint URL,
+  //     which only happens after the PaySprint "Retailer Successfully Onboard" page
+  //   - Silent fallback is better than leaving the merchant stuck on PENDING forever
+  // The false-positive bug was in /api/aeps/kyc-status polling (now removed),
+  // not in this endpoint which is only triggered by a genuine WebView navigation event.
   app.post("/api/aeps/kyc-webview-complete", authMiddleware, async (req: Request, res: Response) => {
     try {
       const merchant = await storage.getAepsMerchant((req as any).userId);
       if (!merchant) return res.status(404).json({ error: "Merchant not found" });
 
-      if (merchant.kycStatus !== "COMPLETED") {
-        await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
-        console.log(`[KYC] WebView completion signal received — marking merchant ${merchant.merchantCode} as COMPLETED`);
+      if (merchant.kycStatus === "COMPLETED") {
+        return res.json({ success: true, kycStatus: "COMPLETED", verified: true });
       }
 
-      res.json({ success: true, kycStatus: "COMPLETED" });
+      const user = await storage.getUser((req as any).userId);
+      const safeCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
+
+      let psVerified = false;
+      try {
+        if (user) {
+          const verifyResult = await aepsService.getOnboardingUrl({
+            merchantCode: safeCode,
+            mobile: user.phone,
+            isNew: false,
+          });
+          psVerified = verifyResult.response_code === 2;
+          console.log(`[KYC-WebView] merchant=${safeCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psVerified=${psVerified}`);
+        }
+      } catch (verifyErr: any) {
+        console.warn(`[KYC-WebView] PaySprint verify failed for ${safeCode}: ${verifyErr.message} — trusting WebView signal`);
+      }
+
+      // Mark COMPLETED regardless: WebView navigation-away is a trusted app-side signal.
+      // psVerified=true means PaySprint also confirmed; psVerified=false means bank activation
+      // is still pending on PaySprint's side (normal — can take minutes).
+      await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
+      console.log(`[KYC-WebView] Marked ${safeCode} COMPLETED (psVerified=${psVerified})`);
+
+      res.json({ success: true, kycStatus: "COMPLETED", verified: psVerified });
     } catch (error) {
       console.error("KYC webview complete error:", error);
       res.status(500).json({ error: "Failed to update KYC status" });

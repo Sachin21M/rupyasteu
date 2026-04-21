@@ -1227,9 +1227,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/onboard", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { merchantCode } = req.body;
-      if (!merchantCode) {
+      const rawCode = req.body.merchantCode;
+      if (!rawCode) {
         return res.status(400).json({ error: "Merchant code is required" });
+      }
+      const merchantCode = String(rawCode).replace(/[^a-zA-Z0-9]/g, "");
+      if (!merchantCode) {
+        return res.status(400).json({ error: "Merchant code must contain at least one alphanumeric character" });
       }
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
@@ -1286,7 +1290,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/onboard/complete", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { merchantCode } = req.body;
+      const rawCode = req.body.merchantCode;
+      const sanitizedCode = rawCode ? String(rawCode).replace(/[^a-zA-Z0-9]/g, "") : undefined;
       const existing = await storage.getAepsMerchant((req as any).userId);
       if (!existing) return res.status(404).json({ error: "Merchant not found. Start onboarding first." });
       if (existing.kycStatus === "COMPLETED") {
@@ -1295,7 +1300,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
-      const mCode = merchantCode || existing.merchantCode;
+      const mCode = sanitizedCode || existing.merchantCode.replace(/[^a-zA-Z0-9]/g, "") || existing.merchantCode;
       const verifyResult = await aepsService.getOnboardingUrl({
         merchantCode: mCode,
         mobile: user.phone,
@@ -1309,7 +1314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (psCompleted) {
         const updates: Record<string, string> = { kycStatus: "COMPLETED" };
-        if (merchantCode) updates.merchantCode = merchantCode;
+        if (sanitizedCode) updates.merchantCode = sanitizedCode;
         await storage.updateAepsMerchant((req as any).userId, updates);
         res.json({ success: true, kycStatus: "COMPLETED" });
       } else {
@@ -1399,7 +1404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
         referenceno: referenceNo,
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         data: aepsService.encryptPidForPaySprint(biometricData),
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
@@ -1444,7 +1449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
         referenceno: referenceNo,
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         data: aepsService.encryptPidForPaySprint(biometricData),
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
@@ -1522,7 +1527,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
-        submerchantid: merchant.merchantCode || PAYSPRINT_PARTNER_ID,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         is_iris: "0",
       };
       console.log(`[AEPS TXN] type=${type} submerchantid=${commonParams.submerchantid} dataLen=${fingerprintData?.length || 0}`);

@@ -1156,7 +1156,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Real PaySprint KYC status check — always calls PaySprint, never trusts local DB alone
+  // Returns stored DB KYC status — does NOT poll PaySprint on every request.
+  // KYC is marked COMPLETED only through trusted signals (kyc-webview-complete, onboard/complete, admin).
   app.get("/api/aeps/kyc-status", authMiddleware, async (req: Request, res: Response) => {
     try {
       const merchant = await storage.getAepsMerchant((req as any).userId);

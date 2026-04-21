@@ -1165,10 +1165,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = new Date().toISOString().split("T")[0];
       const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);
 
-      // If admin has already approved this merchant (COMPLETED), never downgrade it.
-      // PaySprint's is_new=0 check cannot reliably distinguish "form done, eKYC pending"
-      // from "session expired" — so once COMPLETED is set (by admin approval or PaySprint
-      // callback), it stays COMPLETED.
       if (merchant.kycStatus === "COMPLETED") {
         return res.json({
           kycStatus: "COMPLETED",
@@ -1178,54 +1174,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const user = await storage.getUser((req as any).userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
+      // Do NOT call PaySprint here — PaySprint's is_new=0 response is unreliable and
+      // causes false-positive COMPLETED marking (response_code=1 with no URL is returned
+      // for brand-new merchants who haven't done KYC yet). KYC is only marked COMPLETED
+      // through two trusted signals:
+      //   1. /api/aeps/kyc-webview-complete — fired by the app when the WebView navigates
+      //      away from merchantkyc.com (reliable "user completed the form" signal)
+      //   2. /api/aeps/onboard/complete — explicit user action + PaySprint response_code=2 only
+      //   3. Admin approve button in the admin panel
+      // Just return stored DB state and the stored KYC URL.
+      const storedUrl = merchant.kycRedirectUrl || null;
+      const sessionExpired = !storedUrl && merchant.kycStatus !== "FAILED";
 
-      // Call PaySprint with is_new=false to check if merchant is already registered.
-      // Always strip non-alphanumeric from the stored code before sending to PaySprint.
-      const safeCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
-      const verifyResult = await aepsService.getOnboardingUrl({
-        merchantCode: safeCode,
-        mobile: user.phone,
-        isNew: false,
-      });
-
-      const msg = (verifyResult.message || "").toLowerCase();
-
-      // response_code 2 = "already registered/completed" on PaySprint's side
-      // response_code 1 with no redirecturl = also completed (some PaySprint versions)
-      // response_code 0 + "already registered" + no URL = form done, eKYC activation pending
-      //   → treat as completed so merchant can proceed to do AEPS (which IS the eKYC step)
-      const psCompleted =
-        verifyResult.response_code === 2 ||
-        (verifyResult.response_code === 1 && !(verifyResult.redirecturl || verifyResult.data?.redirecturl)) ||
-        (verifyResult.response_code === 0 && (msg.includes("already registered") || msg.includes("already exist")) && !(verifyResult.redirecturl || verifyResult.data?.redirecturl));
-
-      console.log(`[KYC-Status] merchant=${merchant.merchantCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psCompleted=${psCompleted}`);
-
-      // Only upgrade PENDING→COMPLETED, never downgrade COMPLETED→PENDING
-      if (psCompleted && merchant.kycStatus !== "COMPLETED") {
-        await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
-      }
-
-      // Only return a URL if PaySprint actively provides one right now.
-      // Never fall back to stored URLs — they expire and cause silent failures in the WebView.
-      const freshUrl = !psCompleted
-        ? (verifyResult.redirecturl || verifyResult.data?.redirecturl || null)
-        : null;
+      console.log(`[KYC-Status] merchant=${merchant.merchantCode} dbStatus=${merchant.kycStatus} hasUrl=${!!storedUrl}`);
 
       res.json({
-        kycStatus: psCompleted ? "COMPLETED" : "PENDING",
-        onboarded: psCompleted,
+        kycStatus: merchant.kycStatus || "PENDING",
+        onboarded: false,
         dailyAuthenticated: dailyAuth?.authenticated || false,
         twoFaRegistered: merchant.twoFaRegistered || false,
-        redirectUrl: freshUrl || undefined,
-        sessionExpired: !psCompleted && !freshUrl,
-        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message },
+        redirectUrl: storedUrl || undefined,
+        sessionExpired,
       });
     } catch (error) {
       console.error("KYC status check error:", error);
-      res.status(500).json({ error: "Failed to check KYC status from PaySprint" });
+      res.status(500).json({ error: "Failed to check KYC status" });
     }
   });
 
@@ -1310,11 +1283,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mobile: user.phone,
       });
 
-      // response_code 2 = already registered on PaySprint (COMPLETED)
-      // response_code 1 with no redirecturl = also completed on some PaySprint versions
-      const psCompleted =
-        verifyResult.response_code === 2 ||
-        (verifyResult.response_code === 1 && !verifyResult.redirecturl);
+      // Only trust response_code === 2 as a definitive "already registered" signal.
+      // response_code === 1 with no URL is NOT a reliable completed signal — PaySprint
+      // returns this for new merchants too, causing false-positive COMPLETED marking.
+      const psCompleted = verifyResult.response_code === 2;
+
+      console.log(`[Onboard-Complete] merchant=${mCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psCompleted=${psCompleted}`);
 
       if (psCompleted) {
         const updates: Record<string, string> = { kycStatus: "COMPLETED" };

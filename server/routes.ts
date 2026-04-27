@@ -14,6 +14,11 @@ const PAYEE_UPI_ID = process.env.PAYEE_UPI_ID || "44789692406@sbi";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "rupyasetu@2026";
 
+// Server-side store for Aadhaar eKYC OTP request IDs.
+// Keyed by userId; entries expire after 10 minutes to match OTP validity windows.
+const kycOtpStore = new Map<string, { otpreqid: string; aadhaarNumber: string; expiresAt: number }>();
+const KYC_OTP_TTL_MS = 10 * 60 * 1000;
+
 function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -1360,6 +1365,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("KYC webview complete error:", error);
       res.status(500).json({ error: "Failed to update KYC status" });
+    }
+  });
+
+  // Aadhaar eKYC OTP — Step 1: send OTP to the Aadhaar-linked mobile.
+  // Returns success only; the otpreqid is stored server-side and never sent to the client.
+  app.post("/api/aeps/kyc/send-otp", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId as string;
+      const { aadhaarNumber } = req.body as { aadhaarNumber?: string };
+      if (!aadhaarNumber || !/^\d{12}$/.test(aadhaarNumber)) {
+        return res.status(400).json({ error: "Valid 12-digit Aadhaar number is required" });
+      }
+
+      const merchant = await storage.getAepsMerchant(userId);
+      if (!merchant) return res.status(404).json({ error: "Merchant account not found" });
+
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (merchant.kycStatus === "COMPLETED") {
+        return res.json({ success: true, alreadyVerified: true, message: "KYC is already completed." });
+      }
+
+      // Remove any stale entry for this user before making the request
+      kycOtpStore.delete(userId);
+
+      const result = await aepsService.sendKycOtp({
+        adhaarnumber: aadhaarNumber,
+        merchantcode: merchant.merchantCode,
+        mobile: merchant.phone || user.phone,
+      });
+
+      if (!result.status) {
+        console.error(`[KYC-SendOTP] Failed: code=${result.response_code} msg="${result.message}"`);
+        return res.status(400).json({ error: result.message || "Failed to send OTP. Please try again." });
+      }
+
+      const otpreqid: string = (result.data?.otpreqid ?? result.data?.otp_req_id ?? "") as string;
+      if (!otpreqid) {
+        console.error(`[KYC-SendOTP] No otpreqid in response: ${JSON.stringify(result).substring(0, 200)}`);
+        return res.status(500).json({ error: "OTP sent but request ID missing from PaySprint response." });
+      }
+
+      kycOtpStore.set(userId, { otpreqid, aadhaarNumber, expiresAt: Date.now() + KYC_OTP_TTL_MS });
+      console.log(`[KYC-SendOTP] OTP sent for merchant=${merchant.merchantCode}`);
+
+      res.json({ success: true, message: result.message || "OTP sent to Aadhaar-linked mobile number." });
+    } catch (error: any) {
+      console.error("KYC send-otp error:", error);
+      res.status(500).json({ error: "Failed to send KYC OTP. Please try again." });
+    }
+  });
+
+  // Aadhaar eKYC OTP — Step 2: verify OTP and mark KYC as COMPLETED on success.
+  // Uses the server-side otpreqid stored from send-otp — client cannot supply or modify it.
+  app.post("/api/aeps/kyc/verify-otp", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId as string;
+      const { otp } = req.body as { otp?: string };
+      if (!otp || !/^\d{4,8}$/.test(otp)) {
+        return res.status(400).json({ error: "Valid OTP is required" });
+      }
+
+      const entry = kycOtpStore.get(userId);
+      if (!entry) {
+        return res.status(400).json({ error: "No pending OTP request found. Please request a new OTP." });
+      }
+      if (Date.now() > entry.expiresAt) {
+        kycOtpStore.delete(userId);
+        return res.status(400).json({ error: "OTP has expired. Please request a new one." });
+      }
+
+      const merchant = await storage.getAepsMerchant(userId);
+      if (!merchant) return res.status(404).json({ error: "Merchant account not found" });
+
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (merchant.kycStatus === "COMPLETED") {
+        kycOtpStore.delete(userId);
+        return res.json({ success: true, kycStatus: "COMPLETED", message: "KYC already completed." });
+      }
+
+      const result = await aepsService.verifyKycOtp({
+        otpreqid: entry.otpreqid,
+        otp,
+        merchantcode: merchant.merchantCode,
+        adhaarnumber: entry.aadhaarNumber,
+        mobile: merchant.phone || user.phone,
+      });
+
+      if (!result.status) {
+        // Leave the OTP entry in the store so the user can retry with a corrected OTP
+        // without having to request a whole new OTP first.
+        console.error(`[KYC-VerifyOTP] Failed: code=${result.response_code} msg="${result.message}"`);
+        return res.status(400).json({ error: result.message || "OTP verification failed. Please try again." });
+      }
+
+      // OTP verified — remove the spent entry and mark KYC completed.
+      kycOtpStore.delete(userId);
+      await storage.updateAepsMerchant(userId, { kycStatus: "COMPLETED" });
+      console.log(`[KYC-VerifyOTP] Merchant ${merchant.merchantCode} marked COMPLETED via eKYC OTP`);
+
+      res.json({ success: true, kycStatus: "COMPLETED", message: "Aadhaar eKYC verified successfully!" });
+    } catch (error: any) {
+      console.error("KYC verify-otp error:", error);
+      res.status(500).json({ error: "Failed to verify KYC OTP. Please try again." });
     }
   });
 

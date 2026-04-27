@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -6,206 +6,123 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+  ScrollView,
 } from "react-native";
-import { useLocalSearchParams, router } from "expo-router";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { kycWebviewComplete } from "@/lib/api";
-import type { WebView as WebViewClass, WebViewNavigation, WebViewErrorEvent } from "react-native-webview";
+import { aepsKycSendOtp, aepsKycVerifyOtp } from "@/lib/api";
 
-const NativeWebView =
-  Platform.OS !== "web"
-    ? (require("react-native-webview") as { WebView: typeof WebViewClass }).WebView
-    : null;
+type Step = "aadhaar" | "otp" | "success";
 
-const KYC_DOMAIN = "merchantkyc.com";
-
-
-type PermissionState = "requesting" | "granted" | "denied";
-
-export default function KycWebViewScreen() {
-  const { url } = useLocalSearchParams<{ url: string }>();
+export default function KycOtpScreen() {
   const insets = useSafeAreaInsets();
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
-  const [permState, setPermState] = useState<PermissionState>("requesting");
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [webviewLoading, setWebviewLoading] = useState(true);
-  const [webviewError, setWebviewError] = useState<string | null>(null);
-  const completedRef = useRef(false);
+  const [step, setStep] = useState<Step>("aadhaar");
+  const [aadhaarNumber, setAadhaarNumber] = useState("");
+  const [otp, setOtp] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [maskedAadhaar, setMaskedAadhaar] = useState("");
 
-  useEffect(() => {
-    requestLocation();
-  }, []);
-
-  async function requestLocation() {
-    setPermState("requesting");
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
-        try {
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        } catch {
-          // Position unavailable (emulator) — still proceed; WebView native
-          // geolocation will attempt its own resolution
-        }
-        setPermState("granted");
-      } else {
-        setPermState("denied");
-      }
-    } catch {
-      // Unexpected error requesting permission — treat as denied
-      setPermState("denied");
-    }
-  }
-
-  function handleNavigationStateChange(state: WebViewNavigation) {
-    if (!state.url || completedRef.current) return;
-    try {
-      const host = new URL(state.url).hostname;
-      const isOnKycDomain = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
-      if (!isOnKycDomain && state.url.startsWith("http")) {
-        completedRef.current = true;
-        // PaySprint redirected the user away — this is the reliable "flow completed" signal.
-        // Tell the backend to mark KYC as COMPLETED. Fire-and-forget; router.back() runs
-        // immediately so the user doesn't wait, and the DB update lands in the background.
-        kycWebviewComplete().catch(() => {});
-        router.back();
-      }
-    } catch {
-      // URL parsing error — ignore
-    }
-  }
+  const otpInputRef = useRef<TextInput>(null);
 
   function handleBack() {
-    router.back();
+    if (step === "otp") {
+      setStep("aadhaar");
+      setOtp("");
+    } else {
+      router.back();
+    }
   }
 
-  function handleWebViewError(e: WebViewErrorEvent) {
-    const desc = e.nativeEvent?.description || "";
-    const domain = e.nativeEvent?.url || "";
-    console.warn("[KYC WebView] Load error:", desc, domain);
-    setWebviewLoading(false);
-    setWebviewError("Your KYC session has expired or is unavailable. Please go back and ask your admin to regenerate your KYC link, then try again immediately.");
+  async function handleSendOtp() {
+    const clean = aadhaarNumber.replace(/\s/g, "");
+    if (!/^\d{12}$/.test(clean)) {
+      Alert.alert("Invalid Aadhaar", "Please enter a valid 12-digit Aadhaar number.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await aepsKycSendOtp(clean);
+      if (result.alreadyVerified) {
+        Alert.alert("Already Verified", "Your KYC is already completed.", [
+          { text: "OK", onPress: () => router.back() },
+        ]);
+        return;
+      }
+      setMaskedAadhaar("XXXX-XXXX-" + clean.slice(-4));
+      setStep("otp");
+      setTimeout(() => otpInputRef.current?.focus(), 300);
+    } catch (err: any) {
+      Alert.alert("Failed to Send OTP", err.message || "Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  // Inject coords override on Android only — iOS WebView resolves geolocation via
-  // native CoreLocation; Android WebView benefits from the pre-fetched coord shim.
-  const injectedJs =
-    Platform.OS === "android" && coords
-      ? `(function(){var loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};navigator.geolocation.getCurrentPosition=function(s){s(loc);};navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(loc);},50);return 1;}; })();true;`
-      : undefined;
+  async function handleVerifyOtp() {
+    const trimmed = otp.trim();
+    if (!/^\d{4,8}$/.test(trimmed)) {
+      Alert.alert("Invalid OTP", "Please enter the OTP received on your Aadhaar-linked mobile.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await aepsKycVerifyOtp(trimmed);
+      if (result.success && (result.kycStatus === "COMPLETED" || !result.kycStatus)) {
+        setStep("success");
+      } else {
+        Alert.alert("Verification Failed", result.message || result.error || "OTP did not match. Please try again.");
+      }
+    } catch (err: any) {
+      Alert.alert("Verification Failed", err.message || "Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleResendOtp() {
+    setOtp("");
+    setStep("aadhaar");
+  }
 
   const Header = () => (
     <View style={[styles.header, { paddingTop: topPadding }]}>
-      <Pressable onPress={handleBack} style={styles.backBtn} testID="kyc-back">
-        <Ionicons name="arrow-back" size={24} color={Colors.text} />
-      </Pressable>
-      <Text style={styles.headerTitle}>KYC Setup</Text>
+      {step !== "success" ? (
+        <Pressable onPress={handleBack} style={styles.backBtn} testID="kyc-back">
+          <Ionicons name="arrow-back" size={24} color={Colors.text} />
+        </Pressable>
+      ) : (
+        <View style={{ width: 44 }} />
+      )}
+      <Text style={styles.headerTitle}>Aadhaar eKYC</Text>
       <View style={{ width: 44 }} />
     </View>
   );
 
-  if (permState === "requesting") {
+  if (step === "success") {
     return (
       <View style={styles.container}>
         <Header />
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Requesting location permission…</Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (permState === "denied") {
-    return (
-      <View style={styles.container}>
-        <Header />
-        <View style={styles.centered}>
-          <View style={styles.iconCircle}>
-            <Ionicons name="location-outline" size={40} color={Colors.primary} />
+          <View style={[styles.iconCircle, { backgroundColor: Colors.successLight }]}>
+            <Ionicons name="shield-checkmark" size={44} color={Colors.success} />
           </View>
-          <Text style={styles.deniedTitle}>Location Access Needed</Text>
-          <Text style={styles.deniedText}>
-            PaySprint KYC verification requires your location to confirm your
-            presence. Please allow location access and tap Retry.
+          <Text style={styles.successTitle}>KYC Verified!</Text>
+          <Text style={styles.successText}>
+            Your Aadhaar eKYC is complete. Your AEPS merchant account is now active.
           </Text>
           <Pressable
-            style={styles.retryBtn}
-            onPress={() => {
-              requestLocation();
-            }}
-            testID="kyc-retry-location"
+            style={styles.primaryBtn}
+            onPress={() => router.back()}
+            testID="kyc-done-btn"
           >
-            <Text style={styles.retryBtnText}>Retry</Text>
-          </Pressable>
-          <Pressable style={styles.cancelLink} onPress={handleBack}>
-            <Text style={styles.cancelLinkText}>Cancel</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  if (Platform.OS === "web" || !NativeWebView) {
-    return (
-      <View style={styles.container}>
-        <Header />
-        <View style={styles.centered}>
-          <Ionicons name="globe-outline" size={48} color={Colors.textSecondary} />
-          <Text style={styles.loadingText}>
-            Please open this feature on your mobile device.
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  // Security: only allow merchantkyc.com (exact or subdomain)
-  let isValidKycUrl = false;
-  try {
-    const host = new URL(url ?? "").hostname;
-    isValidKycUrl = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
-  } catch {
-    isValidKycUrl = false;
-  }
-
-  if (!isValidKycUrl) {
-    return (
-      <View style={styles.container}>
-        <Header />
-        <View style={styles.centered}>
-          <Ionicons name="warning-outline" size={48} color="#E53E3E" />
-          <Text style={styles.deniedTitle}>Invalid KYC URL</Text>
-          <Text style={styles.deniedText}>
-            The KYC link appears to be invalid. Please go back and try again.
-          </Text>
-          <Pressable style={styles.cancelLink} onPress={handleBack}>
-            <Text style={styles.cancelLinkText}>Go Back</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  if (webviewError) {
-    return (
-      <View style={styles.container}>
-        <Header />
-        <View style={styles.centered}>
-          <View style={[styles.iconCircle, { backgroundColor: "#FEE2E2" }]}>
-            <Ionicons name="time-outline" size={40} color="#EF4444" />
-          </View>
-          <Text style={styles.deniedTitle}>Session Expired</Text>
-          <Text style={styles.deniedText}>{webviewError}</Text>
-          <Pressable style={styles.cancelLink} onPress={handleBack}>
-            <Text style={[styles.cancelLinkText, { color: Colors.primary }]}>Go Back</Text>
+            <Text style={styles.primaryBtnText}>Done</Text>
           </Pressable>
         </View>
       </View>
@@ -213,40 +130,134 @@ export default function KycWebViewScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
       <Header />
-      <View style={styles.webviewContainer}>
-        {webviewLoading && (
-          <View style={styles.webviewOverlay}>
-            <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.loadingText}>Loading KYC page…</Text>
-          </View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.stepIndicator}>
+          <View style={[styles.stepDot, step === "aadhaar" && styles.stepDotActive]} />
+          <View style={styles.stepLine} />
+          <View style={[styles.stepDot, step === "otp" && styles.stepDotActive]} />
+        </View>
+
+        {step === "aadhaar" ? (
+          <>
+            <View style={styles.iconCircle}>
+              <MaterialCommunityIcons name="card-account-details-outline" size={40} color={Colors.primary} />
+            </View>
+            <Text style={styles.stepTitle}>Enter Aadhaar Number</Text>
+            <Text style={styles.stepSubtitle}>
+              An OTP will be sent to your Aadhaar-linked mobile number for verification.
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Aadhaar Number</Text>
+              <TextInput
+                style={styles.input}
+                value={aadhaarNumber}
+                onChangeText={(t) => setAadhaarNumber(t.replace(/\D/g, "").slice(0, 12))}
+                placeholder="Enter 12-digit Aadhaar"
+                placeholderTextColor={Colors.textTertiary}
+                keyboardType="number-pad"
+                maxLength={12}
+                testID="aadhaar-input"
+                returnKeyType="done"
+                onSubmitEditing={handleSendOtp}
+              />
+              <Text style={styles.inputHint}>
+                {aadhaarNumber.length}/12 digits
+              </Text>
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                pressed && { opacity: 0.85 },
+                (loading || aadhaarNumber.replace(/\s/g, "").length !== 12) && styles.btnDisabled,
+              ]}
+              onPress={handleSendOtp}
+              disabled={loading || aadhaarNumber.replace(/\s/g, "").length !== 12}
+              testID="send-otp-btn"
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Send OTP</Text>
+              )}
+            </Pressable>
+
+            <View style={styles.infoBox}>
+              <Ionicons name="information-circle-outline" size={16} color={Colors.textSecondary} />
+              <Text style={styles.infoText}>
+                Your Aadhaar number is sent securely to UIDAI via PaySprint and is never stored by this app.
+              </Text>
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.iconCircle}>
+              <Ionicons name="keypad-outline" size={40} color={Colors.primary} />
+            </View>
+            <Text style={styles.stepTitle}>Enter OTP</Text>
+            <Text style={styles.stepSubtitle}>
+              An OTP has been sent to the mobile number linked with Aadhaar {maskedAadhaar}.
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>OTP</Text>
+              <TextInput
+                ref={otpInputRef}
+                style={[styles.input, styles.otpInput]}
+                value={otp}
+                onChangeText={(t) => setOtp(t.replace(/\D/g, "").slice(0, 8))}
+                placeholder="Enter OTP"
+                placeholderTextColor={Colors.textTertiary}
+                keyboardType="number-pad"
+                maxLength={8}
+                testID="otp-input"
+                returnKeyType="done"
+                onSubmitEditing={handleVerifyOtp}
+                secureTextEntry={false}
+              />
+            </View>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                pressed && { opacity: 0.85 },
+                (loading || otp.length < 4) && styles.btnDisabled,
+              ]}
+              onPress={handleVerifyOtp}
+              disabled={loading || otp.length < 4}
+              testID="verify-otp-btn"
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Verify OTP</Text>
+              )}
+            </Pressable>
+
+            <Pressable style={styles.resendLink} onPress={handleResendOtp} testID="resend-otp-btn">
+              <Text style={styles.resendLinkText}>Didn't receive OTP? Resend</Text>
+            </Pressable>
+          </>
         )}
-        <NativeWebView
-          source={{ uri: url ?? "" }}
-          geolocationEnabled
-          javaScriptEnabled
-          domStorageEnabled
-          allowsFullscreenVideo
-          mediaPlaybackRequiresUserAction={false}
-          setSupportMultipleWindows={false}
-          mediaCapturePermissionGrantType="grant"
-          injectedJavaScriptBeforeContentLoaded={injectedJs}
-          onNavigationStateChange={handleNavigationStateChange}
-          onLoadEnd={() => setWebviewLoading(false)}
-          onError={handleWebViewError}
-          style={styles.webview}
-          testID="kyc-webview"
-        />
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: "row",
@@ -268,15 +279,46 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
     fontSize: 17,
-    fontWeight: "600",
+    fontFamily: "Inter_600SemiBold",
     color: Colors.text,
+  },
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 32,
+    paddingBottom: 40,
+    alignItems: "center",
+    gap: 20,
+  },
+  stepIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 0,
+    marginBottom: 8,
+  },
+  stepDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.border,
+  },
+  stepDotActive: {
+    backgroundColor: Colors.primary,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  stepLine: {
+    width: 48,
+    height: 2,
+    backgroundColor: Colors.border,
+    marginHorizontal: 6,
   },
   centered: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,
-    gap: 12,
+    gap: 16,
   },
   iconCircle: {
     width: 80,
@@ -285,57 +327,111 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryLight,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 8,
   },
-  loadingText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    textAlign: "center",
-    marginTop: 12,
-  },
-  deniedTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+  stepTitle: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
     color: Colors.text,
     textAlign: "center",
   },
-  deniedText: {
+  stepSubtitle: {
     fontSize: 14,
+    fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
     textAlign: "center",
     lineHeight: 20,
   },
-  retryBtn: {
-    marginTop: 8,
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 40,
-    paddingVertical: 14,
+  inputGroup: {
+    width: "100%",
+    gap: 6,
   },
-  retryBtnText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
+  inputLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.text,
   },
-  cancelLink: {
-    paddingVertical: 8,
-  },
-  cancelLinkText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  webviewContainer: {
-    flex: 1,
-    position: "relative",
-  },
-  webviewOverlay: {
-    ...StyleSheet.absoluteFillObject,
+  input: {
+    width: "100%",
     backgroundColor: Colors.surface,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    fontFamily: "Inter_400Regular",
+    color: Colors.text,
+  },
+  otpInput: {
+    letterSpacing: 4,
+    fontSize: 20,
+    fontFamily: "Inter_600SemiBold",
+    textAlign: "center",
+  },
+  inputHint: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textTertiary,
+    textAlign: "right",
+  },
+  primaryBtn: {
+    width: "100%",
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    paddingVertical: 16,
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 10,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  webview: {
+  btnDisabled: {
+    opacity: 0.5,
+  },
+  primaryBtnText: {
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
+  },
+  resendLink: {
+    paddingVertical: 8,
+  },
+  resendLinkText: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.primary,
+  },
+  infoBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+    padding: 14,
+    width: "100%",
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  infoText: {
     flex: 1,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  successTitle: {
+    fontSize: 24,
+    fontFamily: "Inter_700Bold",
+    color: Colors.success,
+    textAlign: "center",
+  },
+  successText: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
   },
 });

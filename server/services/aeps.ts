@@ -337,6 +337,15 @@ async function makeAepsRequest(
 }
 
 function simulateAepsResponse(endpoint: string, payload: Record<string, unknown>): AepsResponse {
+  if (endpoint.includes("sendotp")) {
+    return {
+      status: true, response_code: 1, message: "OTP sent successfully to Aadhaar-linked mobile",
+      data: { otpreqid: `SIM_OTP_${Date.now()}` },
+    };
+  }
+  if (endpoint.includes("verifyotp")) {
+    return { status: true, response_code: 1, message: "OTP verified successfully" };
+  }
   if (endpoint.includes("banklist")) {
     return {
       status: true, response_code: 1, message: "Bank list fetched",
@@ -574,4 +583,26 @@ export async function checkAepsTransactionStatus(params: {
   referenceno: string;
 }): Promise<AepsResponse> {
   return makeAepsRequest("/service/aeps/cashwithdraw/status", params);
+}
+
+export async function sendKycOtp(params: {
+  adhaarnumber: string;
+  merchantcode: string;
+  mobile: string;
+  latitude?: string;
+  longitude?: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/kyc/aadharkyc/sendotp", params);
+}
+
+export async function verifyKycOtp(params: {
+  otpreqid: string;
+  otp: string;
+  merchantcode: string;
+  adhaarnumber: string;
+  mobile: string;
+  latitude?: string;
+  longitude?: string;
+}): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/kyc/aadharkyc/verifyotp", params);
 }

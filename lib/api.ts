@@ -212,6 +212,22 @@ export async function kycWebviewComplete() {
   return handleAepsResponse(res);
 }
 
+export async function aepsKycSendOtp(aadhaarNumber: string) {
+  const res = await authFetch("/api/aeps/kyc/send-otp", {
+    method: "POST",
+    body: JSON.stringify({ aadhaarNumber }),
+  });
+  return handleAepsResponse(res);
+}
+
+export async function aepsKycVerifyOtp(otp: string) {
+  const res = await authFetch("/api/aeps/kyc/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ otp }),
+  });
+  return handleAepsResponse(res);
+}
+
 export async function getAepsTransactionStatus(id: string) {
   const res = await authFetch(`/api/aeps/transaction/${id}/status`);
   return handleAepsResponse(res);

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 import Colors from "@/constants/colors";
 import { kycWebviewComplete } from "@/lib/api";
 
@@ -28,6 +29,12 @@ export default function KycWebviewScreen() {
   const completedRef = useRef(false);
 
   const decodedUrl = url ? decodeURIComponent(url) : "";
+
+  useEffect(() => {
+    if (Platform.OS !== "web") {
+      Location.requestForegroundPermissionsAsync().catch(() => {});
+    }
+  }, []);
 
   async function handleFormComplete(fromCallback = false) {
     if (completedRef.current) return;
@@ -224,6 +231,7 @@ export default function KycWebviewScreen() {
             }}
             javaScriptEnabled
             domStorageEnabled
+            geolocationEnabled
             startInLoadingState
             testID="kyc-webview"
           />

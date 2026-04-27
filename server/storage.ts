@@ -235,6 +235,7 @@ export interface IStorage {
   getAepsMerchantById(id: string): Promise<AepsMerchant | undefined>;
   getAepsMerchantByCode(merchantCode: string): Promise<AepsMerchant | undefined>;
   getAllAepsMerchants(): Promise<AepsMerchant[]>;
+  getAllFailedMerchants(): Promise<AepsMerchant[]>;
   createAepsMerchant(userId: string, merchantCode: string, bankPipes: string, extra?: { phone?: string; firmName?: string; kycRedirectUrl?: string; createdBy?: string }): Promise<AepsMerchant>;
   updateAepsMerchant(userId: string, data: Partial<AepsMerchant>): Promise<AepsMerchant | undefined>;
   deleteAepsMerchant(id: string): Promise<boolean>;
@@ -591,6 +592,13 @@ export class PgStorage implements IStorage {
 
   async getAllAepsMerchants(): Promise<AepsMerchant[]> {
     const result = await pool.query("SELECT * FROM aeps_merchants ORDER BY created_at DESC");
+    return result.rows.map(rowToAepsMerchant);
+  }
+
+  async getAllFailedMerchants(): Promise<AepsMerchant[]> {
+    const result = await pool.query(
+      "SELECT * FROM aeps_merchants WHERE kyc_status = 'FAILED' AND (kyc_redirect_url IS NULL OR kyc_redirect_url = '') ORDER BY created_at ASC"
+    );
     return result.rows.map(rowToAepsMerchant);
   }
 

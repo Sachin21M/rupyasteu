@@ -178,6 +178,34 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
+  // One-time startup job: re-attempt onboarding for any merchant left in FAILED
+  // state with no KYC redirect URL (caused by the Task #79 auth regression).
+  // Runs asynchronously so it never delays server startup.
+  (async () => {
+    try {
+      await new Promise(r => setTimeout(r, 3000)); // wait 3 s for DB pool to warm up
+      const failedMerchants = await storage.getAllFailedMerchants();
+      if (failedMerchants.length === 0) {
+        console.log("[Startup] No FAILED merchants need re-onboarding.");
+        return;
+      }
+      console.log(`[Startup] Re-triggering onboarding for ${failedMerchants.length} FAILED merchant(s)...`);
+      for (const m of failedMerchants) {
+        const user = await storage.getUser(m.userId);
+        const phone = user?.phone || m.phone;
+        if (!phone) {
+          console.warn(`[Startup] Skipping merchant ${m.merchantCode} — no phone found`);
+          continue;
+        }
+        await retryOnboarding(m, phone, m.firmName || "RupyaSetu");
+        await new Promise(r => setTimeout(r, 500)); // small delay between calls
+      }
+      console.log("[Startup] FAILED merchant re-onboarding sweep complete.");
+    } catch (err: any) {
+      console.error("[Startup] Re-onboarding sweep error:", err.message);
+    }
+  })();
+
   app.post("/api/auth/send-otp", async (req: Request, res: Response) => {
     try {
       const parsed = sendOtpSchema.safeParse(req.body);

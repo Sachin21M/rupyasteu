@@ -129,7 +129,7 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const reqid = generateUniqueReqId();
   const payload = {
     timestamp,
-    partnerid: PAYSPRINT_PARTNER_ID, // lowercase — matches body field name
+    partnerId: PAYSPRINT_PARTNER_ID, // camelCase — PaySprint live API reads this claim as-is
     reqid: String(reqid),
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
@@ -237,15 +237,21 @@ async function makeAepsRequest(
     }
 
     const authorisedKey = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+    // Authorisedkey is only required by the AEPS transaction service (/service/aeps/).
+    // The onboarding service (/service/onboard/) does NOT accept this header —
+    // sending it causes HTTP 401 code=11 "Authentication failed !! Ip Not Whitelisted".
+    const isAepsEndpoint = endpoint.includes("/service/aeps/");
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
     };
-    if (authorisedKey) {
+    if (isAepsEndpoint && authorisedKey) {
       paysprintHeaders["Authorisedkey"] = authorisedKey;
-      console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey(len=${authorisedKey.length})`);
+      console.log(`[AEPS] Headers [aeps]: Token(len=${jwtToken.length}) Authorisedkey(len=${authorisedKey.length})`);
+    } else if (isAepsEndpoint && !authorisedKey) {
+      console.warn(`[AEPS] Headers [aeps]: Token(len=${jwtToken.length}) Authorisedkey=MISSING (PAYSPRINT_AUTHORIZED_KEY not set)`);
     } else {
-      console.warn(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey=MISSING (PAYSPRINT_AUTHORIZED_KEY not set)`);
+      console.log(`[AEPS] Headers [onboard]: Token(len=${jwtToken.length}) Authorisedkey=NOT_SENT (onboard endpoint)`);
     }
 
     let rawText: string;

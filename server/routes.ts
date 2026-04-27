@@ -1461,14 +1461,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Complete merchant onboarding first" });
       }
 
+      if (!aadhaarNumber) {
+        return res.status(400).json({ error: "Aadhaar number is required for 2FA authentication" });
+      }
+      const merchantCode2faAuth = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
+      if (!merchantCode2faAuth) {
+        return res.status(400).json({ error: "Merchant code not found — complete merchant onboarding first" });
+      }
+
       const _now2fa = new Date();
       const timestamp = `${_now2fa.getFullYear()}-${String(_now2fa.getMonth()+1).padStart(2,"0")}-${String(_now2fa.getDate()).padStart(2,"0")} ${String(_now2fa.getHours()).padStart(2,"0")}:${String(_now2fa.getMinutes()).padStart(2,"0")}:${String(_now2fa.getSeconds()).padStart(2,"0")}`;
       const referenceNo = `2FA${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
 
-      const merchantCode2faAuth = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
       const fullPayload = {
         accessmode: "Fingerprint",
-        adhaarnumber: aadhaarNumber || "",
+        adhaarnumber: aadhaarNumber,
         mobilenumber: user.phone,
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
@@ -1519,6 +1526,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!fingerprintData) {
         return res.status(400).json({ error: "Biometric data is required for AEPS transactions." });
       }
+      if (!aadhaarNumber) {
+        return res.status(400).json({ error: "Aadhaar number is required for AEPS transactions." });
+      }
+      const aepsMerchantCode = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
+      if (!aepsMerchantCode) {
+        return res.status(400).json({ error: "Merchant code not found — complete merchant onboarding first" });
+      }
 
       const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
       const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
@@ -1551,7 +1565,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
-        merchantcode: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
+        merchantcode: aepsMerchantCode,
         is_iris: "0",
       };
       console.log(`[AEPS TXN] type=${type} merchantcode=${commonParams.merchantcode} refid=${commonParams.refid} dataLen=${fingerprintData?.length || 0}`);

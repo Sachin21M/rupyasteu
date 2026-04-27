@@ -13,6 +13,20 @@ function resolveAesBytes(str: string): Buffer {
   return Buffer.from(s).slice(0, 16);
 }
 
+// Startup diagnostic — printed once when the module is first loaded.
+// Logs key/IV lengths and last-4 chars only (never the full secret).
+(function logAesConfig() {
+  const keyResolved = resolveAesBytes(AES_KEY);
+  const ivResolved  = resolveAesBytes(AES_IV);
+  const keyIsHex = AES_KEY.trim().length === 32 && /^[0-9a-fA-F]+$/.test(AES_KEY.trim());
+  const ivIsHex  = AES_IV.trim().length === 32  && /^[0-9a-fA-F]+$/.test(AES_IV.trim());
+  console.log(
+    `[AES CONFIG] keyLen=${keyResolved.length} ivLen=${ivResolved.length}` +
+    ` keyMode=${keyIsHex ? "hex32" : "ascii"} ivMode=${ivIsHex ? "hex32" : "ascii"}` +
+    ` keyLast4=${AES_KEY.trim().slice(-4)} ivLast4=${AES_IV.trim().slice(-4)}`
+  );
+})();
+
 export function encryptPayload(data: Record<string, unknown>): string {
   const text = JSON.stringify(data);
   const key = resolveAesBytes(AES_KEY);

@@ -1412,20 +1412,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const timestamp = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")} ${String(_now.getHours()).padStart(2,"0")}:${String(_now.getMinutes()).padStart(2,"0")}:${String(_now.getSeconds()).padStart(2,"0")}`;
       const referenceNo = `REG${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
 
+      if (!aadhaarNumber) {
+        return res.status(400).json({ error: "Aadhaar number is required for 2FA registration" });
+      }
+      const merchantCode2faReg = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
+      if (!merchantCode2faReg) {
+        return res.status(400).json({ error: "Merchant code not found — complete merchant onboarding first" });
+      }
+
       const fullPayload = {
-        accessmodetype: "Fingerprint",
-        adhaarnumber: aadhaarNumber || "",
+        accessmode: "Fingerprint",
+        adhaarnumber: aadhaarNumber,
         mobilenumber: user.phone,
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
-        referenceno: referenceNo,
-        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
-        data: aepsService.encryptPidForPaySprint(biometricData),
+        refid: referenceNo,
+        merchantcode: merchantCode2faReg,
+        piddata: aepsService.encryptPidForPaySprint(biometricData),
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
         is_iris: "0",
       };
-      console.log(`[AEPS 2FA REG] submerchantid=${fullPayload.submerchantid} dataLen=${biometricData?.length || 0}`);
+      console.log(`[AEPS 2FA REG] merchantcode=${fullPayload.merchantcode} refid=${fullPayload.refid} dataLen=${biometricData?.length || 0}`);
 
       const result = await aepsService.twoFactorRegistration(fullPayload);
       if (result.status) {
@@ -1457,20 +1465,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const timestamp = `${_now2fa.getFullYear()}-${String(_now2fa.getMonth()+1).padStart(2,"0")}-${String(_now2fa.getDate()).padStart(2,"0")} ${String(_now2fa.getHours()).padStart(2,"0")}:${String(_now2fa.getMinutes()).padStart(2,"0")}:${String(_now2fa.getSeconds()).padStart(2,"0")}`;
       const referenceNo = `2FA${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
 
+      const merchantCode2faAuth = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
       const fullPayload = {
-        accessmodetype: "Fingerprint",
+        accessmode: "Fingerprint",
         adhaarnumber: aadhaarNumber || "",
         mobilenumber: user.phone,
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
-        referenceno: referenceNo,
-        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
-        data: aepsService.encryptPidForPaySprint(biometricData),
+        refid: referenceNo,
+        merchantcode: merchantCode2faAuth,
+        piddata: aepsService.encryptPidForPaySprint(biometricData),
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
         is_iris: "0",
       };
-      console.log(`[AEPS 2FA AUTH] submerchantid=${fullPayload.submerchantid} dataLen=${biometricData?.length || 0}`);
+      console.log(`[AEPS 2FA AUTH] merchantcode=${fullPayload.merchantcode} refid=${fullPayload.refid} dataLen=${biometricData?.length || 0}`);
 
       const result = await aepsService.twoFactorAuthentication(fullPayload);
       if (result.status) {
@@ -1532,20 +1541,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude,
         longitude,
         mobilenumber: user.phone,
-        referenceno: referenceNo,
+        refid: referenceNo,
         ipaddress: (req.ip || "127.0.0.1").replace("::ffff:", ""),
         adhaarnumber: aadhaarNumber,
-        accessmodetype: "Fingerprint",
+        accessmode: "Fingerprint",
         nationalbankidentification: bankIin,
         requestremarks: `${type} via RupyaSetu`,
-        data: aepsService.encryptPidForPaySprint(fingerprintData),
+        piddata: aepsService.encryptPidForPaySprint(fingerprintData),
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
-        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
+        merchantcode: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
         is_iris: "0",
       };
-      console.log(`[AEPS TXN] type=${type} submerchantid=${commonParams.submerchantid} dataLen=${fingerprintData?.length || 0}`);
+      console.log(`[AEPS TXN] type=${type} merchantcode=${commonParams.merchantcode} refid=${commonParams.refid} dataLen=${fingerprintData?.length || 0}`);
 
       let result;
       switch (type) {

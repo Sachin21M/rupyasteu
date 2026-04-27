@@ -6,9 +6,21 @@ import { storage } from "../storage";
 // The body field must contain ONLY the <Data> element value from the PID XML,
 // AES-128-CBC encrypted with PAYSPRINT_AES_KEY/IV, then base64 encoded.
 // PHP reference: openssl_encrypt($dataValue, "AES-128-CBC", $key, OPENSSL_RAW_DATA, $iv)
+//
+// Key decoding: PaySprint provides the key as either:
+//   - 32 hex chars (e.g. "3d49f5...") → decode with Buffer.from(key, 'hex') → 16 bytes
+//   - 16 ASCII chars (e.g. "mySecretKey12345") → decode with Buffer.from(key) → 16 bytes
+function resolveAesBytes(str: string): Buffer {
+  const s = str.trim();
+  if (s.length === 32 && /^[0-9a-fA-F]+$/.test(s)) {
+    return Buffer.from(s, "hex"); // hex-encoded → 16 bytes
+  }
+  return Buffer.from(s).slice(0, 16); // ASCII/UTF-8 → take first 16 bytes
+}
+
 function aes128cbcEncrypt(plaintext: string, keyStr: string, ivStr: string): string {
-  const key = Buffer.from(keyStr.trim()).slice(0, 16);
-  const iv  = Buffer.from(ivStr.trim()).slice(0, 16);
+  const key = resolveAesBytes(keyStr);
+  const iv  = resolveAesBytes(ivStr);
   const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
   const encrypted = Buffer.concat([
     cipher.update(Buffer.from(plaintext, "utf8")),
@@ -20,21 +32,47 @@ function aes128cbcEncrypt(plaintext: string, keyStr: string, ivStr: string): str
 export function encryptPidForPaySprint(pidData: string): string {
   const keyStr = process.env.PAYSPRINT_AES_KEY || "";
   const ivStr  = process.env.PAYSPRINT_AES_IV  || "";
+
+  // --- Debug: print raw PID XML before any processing ---
+  console.log(`[AEPS] RAW PID (first 200): ${(pidData || "").substring(0, 200)}`);
+
   if (!keyStr || !ivStr) {
-    return Buffer.from(pidData).toString("base64");
+    throw new Error("[AEPS] PAYSPRINT_AES_KEY or PAYSPRINT_AES_IV not configured");
   }
+
+  // --- Strict validation ---
+  if (!pidData || pidData.trim().length === 0) {
+    throw new Error("[AEPS] PID data is empty — biometric capture did not return data");
+  }
+
+  // PaySprint expects only the <Data> element value encrypted, not the full PID XML.
+  // Extract the base64 blob from <Data type="X">...</Data>
+  const dataMatch = pidData.match(/<Data[^>]*>([^<]+)<\/Data>/);
+  if (!dataMatch) {
+    throw new Error("[AEPS] PID XML missing <Data> element — capture may have failed");
+  }
+
+  const toEncrypt = dataMatch[1].trim();
+
+  if (toEncrypt === "SIMULATED_BIOMETRIC_DATA") {
+    throw new Error("[AEPS] Simulated biometric data is not valid for live PaySprint calls. Use a real RD device.");
+  }
+
+  if (toEncrypt.length < 20) {
+    throw new Error(`[AEPS] PID <Data> value too short (${toEncrypt.length} chars) — likely malformed`);
+  }
+
+  const keyResolved = resolveAesBytes(keyStr);
+  const ivResolved  = resolveAesBytes(ivStr);
+  console.log(`[AEPS] Encrypting PID: extracted=true inputLen=${toEncrypt.length} keyBytes=${keyResolved.length} ivBytes=${ivResolved.length} keyLast4=${keyStr.trim().slice(-4)} ivLast4=${ivStr.trim().slice(-4)}`);
+
   try {
-    // PaySprint expects only the <Data> element value encrypted, not the full PID XML.
-    // Extract the base64 blob from <Data type="X">...</Data>
-    const dataMatch = pidData.match(/<Data[^>]*>([^<]+)<\/Data>/);
-    const toEncrypt = dataMatch ? dataMatch[1].trim() : pidData.trim();
-    console.log(`[AEPS] Encrypting PID: extracted=${!!dataMatch} inputLen=${toEncrypt.length} keyLen=${keyStr.trim().length} ivLen=${ivStr.trim().length} keyLast4=${keyStr.trim().slice(-4)} ivLast4=${ivStr.trim().slice(-4)}`);
     const result = aes128cbcEncrypt(toEncrypt, keyStr, ivStr);
-    console.log(`[AEPS] Encrypted body length: ${result.length}`);
+    console.log(`[AEPS] Encrypted piddata length: ${result.length}`);
     return result;
   } catch (err) {
     console.error("[AEPS] PID encryption error:", err);
-    return Buffer.from(pidData).toString("base64");
+    throw err;
   }
 }
 
@@ -91,7 +129,7 @@ function generatePaysprintJWT(): { token: string; payload: Record<string, unknow
   const reqid = generateUniqueReqId();
   const payload = {
     timestamp,
-    partnerId: PAYSPRINT_PARTNER_ID,
+    partnerid: PAYSPRINT_PARTNER_ID, // lowercase — matches body field name
     reqid: String(reqid),
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
@@ -198,12 +236,17 @@ async function makeAepsRequest(
       console.log(`[AEPS] Body plain: endpoint=${endpoint} aesConfigured=${!!(aesKey && aesIv)}`);
     }
 
-    // IP BASED partners do NOT use Authorisedkey — authentication is via whitelisted IP only.
+    const authorisedKey = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
     const paysprintHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Token": jwtToken,
     };
-    console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) [IP-BASED: no Authorisedkey sent]`);
+    if (authorisedKey) {
+      paysprintHeaders["Authorisedkey"] = authorisedKey;
+      console.log(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey(len=${authorisedKey.length})`);
+    } else {
+      console.warn(`[AEPS] Headers: Token(len=${jwtToken.length}) Authorisedkey=MISSING (PAYSPRINT_AUTHORIZED_KEY not set)`);
+    }
 
     let rawText: string;
     let httpStatus: number;
@@ -393,14 +436,14 @@ export async function getOnboardingUrl(params: {
 }
 
 export async function twoFactorRegistration(params: {
-  accessmodetype: string;
+  accessmode: string;
   adhaarnumber: string;
   mobilenumber: string;
   latitude: string;
   longitude: string;
-  referenceno: string;
-  submerchantid: string;
-  data: string;
+  refid: string;
+  merchantcode: string;
+  piddata: string;
   ipaddress: string;
   timestamp: string;
   is_iris: string;
@@ -409,14 +452,14 @@ export async function twoFactorRegistration(params: {
 }
 
 export async function twoFactorAuthentication(params: {
-  accessmodetype: string;
+  accessmode: string;
   adhaarnumber: string;
   mobilenumber: string;
   latitude: string;
   longitude: string;
-  referenceno: string;
-  submerchantid: string;
-  data: string;
+  refid: string;
+  merchantcode: string;
+  piddata: string;
   ipaddress: string;
   timestamp: string;
   is_iris: string;
@@ -428,17 +471,17 @@ export async function balanceEnquiry(params: {
   latitude: string;
   longitude: string;
   mobilenumber: string;
-  referenceno: string;
+  refid: string;
   ipaddress: string;
   adhaarnumber: string;
-  accessmodetype: string;
+  accessmode: string;
   nationalbankidentification: string;
   requestremarks: string;
-  data: string;
+  piddata: string;
   pipe: string;
   timestamp: string;
   transactiontype: string;
-  submerchantid: string;
+  merchantcode: string;
   is_iris: string;
 }): Promise<AepsResponse> {
   return makeAepsRequest("/service/aeps/balanceenquiry/index", params);
@@ -448,17 +491,17 @@ export async function miniStatement(params: {
   latitude: string;
   longitude: string;
   mobilenumber: string;
-  referenceno: string;
+  refid: string;
   ipaddress: string;
   adhaarnumber: string;
-  accessmodetype: string;
+  accessmode: string;
   nationalbankidentification: string;
   requestremarks: string;
-  data: string;
+  piddata: string;
   pipe: string;
   timestamp: string;
   transactiontype: string;
-  submerchantid: string;
+  merchantcode: string;
   is_iris: string;
 }): Promise<AepsResponse> {
   return makeAepsRequest("/service/aeps/ministatement/index", params);
@@ -468,17 +511,17 @@ export async function cashWithdrawal(params: {
   latitude: string;
   longitude: string;
   mobilenumber: string;
-  referenceno: string;
+  refid: string;
   ipaddress: string;
   adhaarnumber: string;
-  accessmodetype: string;
+  accessmode: string;
   nationalbankidentification: string;
   requestremarks: string;
-  data: string;
+  piddata: string;
   pipe: string;
   timestamp: string;
   transactiontype: string;
-  submerchantid: string;
+  merchantcode: string;
   is_iris: string;
   amount: number;
 }): Promise<AepsResponse> {
@@ -489,17 +532,17 @@ export async function aadhaarPay(params: {
   latitude: string;
   longitude: string;
   mobilenumber: string;
-  referenceno: string;
+  refid: string;
   ipaddress: string;
   adhaarnumber: string;
-  accessmodetype: string;
+  accessmode: string;
   nationalbankidentification: string;
   requestremarks: string;
-  data: string;
+  piddata: string;
   pipe: string;
   timestamp: string;
   transactiontype: string;
-  submerchantid: string;
+  merchantcode: string;
   is_iris: string;
   amount: number;
 }): Promise<AepsResponse> {
@@ -510,17 +553,17 @@ export async function cashDeposit(params: {
   latitude: string;
   longitude: string;
   mobilenumber: string;
-  referenceno: string;
+  refid: string;
   ipaddress: string;
   adhaarnumber: string;
-  accessmodetype: string;
+  accessmode: string;
   nationalbankidentification: string;
   requestremarks: string;
-  data: string;
+  piddata: string;
   pipe: string;
   timestamp: string;
   transactiontype: string;
-  submerchantid: string;
+  merchantcode: string;
   is_iris: string;
   amount: number;
 }): Promise<AepsResponse> {

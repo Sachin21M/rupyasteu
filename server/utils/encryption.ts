@@ -3,10 +3,20 @@ import crypto from "crypto";
 const AES_KEY = process.env.PAYSPRINT_AES_KEY || "default_aes_key_for_uat_testing";
 const AES_IV = process.env.PAYSPRINT_AES_IV || "default_iv_for_uat";
 
+// Resolve AES key/IV from either hex-encoded (32 chars → 16 bytes)
+// or plain ASCII (16 chars → 16 bytes) string.
+function resolveAesBytes(str: string): Buffer {
+  const s = str.trim();
+  if (s.length === 32 && /^[0-9a-fA-F]+$/.test(s)) {
+    return Buffer.from(s, "hex");
+  }
+  return Buffer.from(s).slice(0, 16);
+}
+
 export function encryptPayload(data: Record<string, unknown>): string {
   const text = JSON.stringify(data);
-  const key = Buffer.from(AES_KEY.slice(0, 16), "utf-8");
-  const iv = Buffer.from(AES_IV.slice(0, 16), "utf-8");
+  const key = resolveAesBytes(AES_KEY);
+  const iv = resolveAesBytes(AES_IV);
   const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
   let encrypted = cipher.update(text, "utf8", "base64");
   encrypted += cipher.final("base64");
@@ -14,8 +24,8 @@ export function encryptPayload(data: Record<string, unknown>): string {
 }
 
 export function decryptPayload(encrypted: string): Record<string, unknown> {
-  const key = Buffer.from(AES_KEY.slice(0, 16), "utf-8");
-  const iv = Buffer.from(AES_IV.slice(0, 16), "utf-8");
+  const key = resolveAesBytes(AES_KEY);
+  const iv = resolveAesBytes(AES_IV);
   const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
   let decrypted = decipher.update(encrypted, "base64", "utf8");
   decrypted += decipher.final("utf8");

@@ -6,13 +6,69 @@ import { validateUtr, validatePhone, validateAmount } from "./utils/validators";
 import { generateOtp, sendSmsAlert } from "./utils/smsalert";
 import { initiateRecharge, checkRechargeStatus, getOperatorInfo, getOperatorList } from "./services/paysprint";
 import * as aepsService from "./services/aeps";
-import { generateAepsReport } from "./services/aeps-report";
+import * as aepsReport from "./services/aeps-report";
 import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema, aepsTransactionSchema } from "../shared/schema";
 
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "MANUAL";
 const PAYEE_UPI_ID = process.env.PAYEE_UPI_ID || "44789692406@sbi";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "rupyasetu@2026";
+
+// Maps PaySprint response codes from eKYC OTP endpoints to user-friendly context.
+// retryable=true means the user can retry OTP entry without requesting a new OTP.
+// retryable=false means the user must start over or contact support.
+function mapKycErrorCode(responseCode: string | number | undefined, rawMessage: string): {
+  userMessage: string;
+  retryable: boolean;
+  errorCode: string;
+} {
+  const code = String(responseCode ?? "").trim();
+  switch (code) {
+    case "404":
+    case "UID_DEACTIVATED":
+      return { userMessage: "This Aadhaar is not active. Please use a valid, active Aadhaar number.", retryable: false, errorCode: "AADHAAR_DEACTIVATED" };
+    case "569":
+    case "570":
+    case "540":
+      return { userMessage: "Aadhaar mobile number is not linked. Please link a mobile number with your Aadhaar via UIDAI before retrying.", retryable: false, errorCode: "MOBILE_NOT_LINKED" };
+    case "999":
+    case "576":
+    case "LIMIT_EXCEEDED":
+      return { userMessage: "KYC attempts limit exceeded for today. Please try again tomorrow.", retryable: false, errorCode: "DAILY_LIMIT_EXCEEDED" };
+    case "580":
+    case "OTP_EXPIRED":
+      return { userMessage: "The OTP has expired. Please request a new OTP.", retryable: false, errorCode: "OTP_EXPIRED" };
+    case "581":
+    case "OTP_INVALID":
+      return { userMessage: "Incorrect OTP. Please check the OTP sent to your Aadhaar-linked mobile and try again.", retryable: true, errorCode: "OTP_INVALID" };
+    case "AADHAAR_MISMATCH":
+    case "596":
+      return { userMessage: "Aadhaar details do not match. Please ensure you're using the correct Aadhaar number.", retryable: false, errorCode: "AADHAAR_MISMATCH" };
+    case "502":
+    case "503":
+    case "504":
+      return { userMessage: "PaySprint service is temporarily unavailable. Please try again in a few minutes.", retryable: false, errorCode: "SERVICE_UNAVAILABLE" };
+    default: {
+      const lower = rawMessage?.toLowerCase() || "";
+      if (lower.includes("invalid otp") || lower.includes("otp mismatch") || lower.includes("wrong otp")) {
+        return { userMessage: "Incorrect OTP. Please check the OTP sent to your Aadhaar-linked mobile and try again.", retryable: true, errorCode: "OTP_INVALID" };
+      }
+      if (lower.includes("expired")) {
+        return { userMessage: "The OTP has expired. Please request a new OTP.", retryable: false, errorCode: "OTP_EXPIRED" };
+      }
+      if (lower.includes("limit") || lower.includes("exceeded")) {
+        return { userMessage: "KYC attempts limit exceeded for today. Please try again tomorrow.", retryable: false, errorCode: "DAILY_LIMIT_EXCEEDED" };
+      }
+      if (lower.includes("not linked") || lower.includes("no mobile")) {
+        return { userMessage: "Aadhaar mobile number is not linked. Please link a mobile number with your Aadhaar via UIDAI.", retryable: false, errorCode: "MOBILE_NOT_LINKED" };
+      }
+      if (lower.includes("mismatch") || lower.includes("not match")) {
+        return { userMessage: "Aadhaar details do not match. Please ensure you're using the correct Aadhaar number.", retryable: false, errorCode: "AADHAAR_MISMATCH" };
+      }
+      return { userMessage: rawMessage || "Verification failed. Please try again.", retryable: false, errorCode: "UNKNOWN" };
+    }
+  }
+}
 
 // Server-side store for Aadhaar eKYC OTP request IDs.
 // Keyed by userId; entries expire after 10 minutes to match OTP validity windows.
@@ -1195,7 +1251,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const storedUrl = kycFormSubmitted ? null : rawUrl;
       const sessionExpired = !storedUrl && !kycFormSubmitted && merchant.kycStatus !== "FAILED";
 
-      console.log(`[KYC-Status] merchant=${merchant.merchantCode} dbStatus=${merchant.kycStatus} hasUrl=${!!storedUrl} submitted=${kycFormSubmitted}`);
+      const hasPendingOtp = kycOtpStore.has((req as any).userId) &&
+        Date.now() < (kycOtpStore.get((req as any).userId)?.expiresAt ?? 0);
+
+      console.log(`[KYC-Status] merchant=${merchant.merchantCode} dbStatus=${merchant.kycStatus} hasUrl=${!!storedUrl} submitted=${kycFormSubmitted} pendingOtp=${hasPendingOtp}`);
 
       res.json({
         kycStatus: merchant.kycStatus || "PENDING",
@@ -1205,6 +1264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         redirectUrl: storedUrl || undefined,
         sessionExpired,
         kycFormSubmitted,
+        hasPendingOtp,
       });
     } catch (error) {
       console.error("KYC status check error:", error);
@@ -1398,8 +1458,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (!result.status) {
+        const mapped = mapKycErrorCode(result.response_code, result.message || "");
         console.error(`[KYC-SendOTP] Failed: code=${result.response_code} msg="${result.message}"`);
-        return res.status(400).json({ error: result.message || "Failed to send OTP. Please try again." });
+        storage.insertKycAttempt({
+          userId,
+          merchantCode: merchant.merchantCode || "",
+          step: "SEND_OTP",
+          success: false,
+          responseCode: String(result.response_code ?? ""),
+          responseMessage: result.message || "",
+        }).catch(() => {});
+        return res.status(400).json({
+          error: mapped.userMessage,
+          errorCode: mapped.errorCode,
+          retryable: mapped.retryable,
+        });
       }
 
       const otpreqid: string = (result.data?.otpreqid ?? result.data?.otp_req_id ?? "") as string;
@@ -1410,6 +1483,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       kycOtpStore.set(userId, { otpreqid, aadhaarNumber, expiresAt: Date.now() + KYC_OTP_TTL_MS });
       console.log(`[KYC-SendOTP] OTP sent for merchant=${merchant.merchantCode}`);
+      storage.insertKycAttempt({
+        userId,
+        merchantCode: merchant.merchantCode || "",
+        step: "SEND_OTP",
+        success: true,
+        responseCode: String(result.response_code ?? "1"),
+        responseMessage: result.message || "OTP sent",
+      }).catch(() => {});
 
       res.json({ success: true, message: result.message || "OTP sent to Aadhaar-linked mobile number." });
     } catch (error: any) {
@@ -1457,16 +1538,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (!result.status) {
-        // Leave the OTP entry in the store so the user can retry with a corrected OTP
-        // without having to request a whole new OTP first.
-        console.error(`[KYC-VerifyOTP] Failed: code=${result.response_code} msg="${result.message}"`);
-        return res.status(400).json({ error: result.message || "OTP verification failed. Please try again." });
+        const mapped = mapKycErrorCode(result.response_code, result.message || "");
+        console.error(`[KYC-VerifyOTP] Failed: code=${result.response_code} msg="${result.message}" retryable=${mapped.retryable}`);
+        storage.insertKycAttempt({
+          userId,
+          merchantCode: merchant.merchantCode || "",
+          step: "VERIFY_OTP",
+          success: false,
+          responseCode: String(result.response_code ?? ""),
+          responseMessage: result.message || "",
+        }).catch(() => {});
+        // For non-retryable errors (expired, rate limit, mismatch) clear the OTP entry
+        // so the user is forced to go back and request a fresh OTP.
+        if (!mapped.retryable) {
+          kycOtpStore.delete(userId);
+        }
+        return res.status(400).json({
+          error: mapped.userMessage,
+          errorCode: mapped.errorCode,
+          retryable: mapped.retryable,
+        });
       }
 
       // OTP verified — remove the spent entry and mark KYC completed.
       kycOtpStore.delete(userId);
       await storage.updateAepsMerchant(userId, { kycStatus: "COMPLETED" });
       console.log(`[KYC-VerifyOTP] Merchant ${merchant.merchantCode} marked COMPLETED via eKYC OTP`);
+      storage.insertKycAttempt({
+        userId,
+        merchantCode: merchant.merchantCode || "",
+        step: "VERIFY_OTP",
+        success: true,
+        responseCode: String(result.response_code ?? "1"),
+        responseMessage: result.message || "OTP verified",
+      }).catch(() => {});
 
       res.json({ success: true, kycStatus: "COMPLETED", message: "Aadhaar eKYC verified successfully!" });
     } catch (error: any) {
@@ -2181,6 +2286,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/admin/kyc-attempts", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const merchantCode = req.query.merchantCode as string | undefined;
+      const userId = req.query.userId as string | undefined;
+      const summary = req.query.summary === "true";
+      const rawLimit = parseInt(req.query.limit as string || "100");
+      const limit = Math.min(Math.max(isNaN(rawLimit) ? 100 : rawLimit, 1), 500);
+
+      if (merchantCode) {
+        if (summary) {
+          const hist = await aepsReport.getKycAttemptHistory(merchantCode);
+          return res.json(hist);
+        }
+        const attempts = await storage.getAllMerchantKycAttempts(merchantCode, limit);
+        return res.json({ attempts });
+      } else if (userId) {
+        const attempts = await storage.getKycAttempts(userId, limit);
+        return res.json({ attempts });
+      } else {
+        return res.status(400).json({ error: "merchantCode or userId query param is required" });
+      }
+    } catch (error) {
+      console.error("Failed to fetch KYC attempts:", error);
+      res.status(500).json({ error: "Failed to fetch KYC attempts" });
+    }
+  });
+
   app.get("/api/admin/server-info", adminAuthMiddleware, async (_req: Request, res: Response) => {
     try {
       const ipRes = await fetch("https://api.ipify.org?format=json");
@@ -2214,7 +2346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/admin/aeps-report", adminAuthMiddleware, async (_req: Request, res: Response) => {
     try {
-      const pdfBuffer = await generateAepsReport();
+      const pdfBuffer = await aepsReport.generateAepsReport();
       const filename = `RupyaSetu_AEPS_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import { storage } from "../storage";
 import * as aepsService from "./aeps";
+import type { KycAttempt } from "../../shared/schema";
 
 const GREEN = "#2E9E5B";
 const DARK_GREEN = "#1E6F44";
@@ -479,4 +480,35 @@ export async function generateAepsReport(): Promise<Buffer> {
 
     doc.end();
   });
+}
+
+export interface KycAttemptSummary {
+  merchantCode: string;
+  userId: string;
+  attempts: KycAttempt[];
+  totalSendOtp: number;
+  successfulSendOtp: number;
+  totalVerifyOtp: number;
+  successfulVerifyOtp: number;
+  lastAttemptAt: string | null;
+  kycCompleted: boolean;
+}
+
+export async function getKycAttemptHistory(merchantCode: string): Promise<KycAttemptSummary> {
+  const attempts = await storage.getAllMerchantKycAttempts(merchantCode, 200);
+
+  const sendOtpAttempts = attempts.filter((a) => a.step === "SEND_OTP");
+  const verifyOtpAttempts = attempts.filter((a) => a.step === "VERIFY_OTP");
+
+  return {
+    merchantCode,
+    userId: attempts[0]?.userId || "",
+    attempts,
+    totalSendOtp: sendOtpAttempts.length,
+    successfulSendOtp: sendOtpAttempts.filter((a) => a.success).length,
+    totalVerifyOtp: verifyOtpAttempts.length,
+    successfulVerifyOtp: verifyOtpAttempts.filter((a) => a.success).length,
+    lastAttemptAt: attempts[0]?.createdAt || null,
+    kycCompleted: verifyOtpAttempts.some((a) => a.success),
+  };
 }

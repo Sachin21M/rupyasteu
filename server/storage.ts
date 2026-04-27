@@ -1,4 +1,4 @@
-import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction, AepsApiLog, VendorWallet, WalletTransaction, CommissionConfig, CommissionWallet, CommissionTransaction, CommissionWithdrawal, CommissionWithdrawalStatus, CommissionWithdrawalMode } from "../shared/schema";
+import type { User, OtpRecord, Transaction, Operator, Plan, AepsMerchant, AepsDailyAuth, AepsTransaction, AepsApiLog, KycAttempt, VendorWallet, WalletTransaction, CommissionConfig, CommissionWallet, CommissionTransaction, CommissionWithdrawal, CommissionWithdrawalStatus, CommissionWithdrawalMode } from "../shared/schema";
 import { randomUUID } from "crypto";
 import pg from "pg";
 
@@ -78,6 +78,21 @@ async function initAepsTables() {
     `);
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_aeps_api_logs_endpoint ON aeps_api_logs(endpoint)
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS kyc_attempts (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        merchant_code VARCHAR(64) NOT NULL DEFAULT '',
+        step VARCHAR(20) NOT NULL,
+        success BOOLEAN NOT NULL DEFAULT FALSE,
+        response_code VARCHAR(20) NOT NULL DEFAULT '',
+        response_message TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_kyc_attempts_user_id ON kyc_attempts(user_id)
     `);
     const alterQueries = [
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS phone VARCHAR(15) NOT NULL DEFAULT ''",
@@ -232,6 +247,10 @@ export interface IStorage {
 
   createAepsApiLog(data: Omit<AepsApiLog, "id" | "createdAt">): Promise<AepsApiLog>;
   getAepsApiLogs(filters?: { endpoint?: string; success?: boolean; fromDate?: string; toDate?: string; limit?: number; offset?: number }): Promise<{ logs: AepsApiLog[]; total: number }>;
+
+  insertKycAttempt(data: Omit<KycAttempt, "id" | "createdAt">): Promise<KycAttempt>;
+  getKycAttempts(userId: string, limit?: number): Promise<KycAttempt[]>;
+  getAllMerchantKycAttempts(merchantCode: string, limit?: number): Promise<KycAttempt[]>;
 
   getWallet(userId: string): Promise<VendorWallet | undefined>;
   getOrCreateWallet(userId: string): Promise<VendorWallet>;
@@ -725,6 +744,33 @@ export class PgStorage implements IStorage {
     return { logs: result.rows.map(rowToAepsApiLog), total };
   }
 
+  async insertKycAttempt(data: Omit<KycAttempt, "id" | "createdAt">): Promise<KycAttempt> {
+    const id = randomUUID();
+    const result = await pool.query(
+      `INSERT INTO kyc_attempts (id, user_id, merchant_code, step, success, response_code, response_message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [id, data.userId, data.merchantCode, data.step, data.success, data.responseCode, data.responseMessage]
+    );
+    return rowToKycAttempt(result.rows[0]);
+  }
+
+  async getKycAttempts(userId: string, limit = 50): Promise<KycAttempt[]> {
+    const result = await pool.query(
+      `SELECT * FROM kyc_attempts WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [userId, limit]
+    );
+    return result.rows.map(rowToKycAttempt);
+  }
+
+  async getAllMerchantKycAttempts(merchantCode: string, limit = 100): Promise<KycAttempt[]> {
+    const result = await pool.query(
+      `SELECT * FROM kyc_attempts WHERE merchant_code = $1 ORDER BY created_at DESC LIMIT $2`,
+      [merchantCode, limit]
+    );
+    return result.rows.map(rowToKycAttempt);
+  }
+
   async getWallet(userId: string): Promise<VendorWallet | undefined> {
     const result = await pool.query("SELECT * FROM vendor_wallets WHERE user_id = $1", [userId]);
     return result.rows[0] ? rowToWallet(result.rows[0]) : undefined;
@@ -1062,6 +1108,19 @@ function rowToAepsApiLog(row: any): AepsApiLog {
     success: row.success,
     durationMs: row.duration_ms,
     errorMessage: row.error_message || undefined,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+  };
+}
+
+function rowToKycAttempt(row: any): KycAttempt {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    merchantCode: row.merchant_code,
+    step: row.step,
+    success: row.success,
+    responseCode: row.response_code,
+    responseMessage: row.response_message,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
   };
 }

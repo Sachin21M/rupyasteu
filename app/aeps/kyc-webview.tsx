@@ -19,6 +19,12 @@ import { aepsKycSendOtp, aepsKycVerifyOtp } from "@/lib/api";
 
 type Step = "aadhaar" | "otp" | "success";
 
+interface KycError {
+  message: string;
+  errorCode: string;
+  retryable: boolean;
+}
+
 export default function KycOtpScreen() {
   const insets = useSafeAreaInsets();
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
@@ -28,6 +34,8 @@ export default function KycOtpScreen() {
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [maskedAadhaar, setMaskedAadhaar] = useState("");
+  const [otpError, setOtpError] = useState<KycError | null>(null);
+  const [sendOtpError, setSendOtpError] = useState<KycError | null>(null);
 
   const otpInputRef = useRef<TextInput>(null);
 
@@ -35,6 +43,7 @@ export default function KycOtpScreen() {
     if (step === "otp") {
       setStep("aadhaar");
       setOtp("");
+      setOtpError(null);
     } else {
       router.back();
     }
@@ -47,6 +56,7 @@ export default function KycOtpScreen() {
       return;
     }
     setLoading(true);
+    setSendOtpError(null);
     try {
       const result = await aepsKycSendOtp(clean);
       if (result.alreadyVerified) {
@@ -57,9 +67,14 @@ export default function KycOtpScreen() {
       }
       setMaskedAadhaar("XXXX-XXXX-" + clean.slice(-4));
       setStep("otp");
+      setOtpError(null);
       setTimeout(() => otpInputRef.current?.focus(), 300);
     } catch (err: any) {
-      Alert.alert("Failed to Send OTP", err.message || "Please try again.");
+      setSendOtpError({
+        message: err.message || "Failed to send OTP. Please try again.",
+        errorCode: err.errorCode || "UNKNOWN",
+        retryable: err.retryable ?? true,
+      });
     } finally {
       setLoading(false);
     }
@@ -72,15 +87,30 @@ export default function KycOtpScreen() {
       return;
     }
     setLoading(true);
+    setOtpError(null);
     try {
       const result = await aepsKycVerifyOtp(trimmed);
       if (result.success && (result.kycStatus === "COMPLETED" || !result.kycStatus)) {
         setStep("success");
       } else {
-        Alert.alert("Verification Failed", result.message || result.error || "OTP did not match. Please try again.");
+        setOtpError({
+          message: result.message || result.error || "OTP verification failed. Please try again.",
+          errorCode: result.errorCode || "UNKNOWN",
+          retryable: result.retryable ?? false,
+        });
+        if (!result.retryable) {
+          setOtp("");
+        }
       }
     } catch (err: any) {
-      Alert.alert("Verification Failed", err.message || "Please try again.");
+      setOtpError({
+        message: err.message || "Verification failed. Please try again.",
+        errorCode: err.errorCode || "UNKNOWN",
+        retryable: err.retryable ?? false,
+      });
+      if (err.retryable === false) {
+        setOtp("");
+      }
     } finally {
       setLoading(false);
     }
@@ -88,6 +118,15 @@ export default function KycOtpScreen() {
 
   function handleResendOtp() {
     setOtp("");
+    setOtpError(null);
+    setStep("aadhaar");
+  }
+
+  function handleStartOver() {
+    setOtp("");
+    setOtpError(null);
+    setSendOtpError(null);
+    setAadhaarNumber("");
     setStep("aadhaar");
   }
 
@@ -161,7 +200,10 @@ export default function KycOtpScreen() {
               <TextInput
                 style={styles.input}
                 value={aadhaarNumber}
-                onChangeText={(t) => setAadhaarNumber(t.replace(/\D/g, "").slice(0, 12))}
+                onChangeText={(t) => {
+                  setAadhaarNumber(t.replace(/\D/g, "").slice(0, 12));
+                  setSendOtpError(null);
+                }}
                 placeholder="Enter 12-digit Aadhaar"
                 placeholderTextColor={Colors.textTertiary}
                 keyboardType="number-pad"
@@ -174,6 +216,19 @@ export default function KycOtpScreen() {
                 {aadhaarNumber.length}/12 digits
               </Text>
             </View>
+
+            {sendOtpError && (
+              <View style={[styles.errorBox, sendOtpError.retryable ? styles.errorBoxWarning : styles.errorBoxFatal]}>
+                <Ionicons
+                  name={sendOtpError.retryable ? "warning-outline" : "close-circle-outline"}
+                  size={18}
+                  color={sendOtpError.retryable ? Colors.warning : Colors.error}
+                />
+                <Text style={[styles.errorText, !sendOtpError.retryable && styles.errorTextFatal]}>
+                  {sendOtpError.message}
+                </Text>
+              </View>
+            )}
 
             <Pressable
               style={({ pressed }) => [
@@ -213,9 +268,12 @@ export default function KycOtpScreen() {
               <Text style={styles.inputLabel}>OTP</Text>
               <TextInput
                 ref={otpInputRef}
-                style={[styles.input, styles.otpInput]}
+                style={[styles.input, styles.otpInput, otpError && !otpError.retryable && styles.inputError]}
                 value={otp}
-                onChangeText={(t) => setOtp(t.replace(/\D/g, "").slice(0, 8))}
+                onChangeText={(t) => {
+                  setOtp(t.replace(/\D/g, "").slice(0, 8));
+                  if (otpError?.retryable) setOtpError(null);
+                }}
                 placeholder="Enter OTP"
                 placeholderTextColor={Colors.textTertiary}
                 keyboardType="number-pad"
@@ -224,17 +282,43 @@ export default function KycOtpScreen() {
                 returnKeyType="done"
                 onSubmitEditing={handleVerifyOtp}
                 secureTextEntry={false}
+                editable={!otpError || otpError.retryable}
               />
             </View>
+
+            {otpError && (
+              <View style={[styles.errorBox, otpError.retryable ? styles.errorBoxWarning : styles.errorBoxFatal]}>
+                <Ionicons
+                  name={otpError.retryable ? "warning-outline" : "close-circle-outline"}
+                  size={18}
+                  color={otpError.retryable ? Colors.warning : Colors.error}
+                />
+                <View style={styles.errorContent}>
+                  <Text style={[styles.errorText, !otpError.retryable && styles.errorTextFatal]}>
+                    {otpError.message}
+                  </Text>
+                  {!otpError.retryable && (
+                    <Pressable
+                      style={styles.startOverBtn}
+                      onPress={handleStartOver}
+                      testID="start-over-btn"
+                    >
+                      <Ionicons name="refresh" size={14} color={Colors.primary} />
+                      <Text style={styles.startOverText}>Start over with new Aadhaar</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            )}
 
             <Pressable
               style={({ pressed }) => [
                 styles.primaryBtn,
                 pressed && { opacity: 0.85 },
-                (loading || otp.length < 4) && styles.btnDisabled,
+                (loading || otp.length < 4 || (!!otpError && !otpError.retryable)) && styles.btnDisabled,
               ]}
               onPress={handleVerifyOtp}
-              disabled={loading || otp.length < 4}
+              disabled={loading || otp.length < 4 || (!!otpError && !otpError.retryable)}
               testID="verify-otp-btn"
             >
               {loading ? (
@@ -362,6 +446,9 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.text,
   },
+  inputError: {
+    borderColor: Colors.error,
+  },
   otpInput: {
     letterSpacing: 4,
     fontSize: 20,
@@ -373,6 +460,48 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.textTertiary,
     textAlign: "right",
+  },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    borderRadius: 12,
+    padding: 14,
+    width: "100%",
+    borderWidth: 1,
+  },
+  errorBoxWarning: {
+    backgroundColor: Colors.warningLight,
+    borderColor: Colors.warning + "60",
+  },
+  errorBoxFatal: {
+    backgroundColor: Colors.errorLight ?? "#FEF2F2",
+    borderColor: Colors.error + "60",
+  },
+  errorContent: {
+    flex: 1,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: Colors.warning,
+    lineHeight: 18,
+  },
+  errorTextFatal: {
+    color: Colors.error,
+  },
+  startOverBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 4,
+  },
+  startOverText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.primary,
   },
   primaryBtn: {
     width: "100%",

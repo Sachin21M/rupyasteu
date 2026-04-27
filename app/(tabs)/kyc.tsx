@@ -16,13 +16,14 @@ import type { Href } from "expo-router";
 import Colors from "@/constants/colors";
 import { getAepsMerchant, getAepsKycStatus } from "@/lib/api";
 
-type KycStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | string;
+type KycStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "PENDING" | "COMPLETED" | "FAILED" | string;
 
 export default function KycScreen() {
   const insets = useSafeAreaInsets();
   const [kycStatus, setKycStatus] = useState<KycStatusValue>("NOT_STARTED");
   const [merchantCode, setMerchantCode] = useState("");
   const [loading, setLoading] = useState(true);
+  const [hasPendingOtp, setHasPendingOtp] = useState(false);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -54,9 +55,13 @@ export default function KycScreen() {
         const ks = kycResult.value;
         if (ks?.kycStatus) setKycStatus(ks.kycStatus);
         else if (ks?.onboarded) setKycStatus("COMPLETED");
+        setHasPendingOtp(!!(ks?.hasPendingOtp));
+      } else {
+        setHasPendingOtp(false);
       }
     } catch {
       setKycStatus("NOT_STARTED");
+      setHasPendingOtp(false);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -75,6 +80,8 @@ export default function KycScreen() {
 
   const isVerified = kycStatus === "COMPLETED";
   const isInProgress = kycStatus === "IN_PROGRESS";
+  const isPending = kycStatus === "PENDING" && !isVerified;
+  const hasOtpInProgress = hasPendingOtp && !isVerified;
 
   const statusConfig = isVerified
     ? {
@@ -84,7 +91,15 @@ export default function KycScreen() {
         title: "Verified",
         subtitle: "Your AEPS account is active and ready for transactions.",
       }
-    : isInProgress
+    : hasOtpInProgress
+    ? {
+        icon: "keypad-outline" as const,
+        color: Colors.primary,
+        bg: Colors.primaryLight,
+        title: "OTP Sent",
+        subtitle: "An OTP has been sent to your Aadhaar-linked mobile. Continue to enter the OTP and complete verification.",
+      }
+    : isInProgress || isPending
     ? {
         icon: "time" as const,
         color: Colors.warning,
@@ -179,7 +194,7 @@ export default function KycScreen() {
         >
           <MaterialCommunityIcons name="fingerprint" size={22} color="#fff" />
           <Text style={styles.kycBtnText}>
-            {isInProgress ? "Continue KYC Setup" : "Start KYC Verification"}
+            {hasOtpInProgress ? "Enter OTP to Complete KYC" : isInProgress || isPending ? "Continue KYC Setup" : "Start KYC Verification"}
           </Text>
           <Ionicons name="arrow-forward" size={20} color="#fff" />
         </Pressable>

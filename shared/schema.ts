@@ -133,6 +133,17 @@ export interface AepsApiLog {
   createdAt: string;
 }
 
+export interface KycAttempt {
+  id: string;
+  userId: string;
+  merchantCode: string;
+  step: "SEND_OTP" | "VERIFY_OTP";
+  success: boolean;
+  responseCode: string;
+  responseMessage: string;
+  createdAt: string;
+}
+
 export const walletTransactionTypes = ["RECHARGE", "DEBIT", "CREDIT", "COMMISSION", "ADJUSTMENT"] as const;
 export type WalletTransactionType = typeof walletTransactionTypes[number];
 

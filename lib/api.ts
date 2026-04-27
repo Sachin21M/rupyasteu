@@ -133,7 +133,10 @@ export async function updateLowBalanceThreshold(threshold: number) {
 async function handleAepsResponse(res: Response) {
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.error || `Request failed (${res.status})`);
+    const err = new Error(data.error || `Request failed (${res.status})`) as Error & { errorCode?: string; retryable?: boolean };
+    if (data.errorCode) err.errorCode = data.errorCode;
+    if (data.retryable !== undefined) err.retryable = data.retryable;
+    throw err;
   }
   return data;
 }

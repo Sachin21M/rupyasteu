@@ -215,11 +215,10 @@ export default function KycWebviewScreen() {
             }}
             onNavigationStateChange={(state: { url: string }) => {
               const navUrl = state.url || "";
-              if (
-                navUrl.includes("rupyasetuapi.site/api/paysprint/") ||
-                navUrl.includes("aeps-callback") ||
-                navUrl.includes("/api/paysprint/callback")
-              ) {
+              const isCallback =
+                navUrl.includes("rupyasetuapi.site/api/paysprint/aeps-callback") ||
+                navUrl.includes("rupyasetuapi.site/api/paysprint/callback");
+              if (isCallback) {
                 handleFormComplete(true);
               }
             }}

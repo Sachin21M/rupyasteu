@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import type { Href } from "expo-router";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, getAepsKycStatus } from "@/lib/api";
+import { getAepsMerchant, getAepsKycStatus, aepsOnboard } from "@/lib/api";
 
 type KycStatusValue = "NOT_STARTED" | "IN_PROGRESS" | "PENDING" | "COMPLETED" | "FAILED" | string;
 
@@ -23,7 +23,7 @@ export default function KycScreen() {
   const [kycStatus, setKycStatus] = useState<KycStatusValue>("NOT_STARTED");
   const [merchantCode, setMerchantCode] = useState("");
   const [loading, setLoading] = useState(true);
-  const [hasPendingOtp, setHasPendingOtp] = useState(false);
+  const [startingKyc, setStartingKyc] = useState(false);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -55,19 +55,15 @@ export default function KycScreen() {
         const ks = kycResult.value;
         if (ks?.kycStatus) setKycStatus(ks.kycStatus);
         else if (ks?.onboarded) setKycStatus("COMPLETED");
-        setHasPendingOtp(!!(ks?.hasPendingOtp));
-      } else {
-        setHasPendingOtp(false);
       }
     } catch {
       setKycStatus("NOT_STARTED");
-      setHasPendingOtp(false);
     } finally {
       if (!silent) setLoading(false);
     }
   }
 
-  function handleStartKyc() {
+  async function handleStartKyc() {
     if (!merchantCode) {
       Alert.alert(
         "KYC Unavailable",
@@ -75,13 +71,43 @@ export default function KycScreen() {
       );
       return;
     }
-    router.push("/aeps/kyc-webview" as Href);
+    setStartingKyc(true);
+    try {
+      const result = await aepsOnboard(merchantCode);
+      if (result.success && result.redirectUrl) {
+        router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
+      } else if (result.sessionExpired) {
+        Alert.alert(
+          "KYC Session Expired",
+          "Your KYC session has expired. Please ask your admin to regenerate your KYC link from the admin panel, then try again."
+        );
+      } else if (
+        result.response_code === 12001 ||
+        result.response_code === 2 ||
+        result.alreadyRegistered ||
+        (result.error || result.message || "").toLowerCase().includes("already registered")
+      ) {
+        Alert.alert(
+          "KYC In Progress",
+          "Your merchant account already exists in PaySprint. Please ask your admin to check your KYC status, or wait for activation."
+        );
+        await loadMerchantStatus(true);
+      } else {
+        Alert.alert(
+          "Setup Failed",
+          result.error || result.message || "PaySprint could not generate a KYC link. Please try again."
+        );
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to start KYC. Please try again.");
+    } finally {
+      setStartingKyc(false);
+    }
   }
 
   const isVerified = kycStatus === "COMPLETED";
   const isInProgress = kycStatus === "IN_PROGRESS";
   const isPending = kycStatus === "PENDING" && !isVerified;
-  const hasOtpInProgress = hasPendingOtp && !isVerified;
 
   const statusConfig = isVerified
     ? {
@@ -90,14 +116,6 @@ export default function KycScreen() {
         bg: Colors.successLight,
         title: "Verified",
         subtitle: "Your AEPS account is active and ready for transactions.",
-      }
-    : hasOtpInProgress
-    ? {
-        icon: "keypad-outline" as const,
-        color: Colors.primary,
-        bg: Colors.primaryLight,
-        title: "OTP Sent",
-        subtitle: "An OTP has been sent to your Aadhaar-linked mobile. Continue to enter the OTP and complete verification.",
       }
     : isInProgress || isPending
     ? {
@@ -166,10 +184,11 @@ export default function KycScreen() {
           <Text style={styles.stepsTitle}>How KYC Works</Text>
           {(
             [
-              { icon: "card-account-details-outline" as const, text: "Enter your 12-digit Aadhaar number" },
-              { icon: "message-text-outline" as const, text: "Receive OTP on your Aadhaar-linked mobile" },
-              { icon: "check-decagram-outline" as const, text: "Enter the OTP to verify your identity" },
-              { icon: "bank-check" as const, text: "AEPS account activated instantly" },
+              { icon: "web" as const, text: "PaySprint KYC form opens in a secure browser" },
+              { icon: "card-account-details-outline" as const, text: "Enter your Aadhaar for OTP/biometric verification" },
+              { icon: "account-edit-outline" as const, text: "Fill in your personal and business details" },
+              { icon: "file-document-outline" as const, text: "Upload required KYC documents" },
+              { icon: "bank-check" as const, text: "Submit — PaySprint activates your AEPS account" },
             ]
           ).map((step, i) => (
             <View key={i} style={styles.stepRow}>
@@ -188,15 +207,21 @@ export default function KycScreen() {
           style={({ pressed }) => [
             styles.kycBtn,
             pressed && { opacity: 0.85 },
+            startingKyc && styles.kycBtnDisabled,
           ]}
           onPress={handleStartKyc}
+          disabled={startingKyc}
           testID="kyc-start-btn"
         >
-          <MaterialCommunityIcons name="fingerprint" size={22} color="#fff" />
+          {startingKyc ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <MaterialCommunityIcons name="fingerprint" size={22} color="#fff" />
+          )}
           <Text style={styles.kycBtnText}>
-            {hasOtpInProgress ? "Enter OTP to Complete KYC" : isInProgress || isPending ? "Continue KYC Setup" : "Start KYC Verification"}
+            {isInProgress || isPending ? "Continue KYC Setup" : "Start KYC Verification"}
           </Text>
-          <Ionicons name="arrow-forward" size={20} color="#fff" />
+          {!startingKyc && <Ionicons name="arrow-forward" size={20} color="#fff" />}
         </Pressable>
       )}
 
@@ -215,7 +240,7 @@ export default function KycScreen() {
       <Text style={styles.hintText}>
         {isVerified
           ? "Your KYC is verified with PaySprint. Contact support if you face any issues."
-          : "Your status updates automatically after completing Aadhaar eKYC."}
+          : "Your status updates automatically after completing the KYC form."}
       </Text>
     </ScrollView>
   );
@@ -350,23 +375,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     color: Colors.text,
-    lineHeight: 20,
-  },
-  warningBox: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: Colors.warningLight,
-    borderRadius: 12,
-    padding: 14,
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.warning,
-  },
-  warningText: {
-    flex: 1,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    color: "#92400E",
     lineHeight: 20,
   },
   kycBtn: {

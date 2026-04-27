@@ -1440,8 +1440,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateAepsMerchant((req as any).userId, { twoFaRegistered: true } as any);
       }
       res.json({ success: result.status, message: result.message, data: result.data, alreadyRegistered: false });
-    } catch (error) {
+    } catch (error: any) {
       console.error("AEPS 2FA register error:", error);
+      const msg: string = error?.message || "";
+      if (msg.startsWith("[AEPS]")) {
+        return res.status(400).json({ error: msg.replace("[AEPS] ", "") });
+      }
       res.status(500).json({ error: "2FA registration failed" });
     }
   });
@@ -1494,8 +1498,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.setAepsDailyAuth((req as any).userId, today);
       }
       res.json({ success: result.status, message: result.message, data: result.data });
-    } catch (error) {
+    } catch (error: any) {
       console.error("AEPS 2FA auth error:", error);
+      const msg: string = error?.message || "";
+      if (msg.startsWith("[AEPS]")) {
+        return res.status(400).json({ error: msg.replace("[AEPS] ", "") });
+      }
       res.status(500).json({ error: "2FA authentication failed" });
     }
   });
@@ -1664,8 +1672,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         commissionEarned: commissionCredited,
         serviceCharge: serviceChargeDeducted || undefined,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("AEPS transaction error:", error);
+      const msg: string = error?.message || "";
+      if (msg.startsWith("[AEPS]")) {
+        return res.status(400).json({ error: msg.replace("[AEPS] ", "") });
+      }
       res.status(500).json({ error: "AEPS transaction failed" });
     }
   });

@@ -8,6 +8,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Linking,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -75,7 +76,15 @@ export default function KycScreen() {
     try {
       const result = await aepsOnboard(merchantCode);
       if (result.success && result.redirectUrl) {
-        router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
+        if (Platform.OS === "web") {
+          Linking.openURL(result.redirectUrl);
+          Alert.alert(
+            "KYC Form Opened",
+            "Complete all 5 steps in the browser tab that just opened, then return here and tap Refresh to check your status."
+          );
+        } else {
+          router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
+        }
       } else if (result.sessionExpired) {
         Alert.alert(
           "KYC Session Expired",
@@ -98,8 +107,9 @@ export default function KycScreen() {
           result.error || result.message || "PaySprint could not generate a KYC link. Please try again."
         );
       }
-    } catch (err: any) {
-      Alert.alert("Error", err.message || "Failed to start KYC. Please try again.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to start KYC. Please try again.";
+      Alert.alert("Error", message);
     } finally {
       setStartingKyc(false);
     }

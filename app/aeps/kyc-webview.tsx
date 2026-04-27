@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
+  Alert,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,7 +29,23 @@ export default function KycWebviewScreen() {
 
   const decodedUrl = url ? decodeURIComponent(url) : "";
 
-  async function handleFormComplete() {
+  async function handleFormComplete(fromCallback = false) {
+    if (completedRef.current) return;
+    if (!fromCallback) {
+      Alert.alert(
+        "Confirm Submission",
+        "Only tap this after you have fully submitted the KYC form in the browser above. Have you completed all steps?",
+        [
+          { text: "Not Yet", style: "cancel" },
+          { text: "Yes, I'm Done", onPress: () => doComplete() },
+        ]
+      );
+      return;
+    }
+    doComplete();
+  }
+
+  async function doComplete() {
     if (completedRef.current) return;
     completedRef.current = true;
     setDoneState("submitting");
@@ -203,7 +220,7 @@ export default function KycWebviewScreen() {
                 navUrl.includes("aeps-callback") ||
                 navUrl.includes("/api/paysprint/callback")
               ) {
-                handleFormComplete();
+                handleFormComplete(true);
               }
             }}
             javaScriptEnabled

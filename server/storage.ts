@@ -101,6 +101,9 @@ async function initAepsTables() {
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS created_by VARCHAR(20) DEFAULT 'self'",
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS two_fa_registered BOOLEAN NOT NULL DEFAULT FALSE",
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_aeps_merchants_user_id ON aeps_merchants(user_id)",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS kyc_otp_reqid VARCHAR(200)",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS kyc_otp_aadhaar VARCHAR(12)",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS kyc_otp_expires_at BIGINT",
     ];
     for (const q of alterQueries) {
       try { await pool.query(q); } catch {}
@@ -252,6 +255,10 @@ export interface IStorage {
   getKycAttempts(userId: string, limit?: number): Promise<KycAttempt[]>;
   getAllMerchantKycAttempts(merchantCode: string, limit?: number): Promise<KycAttempt[]>;
 
+  saveKycOtpSession(userId: string, otpreqid: string, aadhaarNumber: string, expiresAt: number): Promise<void>;
+  getKycOtpSession(userId: string): Promise<{ otpreqid: string; aadhaarNumber: string; expiresAt: number } | undefined>;
+  deleteKycOtpSession(userId: string): Promise<void>;
+
   getWallet(userId: string): Promise<VendorWallet | undefined>;
   getOrCreateWallet(userId: string): Promise<VendorWallet>;
   getAllWallets(): Promise<(VendorWallet & { phone?: string; name?: string })[]>;
@@ -362,6 +369,9 @@ function rowToAepsMerchant(row: any): AepsMerchant {
     kycRedirectUrl: row.kyc_redirect_url || undefined,
     createdBy: row.created_by || 'self',
     twoFaRegistered: row.two_fa_registered || false,
+    kycOtpReqid: row.kyc_otp_reqid || undefined,
+    kycOtpAadhaar: row.kyc_otp_aadhaar || undefined,
+    kycOtpExpiresAt: row.kyc_otp_expires_at != null ? Number(row.kyc_otp_expires_at) : undefined,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
   };
@@ -769,6 +779,39 @@ export class PgStorage implements IStorage {
       [merchantCode, limit]
     );
     return result.rows.map(rowToKycAttempt);
+  }
+
+  async saveKycOtpSession(userId: string, otpreqid: string, aadhaarNumber: string, expiresAt: number): Promise<void> {
+    await pool.query(
+      `UPDATE aeps_merchants SET kyc_otp_reqid = $1, kyc_otp_aadhaar = $2, kyc_otp_expires_at = $3, updated_at = NOW() WHERE user_id = $4`,
+      [otpreqid, aadhaarNumber, expiresAt, userId]
+    );
+  }
+
+  async getKycOtpSession(userId: string): Promise<{ otpreqid: string; aadhaarNumber: string; expiresAt: number } | undefined> {
+    const result = await pool.query(
+      `SELECT kyc_otp_reqid, kyc_otp_aadhaar, kyc_otp_expires_at FROM aeps_merchants WHERE user_id = $1`,
+      [userId]
+    );
+    const row = result.rows[0];
+    if (!row || !row.kyc_otp_reqid || !row.kyc_otp_expires_at) return undefined;
+    const expiresAt = Number(row.kyc_otp_expires_at);
+    if (Date.now() > expiresAt) {
+      await this.deleteKycOtpSession(userId);
+      return undefined;
+    }
+    return {
+      otpreqid: row.kyc_otp_reqid,
+      aadhaarNumber: row.kyc_otp_aadhaar || '',
+      expiresAt,
+    };
+  }
+
+  async deleteKycOtpSession(userId: string): Promise<void> {
+    await pool.query(
+      `UPDATE aeps_merchants SET kyc_otp_reqid = NULL, kyc_otp_aadhaar = NULL, kyc_otp_expires_at = NULL, updated_at = NOW() WHERE user_id = $1`,
+      [userId]
+    );
   }
 
   async getWallet(userId: string): Promise<VendorWallet | undefined> {

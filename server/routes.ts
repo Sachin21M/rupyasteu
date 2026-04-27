@@ -70,9 +70,7 @@ function mapKycErrorCode(responseCode: string | number | undefined, rawMessage: 
   }
 }
 
-// Server-side store for Aadhaar eKYC OTP request IDs.
-// Keyed by userId; entries expire after 10 minutes to match OTP validity windows.
-const kycOtpStore = new Map<string, { otpreqid: string; aadhaarNumber: string; expiresAt: number }>();
+// TTL for Aadhaar eKYC OTP sessions persisted to DB (must match PaySprint OTP validity).
 const KYC_OTP_TTL_MS = 10 * 60 * 1000;
 
 function authMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -1251,8 +1249,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const storedUrl = kycFormSubmitted ? null : rawUrl;
       const sessionExpired = !storedUrl && !kycFormSubmitted && merchant.kycStatus !== "FAILED";
 
-      const hasPendingOtp = kycOtpStore.has((req as any).userId) &&
-        Date.now() < (kycOtpStore.get((req as any).userId)?.expiresAt ?? 0);
+      const otpSession = await storage.getKycOtpSession((req as any).userId);
+      const hasPendingOtp = !!otpSession && Date.now() < otpSession.expiresAt;
 
       console.log(`[KYC-Status] merchant=${merchant.merchantCode} dbStatus=${merchant.kycStatus} hasUrl=${!!storedUrl} submitted=${kycFormSubmitted} pendingOtp=${hasPendingOtp}`);
 
@@ -1448,8 +1446,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: true, alreadyVerified: true, message: "KYC is already completed." });
       }
 
-      // Remove any stale entry for this user before making the request
-      kycOtpStore.delete(userId);
+      // Remove any stale OTP session before making a fresh request
+      await storage.deleteKycOtpSession(userId);
 
       const result = await aepsService.sendKycOtp({
         adhaarnumber: aadhaarNumber,
@@ -1481,7 +1479,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: "OTP sent but request ID missing from PaySprint response." });
       }
 
-      kycOtpStore.set(userId, { otpreqid, aadhaarNumber, expiresAt: Date.now() + KYC_OTP_TTL_MS });
+      await storage.saveKycOtpSession(userId, otpreqid, aadhaarNumber, Date.now() + KYC_OTP_TTL_MS);
       console.log(`[KYC-SendOTP] OTP sent for merchant=${merchant.merchantCode}`);
       storage.insertKycAttempt({
         userId,
@@ -1509,12 +1507,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Valid OTP is required" });
       }
 
-      const entry = kycOtpStore.get(userId);
+      const entry = await storage.getKycOtpSession(userId);
       if (!entry) {
         return res.status(400).json({ error: "No pending OTP request found. Please request a new OTP." });
       }
       if (Date.now() > entry.expiresAt) {
-        kycOtpStore.delete(userId);
+        await storage.deleteKycOtpSession(userId);
         return res.status(400).json({ error: "OTP has expired. Please request a new one." });
       }
 
@@ -1525,7 +1523,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) return res.status(404).json({ error: "User not found" });
 
       if (merchant.kycStatus === "COMPLETED") {
-        kycOtpStore.delete(userId);
+        await storage.deleteKycOtpSession(userId);
         return res.json({ success: true, kycStatus: "COMPLETED", message: "KYC already completed." });
       }
 
@@ -1548,10 +1546,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           responseCode: String(result.response_code ?? ""),
           responseMessage: result.message || "",
         }).catch(() => {});
-        // For non-retryable errors (expired, rate limit, mismatch) clear the OTP entry
+        // For non-retryable errors (expired, rate limit, mismatch) clear the OTP session
         // so the user is forced to go back and request a fresh OTP.
         if (!mapped.retryable) {
-          kycOtpStore.delete(userId);
+          await storage.deleteKycOtpSession(userId);
         }
         return res.status(400).json({
           error: mapped.userMessage,
@@ -1560,8 +1558,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // OTP verified — remove the spent entry and mark KYC completed.
-      kycOtpStore.delete(userId);
+      // OTP verified — remove the spent session and mark KYC completed.
+      await storage.deleteKycOtpSession(userId);
       await storage.updateAepsMerchant(userId, { kycStatus: "COMPLETED" });
       console.log(`[KYC-VerifyOTP] Merchant ${merchant.merchantCode} marked COMPLETED via eKYC OTP`);
       storage.insertKycAttempt({

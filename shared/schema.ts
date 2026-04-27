@@ -83,6 +83,9 @@ export interface AepsMerchant {
   kycRedirectUrl?: string;
   createdBy?: string;
   twoFaRegistered?: boolean;
+  kycOtpReqid?: string;
+  kycOtpAadhaar?: string;
+  kycOtpExpiresAt?: number;
   createdAt: string;
   updatedAt: string;
 }

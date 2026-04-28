@@ -27,39 +27,65 @@ const NativeWebView =
 
 const KYC_DOMAIN = "merchantkyc.com";
 
-// JS injected into the WebView after each page load.
-// Polls DOM every 800ms for PaySprint's completion keywords.
-// When found → posts KYC_COMPLETED message to React Native.
+// JS injected into WebView on every page load (via injectedJavaScriptBeforeContentLoaded).
+// Two signals:
+//  1. DOM polling every 300ms — reads page text for PaySprint completion keywords.
+//  2. Click listener — catches the "Onboarding Completed" button click immediately,
+//     before the page navigates away (solves the <300ms race condition).
+// Both post KYC_COMPLETED to React Native via onMessage.
 const COMPLETION_DETECTOR_JS = `
 (function() {
   var _kycDone = false;
+
+  function _notify(keyword) {
+    if (_kycDone) return;
+    _kycDone = true;
+    clearInterval(_interval);
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'KYC_COMPLETED', keyword: keyword }));
+    }
+  }
+
+  // 1. DOM text polling — 300ms interval
+  var _keywords = [
+    'onboarding completed',
+    'bank 2 will be activate',
+    'your bank 2 will be',
+    'activation shortly',
+    'onboarding complete',
+    'kyc completed',
+    'kyc complete',
+    'successfully registered',
+    'successfully onboarded',
+  ];
   var _interval = setInterval(function() {
     if (_kycDone) return;
     var body = document.body ? document.body.innerText || document.body.textContent || '' : '';
     var lower = body.toLowerCase();
-    var keywords = [
-      'onboarding completed',
-      'bank 2 will be activate',
-      'your bank 2 will be',
-      'activation shortly',
-      'onboarding complete',
-      'kyc completed',
-      'kyc complete',
-      'successfully registered',
-      'successfully onboarded',
-    ];
-    for (var i = 0; i < keywords.length; i++) {
-      if (lower.indexOf(keywords[i]) !== -1) {
-        _kycDone = true;
-        clearInterval(_interval);
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'KYC_COMPLETED', keyword: keywords[i] }));
-        }
+    for (var i = 0; i < _keywords.length; i++) {
+      if (lower.indexOf(_keywords[i]) !== -1) {
+        _notify(_keywords[i]);
         break;
       }
     }
-  }, 800);
-  // Auto-stop after 10 minutes to avoid memory leak
+  }, 300);
+
+  // 2. Click listener — catches "Onboarding Completed" button before navigation
+  document.addEventListener('click', function(e) {
+    if (_kycDone) return;
+    var el = e.target;
+    // Walk up to 3 parent levels (button may wrap a span/icon)
+    for (var i = 0; i < 3 && el; i++) {
+      var t = (el.innerText || el.textContent || '').toLowerCase().trim();
+      if (t.indexOf('onboarding completed') !== -1 || t.indexOf('onboarding complete') !== -1) {
+        _notify('BUTTON_CLICK:' + t.slice(0, 30));
+        break;
+      }
+      el = el.parentElement;
+    }
+  }, true);
+
+  // Auto-stop after 10 minutes
   setTimeout(function() { clearInterval(_interval); }, 600000);
 })();
 true;
@@ -147,10 +173,16 @@ export default function KycWebViewScreen() {
       if (!isOnKycDomain && state.url.startsWith("http")) {
         const isCallbackUrl = state.url.includes("aeps-callback");
         console.log(`[KYC WebView] Left KYC domain → url=${state.url} isCallback=${isCallbackUrl}`);
-        // Any navigation away from merchantkyc.com means the user finished
-        // (either our callback URL, or PaySprint's own "Onboarding Completed" redirect).
-        // Always call markKycCompleted — never just router.back().
-        markKycCompleted(isCallbackUrl ? "CALLBACK_URL_REDIRECT" : "DOMAIN_EXIT");
+        if (isCallbackUrl) {
+          // PaySprint explicitly redirected to our callback URL — definite completion signal.
+          markKycCompleted("CALLBACK_URL_REDIRECT");
+        } else {
+          // User navigated away (e.g. pressed "Back to Home" mid-form, or error redirect).
+          // Do NOT mark complete — the JS button-click listener + DOM polling handle
+          // actual completion detection before any navigation happens.
+          completedRef.current = true;
+          router.back();
+        }
       }
     } catch {
       // URL parsing error — ignore

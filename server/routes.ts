@@ -1181,25 +1181,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      // Call PaySprint with is_new=false to check if merchant is already registered
-      const verifyResult = await aepsService.getOnboardingUrl({
-        merchantCode: merchant.merchantCode,
-        mobile: user.phone,
-        isNew: false,
-      });
+      // Run both checks in parallel: URL-based check + STAGES-based check
+      const [verifyResult, stagesResult] = await Promise.all([
+        aepsService.getOnboardingUrl({
+          merchantCode: merchant.merchantCode,
+          mobile: user.phone,
+          isNew: false,
+        }),
+        aepsService.getMerchantOnboardingStatus(merchant.merchantCode),
+      ]);
 
       const msg = (verifyResult.message || "").toLowerCase();
+      const hasUrl = !!(verifyResult.redirecturl || verifyResult.data?.redirecturl);
+
+      // STAGES check: PaySprint dashboard shows STAGES=Completed when merchant has
+      // finished all onboarding form steps. This is the most reliable signal.
+      const stagesCompleted = (stagesResult.stages || "").toLowerCase() === "completed";
 
       // response_code 2 = "already registered/completed" on PaySprint's side
       // response_code 1 with no redirecturl = also completed (some PaySprint versions)
       // response_code 0 + "already registered" + no URL = form done, eKYC activation pending
-      //   → treat as completed so merchant can proceed to do AEPS (which IS the eKYC step)
+      // stagesCompleted = STAGES field from PaySprint merchant details = "Completed"
       const psCompleted =
+        stagesCompleted ||
         verifyResult.response_code === 2 ||
-        (verifyResult.response_code === 1 && !(verifyResult.redirecturl || verifyResult.data?.redirecturl)) ||
-        (verifyResult.response_code === 0 && (msg.includes("already registered") || msg.includes("already exist")) && !(verifyResult.redirecturl || verifyResult.data?.redirecturl));
+        (verifyResult.response_code === 1 && !hasUrl) ||
+        (verifyResult.response_code === 0 && (msg.includes("already registered") || msg.includes("already exist")) && !hasUrl);
 
-      console.log(`[KYC-Status] merchant=${merchant.merchantCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psCompleted=${psCompleted}`);
+      console.log(`[KYC-Status] merchant=${merchant.merchantCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" stages="${stagesResult.stages}" hasUrl=${hasUrl} psCompleted=${psCompleted}`);
 
       // Only upgrade PENDING→COMPLETED, never downgrade COMPLETED→PENDING
       if (psCompleted && merchant.kycStatus !== "COMPLETED") {
@@ -1218,7 +1227,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dailyAuthenticated: dailyAuth?.authenticated || false,
         redirectUrl: freshUrl || undefined,
         sessionExpired: !psCompleted && !freshUrl,
-        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message },
+        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message, stages: stagesResult.stages },
       });
     } catch (error) {
       console.error("KYC status check error:", error);
@@ -1297,16 +1306,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
       const mCode = merchantCode || existing.merchantCode;
-      const verifyResult = await aepsService.getOnboardingUrl({
-        merchantCode: mCode,
-        mobile: user.phone,
-      });
 
+      // Run both checks in parallel
+      const [verifyResult, stagesResult] = await Promise.all([
+        aepsService.getOnboardingUrl({ merchantCode: mCode, mobile: user.phone }),
+        aepsService.getMerchantOnboardingStatus(mCode),
+      ]);
+
+      const stagesCompleted = (stagesResult.stages || "").toLowerCase() === "completed";
       // response_code 2 = already registered on PaySprint (COMPLETED)
       // response_code 1 with no redirecturl = also completed on some PaySprint versions
+      // stagesCompleted = STAGES field = "Completed" from merchant details API
       const psCompleted =
+        stagesCompleted ||
         verifyResult.response_code === 2 ||
-        (verifyResult.response_code === 1 && !verifyResult.redirecturl);
+        (verifyResult.response_code === 1 && !(verifyResult.redirecturl || verifyResult.data?.redirecturl));
+
+      console.log(`[Onboard-Complete] merchant=${mCode} ps_code=${verifyResult.response_code} stages="${stagesResult.stages}" psCompleted=${psCompleted}`);
 
       if (psCompleted) {
         const updates: Record<string, string> = { kycStatus: "COMPLETED" };
@@ -1896,6 +1912,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Failed to regenerate KYC URL:", error);
       res.status(500).json({ error: "Failed to regenerate KYC URL" });
+    }
+  });
+
+  // Admin: Force-complete onboarding by merchantCode (immediate override)
+  app.post("/api/admin/merchants/force-complete", adminAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { merchantCode } = req.body;
+      if (!merchantCode) return res.status(400).json({ error: "merchantCode is required" });
+
+      const merchant = await storage.getAepsMerchantByCode(merchantCode);
+      if (!merchant) return res.status(404).json({ error: `No merchant found with code: ${merchantCode}` });
+
+      await storage.updateAepsMerchant(merchant.userId, { kycStatus: "COMPLETED" });
+      console.log(`[Admin] Force-completed onboarding for merchant ${merchantCode}`);
+      res.json({ success: true, merchantCode, message: `Merchant ${merchantCode} marked as COMPLETED` });
+    } catch (error) {
+      console.error("Force-complete failed:", error);
+      res.status(500).json({ error: "Failed to force-complete merchant" });
     }
   });
 

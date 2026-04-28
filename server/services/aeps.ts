@@ -347,6 +347,9 @@ function simulateAepsResponse(endpoint: string, payload: Record<string, unknown>
       data: { ackno: `AEPS${Date.now()}` },
     };
   }
+  if (endpoint.includes("getmerchantkyc") || endpoint.includes("getonboardstatus")) {
+    return { status: true, response_code: 1, message: "Merchant KYC status", stages: "Completed" } as any;
+  }
   if (endpoint.includes("onboard")) {
     return {
       status: true, response_code: 1, message: "Onboarding URL generated",
@@ -370,6 +373,35 @@ function simulateAepsResponse(endpoint: string, payload: Record<string, unknown>
 
 export async function getAepsBankList(): Promise<AepsResponse> {
   return makeAepsRequest("/service/aeps/banklist/index", {});
+}
+
+/**
+ * Check merchant onboarding STAGES status directly from PaySprint.
+ * Returns { stages: "Completed" | "Pending" | "" } so callers can check
+ * stages.toLowerCase() === "completed" without relying on redirecturl logic.
+ */
+export async function getMerchantOnboardingStatus(merchantCode: string): Promise<AepsResponse & { stages?: string }> {
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  if (!jwtTokenEnv) {
+    console.log("[AEPS SIMULATION] getMerchantOnboardingStatus: returning stages=Completed (simulation)");
+    return { status: true, response_code: 1, message: "Simulation", stages: "Completed" };
+  }
+
+  // Try the primary PaySprint merchant KYC status endpoint
+  const result = await makeAepsRequest("/service/onboard/onboard/getmerchantkyc", {
+    merchantcode: merchantCode,
+  }) as AepsResponse & { stages?: string; data?: any };
+
+  // PaySprint may return stages at top-level OR inside data
+  const stages: string =
+    result.stages ||
+    result.data?.stages ||
+    result.data?.STAGES ||
+    "";
+
+  console.log(`[Stages-Check] merchant=${merchantCode} response_code=${result.response_code} stages="${stages}" msg="${result.message}"`);
+
+  return { ...result, stages };
 }
 
 export async function getOnboardingUrl(params: {

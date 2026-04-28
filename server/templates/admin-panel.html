@@ -328,6 +328,8 @@
             <th>Firm Name</th>
             <th>Merchant Code</th>
             <th>KYC Status</th>
+            <th>eKYC</th>
+            <th>2FA Reg</th>
             <th>Created By</th>
             <th>Actions</th>
           </tr>
@@ -974,15 +976,19 @@ async function loadMerchants() {
       const statusColor = statusColors[m.kycStatus] || '#888';
       const kycBtn = m.kycRedirectUrl ? `<a href="${m.kycRedirectUrl}" target="_blank" style="color:#2E9E5B;text-decoration:none;font-size:12px;margin-right:6px;">KYC Link</a>` : '';
       const regenBtn = m.kycStatus !== 'COMPLETED' ? `<button onclick="regenerateKyc('${m.id}','${m.merchantCode||''}')" style="padding:3px 8px;background:#6366F1;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">🔗 Regen URL</button>` : '';
-      const approveBtn = m.kycStatus !== 'COMPLETED' ? `<button onclick="updateMerchantStatus('${m.id}','COMPLETED')" style="padding:3px 8px;background:#10B981;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">Approve</button>` : '';
+      const approveBtn = m.kycStatus !== 'COMPLETED' ? `<button onclick="forceCompleteOnboarding('${m.merchantCode}')" style="padding:3px 8px;background:#10B981;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">✅ Approve</button>` : '';
       const rejectBtn = m.kycStatus !== 'FAILED' ? `<button onclick="updateMerchantStatus('${m.id}','FAILED')" style="padding:3px 8px;background:#EF4444;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin-right:4px;">Reject</button>` : '';
       const deleteBtn = `<button onclick="deleteMerchant('${m.id}')" style="padding:3px 8px;background:#666;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">Delete</button>`;
+      const ekycBadge = m.isKycDone ? `<span style="color:#10B981;font-weight:700;font-size:13px;">✓</span>` : `<span style="color:#D1D5DB;font-size:13px;">—</span>`;
+      const twoFaBadge = m.is2FaRegistered ? `<span style="color:#10B981;font-weight:700;font-size:13px;">✓</span>` : `<span style="color:#D1D5DB;font-size:13px;">—</span>`;
       return `<tr>
         <td>${date}</td>
         <td>${m.userPhone || m.phone}</td>
         <td>${m.firmName || '-'}</td>
         <td style="font-family:monospace;font-weight:600;color:#2E9E5B;">${m.merchantCode}</td>
         <td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${statusColor}">${m.kycStatus}</span></td>
+        <td style="text-align:center;">${ekycBadge}</td>
+        <td style="text-align:center;">${twoFaBadge}</td>
         <td style="font-size:12px;color:#888;">${m.createdBy || 'self'}</td>
         <td>${kycBtn}${regenBtn}${approveBtn}${rejectBtn}${deleteBtn}</td>
       </tr>`;
@@ -1039,6 +1045,26 @@ async function updateMerchantStatus(id, status) {
     }
   } catch (err) {
     alert('Failed to update: ' + err.message);
+  }
+}
+
+async function forceCompleteOnboarding(merchantCode) {
+  if (!confirm('Force-complete onboarding for merchant ' + merchantCode + '?\n\nThis will mark their KYC as COMPLETED so they can proceed to eKYC step.')) return;
+  try {
+    const res = await fetch('/api/admin/merchants/force-complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken },
+      body: JSON.stringify({ merchantCode }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert('✅ ' + data.message);
+      loadMerchants();
+    } else {
+      alert('Error: ' + (data.error || 'Failed to force-complete'));
+    }
+  } catch (err) {
+    alert('Failed: ' + err.message);
   }
 }
 

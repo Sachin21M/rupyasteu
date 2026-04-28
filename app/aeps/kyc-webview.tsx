@@ -12,7 +12,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
-import type { WebView as WebViewClass, WebViewNavigation, WebViewErrorEvent } from "react-native-webview";
+import type {
+  WebView as WebViewClass,
+  WebViewNavigation,
+  WebViewErrorEvent,
+  WebViewMessageEvent,
+} from "react-native-webview";
 import { aepsOnboardComplete } from "@/lib/api";
 
 const NativeWebView =
@@ -22,6 +27,43 @@ const NativeWebView =
 
 const KYC_DOMAIN = "merchantkyc.com";
 
+// JS injected into the WebView after each page load.
+// Polls DOM every 800ms for PaySprint's completion keywords.
+// When found → posts KYC_COMPLETED message to React Native.
+const COMPLETION_DETECTOR_JS = `
+(function() {
+  var _kycDone = false;
+  var _interval = setInterval(function() {
+    if (_kycDone) return;
+    var body = document.body ? document.body.innerText || document.body.textContent || '' : '';
+    var lower = body.toLowerCase();
+    var keywords = [
+      'onboarding completed',
+      'bank 2 will be activate',
+      'your bank 2 will be',
+      'activation shortly',
+      'onboarding complete',
+      'kyc completed',
+      'kyc complete',
+      'successfully registered',
+      'successfully onboarded',
+    ];
+    for (var i = 0; i < keywords.length; i++) {
+      if (lower.indexOf(keywords[i]) !== -1) {
+        _kycDone = true;
+        clearInterval(_interval);
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'KYC_COMPLETED', keyword: keywords[i] }));
+        }
+        break;
+      }
+    }
+  }, 800);
+  // Auto-stop after 10 minutes to avoid memory leak
+  setTimeout(function() { clearInterval(_interval); }, 600000);
+})();
+true;
+`;
 
 type PermissionState = "requesting" | "granted" | "denied";
 
@@ -34,11 +76,26 @@ export default function KycWebViewScreen() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [webviewLoading, setWebviewLoading] = useState(true);
   const [webviewError, setWebviewError] = useState<string | null>(null);
+  const [showManualBtn, setShowManualBtn] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const completedRef = useRef(false);
+  const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     requestLocation();
+    return () => {
+      if (manualTimerRef.current) clearTimeout(manualTimerRef.current);
+    };
   }, []);
+
+  // Show manual fallback button 25 seconds after WebView finishes loading
+  function onWebViewLoadEnd() {
+    setWebviewLoading(false);
+    if (manualTimerRef.current) clearTimeout(manualTimerRef.current);
+    manualTimerRef.current = setTimeout(() => {
+      if (!completedRef.current) setShowManualBtn(true);
+    }, 25000);
+  }
 
   async function requestLocation() {
     setPermState("requesting");
@@ -51,40 +108,61 @@ export default function KycWebViewScreen() {
           });
           setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         } catch {
-          // Position unavailable (emulator) — still proceed; WebView native
-          // geolocation will attempt its own resolution
+          // Position unavailable — still proceed
         }
         setPermState("granted");
       } else {
         setPermState("denied");
       }
     } catch {
-      // Unexpected error requesting permission — treat as denied
       setPermState("denied");
     }
   }
 
+  // Called from both JS detection and manual button
+  async function markKycCompleted(source: string) {
+    if (completedRef.current || completing) return;
+    completedRef.current = true;
+    setCompleting(true);
+    setShowManualBtn(false);
+    console.log(`[KYC WebView] Completion triggered via: ${source}`);
+    try {
+      await aepsOnboardComplete({ status: "CALLBACK", fromCallback: true });
+      console.log("[KYC WebView] Marked COMPLETED successfully");
+    } catch (err) {
+      console.warn("[KYC WebView] markKycCompleted API failed (proceeding anyway):", err);
+    } finally {
+      setCompleting(false);
+      router.back();
+    }
+  }
+
+  // Receive messages posted by the injected JS
+  function handleWebViewMessage(event: WebViewMessageEvent) {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === "KYC_COMPLETED") {
+        console.log("[KYC WebView] DOM detected completion keyword:", data.keyword);
+        markKycCompleted(`DOM_DETECTION:${data.keyword}`);
+      }
+    } catch {
+      // Ignore non-JSON messages from the page
+    }
+  }
+
+  // Navigation state change — catches URL redirects (callback URL or off-domain)
   function handleNavigationStateChange(state: WebViewNavigation) {
     if (!state.url || completedRef.current) return;
     try {
       const host = new URL(state.url).hostname;
       const isOnKycDomain = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
       if (!isOnKycDomain && state.url.startsWith("http")) {
-        completedRef.current = true;
         const isCallbackUrl = state.url.includes("aeps-callback");
+        console.log(`[KYC WebView] Left KYC domain → url=${state.url} isCallback=${isCallbackUrl}`);
         if (isCallbackUrl) {
-          // PaySprint redirected to our callback URL — this means form was completed.
-          // Mark onboarding as COMPLETED before going back, then proceed.
-          console.log("[KYC WebView] Callback URL detected:", state.url);
-          const timeoutId = setTimeout(() => router.back(), 6000);
-          aepsOnboardComplete({ status: "CALLBACK", fromCallback: true })
-            .then(() => console.log("[KYC WebView] Onboarding marked COMPLETED via callback"))
-            .catch(err => console.warn("[KYC WebView] Callback mark failed (will still go back):", err))
-            .finally(() => {
-              clearTimeout(timeoutId);
-              router.back();
-            });
+          markKycCompleted("CALLBACK_URL_REDIRECT");
         } else {
+          completedRef.current = true;
           router.back();
         }
       }
@@ -99,18 +177,23 @@ export default function KycWebViewScreen() {
 
   function handleWebViewError(e: WebViewErrorEvent) {
     const desc = e.nativeEvent?.description || "";
-    const domain = e.nativeEvent?.url || "";
-    console.warn("[KYC WebView] Load error:", desc, domain);
+    console.warn("[KYC WebView] Load error:", desc);
     setWebviewLoading(false);
-    setWebviewError("Your KYC session has expired or is unavailable. Please go back and ask your admin to regenerate your KYC link, then try again immediately.");
+    setWebviewError(
+      "KYC session expired. Please go back and tap 'Complete Your KYC Setup' to get a fresh link."
+    );
   }
 
-  // Inject coords override on Android only — iOS WebView resolves geolocation via
-  // native CoreLocation; Android WebView benefits from the pre-fetched coord shim.
-  const injectedJs =
+  // Build injected JS — runs before content loads on EVERY page navigation.
+  // Combines geolocation shim (Android only) + completion keyword detector.
+  // BeforeContentLoaded re-fires on each navigation, so the detector works even
+  // when PaySprint uses multi-page flow (not SPA).
+  const geoShim =
     Platform.OS === "android" && coords
-      ? `(function(){var loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};navigator.geolocation.getCurrentPosition=function(s){s(loc);};navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(loc);},50);return 1;}; })();true;`
-      : undefined;
+      ? `(function(){var loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};navigator.geolocation.getCurrentPosition=function(s){s(loc);};navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(loc);},50);return 1;}; })();`
+      : "";
+
+  const injectedJsBeforeLoad = `${geoShim}${COMPLETION_DETECTOR_JS}`;
 
   const Header = () => (
     <View style={[styles.header, { paddingTop: topPadding }]}>
@@ -147,13 +230,7 @@ export default function KycWebViewScreen() {
             PaySprint KYC verification requires your location to confirm your
             presence. Please allow location access and tap Retry.
           </Text>
-          <Pressable
-            style={styles.retryBtn}
-            onPress={() => {
-              requestLocation();
-            }}
-            testID="kyc-retry-location"
-          >
+          <Pressable style={styles.retryBtn} onPress={requestLocation} testID="kyc-retry-location">
             <Text style={styles.retryBtnText}>Retry</Text>
           </Pressable>
           <Pressable style={styles.cancelLink} onPress={handleBack}>
@@ -178,7 +255,7 @@ export default function KycWebViewScreen() {
     );
   }
 
-  // Security: only allow merchantkyc.com (exact or subdomain)
+  // Security: only allow merchantkyc.com
   let isValidKycUrl = false;
   try {
     const host = new URL(url ?? "").hostname;
@@ -233,6 +310,14 @@ export default function KycWebViewScreen() {
             <Text style={styles.loadingText}>Loading KYC page…</Text>
           </View>
         )}
+
+        {completing && (
+          <View style={styles.completingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.completingText}>Saving your KYC status…</Text>
+          </View>
+        )}
+
         <NativeWebView
           source={{ uri: url ?? "" }}
           geolocationEnabled
@@ -242,13 +327,31 @@ export default function KycWebViewScreen() {
           mediaPlaybackRequiresUserAction={false}
           setSupportMultipleWindows={false}
           mediaCapturePermissionGrantType="grant"
-          injectedJavaScriptBeforeContentLoaded={injectedJs}
+          injectedJavaScriptBeforeContentLoaded={injectedJsBeforeLoad}
           onNavigationStateChange={handleNavigationStateChange}
-          onLoadEnd={() => setWebviewLoading(false)}
+          onMessage={handleWebViewMessage}
+          onLoadEnd={onWebViewLoadEnd}
           onError={handleWebViewError}
           style={styles.webview}
           testID="kyc-webview"
         />
+
+        {/* Manual fallback button — shown 25s after load if not already completed */}
+        {showManualBtn && !completing && (
+          <View style={[styles.manualBtnContainer, { bottom: insets.bottom + 16 }]}>
+            <Text style={styles.manualBtnHint}>
+              PaySprint ka "Onboarding Completed" screen dikh raha hai?
+            </Text>
+            <Pressable
+              style={styles.manualBtn}
+              onPress={() => markKycCompleted("MANUAL_BUTTON")}
+              testID="kyc-manual-complete"
+            >
+              <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.manualBtnText}>Maine KYC Complete Kar Li</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -346,7 +449,56 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 10,
   },
+  completingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 20,
+    gap: 16,
+  },
+  completingText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
   webview: {
     flex: 1,
+  },
+  manualBtnContainer: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    alignItems: "center",
+    gap: 8,
+    zIndex: 15,
+  },
+  manualBtnHint: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textAlign: "center",
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  manualBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  manualBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
   },
 });

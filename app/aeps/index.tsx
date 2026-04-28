@@ -237,11 +237,11 @@ export default function AepsServicesScreen() {
           router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
         }
       } else if (allowRedirect && result.sessionExpired) {
-        // PaySprint session expired — admin must regenerate the KYC link
+        // PaySprint session expired — user can get a fresh link by tapping the button again
         setKycVerifyingBanner(false);
         Alert.alert(
           "KYC Session Expired",
-          "Your KYC session has expired. Please ask your admin to regenerate your KYC link from the admin panel, then try again immediately."
+          "Your KYC session has expired. Please tap 'Complete Your KYC Setup' to get a fresh link and complete the process."
         );
       } else {
         // While a polling loop is running, stay silent — keep the banner visible
@@ -286,7 +286,7 @@ export default function AepsServicesScreen() {
         } else if (result.sessionExpired) {
           Alert.alert(
             "KYC Session Expired",
-            "Your KYC session has expired. Please ask your admin to regenerate your KYC link from the admin panel, then try again immediately."
+            "Your KYC session has expired. Please tap 'Complete Your KYC Setup' again to get a fresh link."
           );
           setOnboardingLoading(false);
           return;

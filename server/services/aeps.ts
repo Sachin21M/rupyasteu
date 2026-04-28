@@ -408,7 +408,7 @@ export async function getMerchantOnboardingStatus(merchantCode: string): Promise
   }) as AepsResponse & { stages?: string; data?: any };
 
   const primaryStages = extractStages(primary);
-  console.log(`[Stages-Check] PRIMARY endpoint merchant=${merchantCode} response_code=${primary.response_code} stages="${primaryStages}" msg="${primary.message}" full_response=${JSON.stringify(primary).substring(0, 400)}`);
+  console.log(`[Stages-Check] PRIMARY endpoint merchant=${merchantCode} response_code=${primary.response_code} stages="${primaryStages}" msg="${primary.message}" full_response=${JSON.stringify(primary).substring(0, 800)}`);
 
   if (primaryStages) {
     return { ...primary, stages: primaryStages };
@@ -420,7 +420,7 @@ export async function getMerchantOnboardingStatus(merchantCode: string): Promise
   }) as AepsResponse & { stages?: string; data?: any };
 
   const fallbackStages = extractStages(fallback);
-  console.log(`[Stages-Check] FALLBACK endpoint merchant=${merchantCode} response_code=${fallback.response_code} stages="${fallbackStages}" msg="${fallback.message}" full_response=${JSON.stringify(fallback).substring(0, 400)}`);
+  console.log(`[Stages-Check] FALLBACK endpoint merchant=${merchantCode} response_code=${fallback.response_code} stages="${fallbackStages}" msg="${fallback.message}" full_response=${JSON.stringify(fallback).substring(0, 800)}`);
 
   // Return whichever attempt gave us a stages value; empty string if neither did
   return { ...fallback, stages: fallbackStages };

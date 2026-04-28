@@ -590,13 +590,17 @@ export async function ekycComplete(params: {
     partnerid: PAYSPRINT_PARTNER_ID,
     merchantcode: params.merchantCode.replace(/-/g, ""),
     mobile: params.mobile,
+    referenceid: `EKYC${Date.now()}`,
+    aadharno: params.aadhaar,
+    accessmode: "BIO",
     pipe: "bank2",
     piddata: encryptedPid,
   };
 
-  console.log("[eKYC] Final payload before encryption:", JSON.stringify({ ...innerPayload, piddata: "[REDACTED]" }));
+  console.log("[eKYC] Payload:", JSON.stringify({ ...innerPayload, piddata: "[REDACTED]", aadharno: "[REDACTED]" }));
 
   const encryptedBody = encryptAesBody(innerPayload);
+  console.log("[eKYC] Encrypted body length:", encryptedBody.length);
   const requestBody = JSON.stringify({ body: encryptedBody });
 
   const endpoint = "/service/aeps/kyc/V3/kyc";

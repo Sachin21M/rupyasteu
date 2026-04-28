@@ -572,6 +572,7 @@ export async function ekycComplete(params: {
   merchantCode: string;
   aadhaar: string;
   pidXml: string;
+  mobile: string;
 }): Promise<AepsResponse> {
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
   const encryptedPid = jwtTokenEnv
@@ -579,13 +580,91 @@ export async function ekycComplete(params: {
     : "SIMULATED_ENCRYPTED_PID_FOR_TESTING_ONLY";
   const refid = `EKYC${Date.now()}${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
   console.log(`[eKYC] Complete for merchant ${params.merchantCode}, refid=${refid}, pidLen=${params.pidXml.length}, encryptedLen=${encryptedPid.length}`);
-  return makeAepsRequest("/service/aeps/kyc/V3/kyc", {
-    refid,
-    aadhaar: params.aadhaar,
-    data: encryptedPid,
-    merchantcode: params.merchantCode,
-    accessmode: "APP",
-  });
+
+  // /V3/kyc requires encrypted body format — different from other AEPS endpoints
+  const innerPayload: Record<string, unknown> = {
+    partnerid: PAYSPRINT_PARTNER_ID,
+    merchantcode: params.merchantCode.replace(/-/g, ""),
+    mobile: params.mobile,
+    pipe: "bank2",
+    piddata: encryptedPid,
+  };
+
+  console.log("[eKYC] Final payload before encryption:", JSON.stringify({ ...innerPayload, piddata: "[REDACTED]" }));
+
+  const encryptedBody = encryptAesBody(innerPayload);
+  const requestBody = JSON.stringify({ body: encryptedBody });
+
+  if (!jwtTokenEnv) {
+    console.log("[AEPS SIMULATION] No JWT token — simulating eKYC complete");
+    return { status: true, response_code: 1, message: "eKYC completed (simulated)" };
+  }
+
+  const endpoint = "/service/aeps/kyc/V3/kyc";
+  const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;
+  const startTime = Date.now();
+
+  const jwtResult = generatePaysprintJWT();
+  const PAYSPRINT_AUTHORIZED_KEY = process.env.PAYSPRINT_AUTHORIZED_KEY || "";
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Token": jwtResult.token,
+    ...(!isProductionEnv() && PAYSPRINT_AUTHORIZED_KEY ? { "Authorisedkey": PAYSPRINT_AUTHORIZED_KEY } : {}),
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AEPS_TIMEOUT);
+
+  try {
+    console.log(`[AEPS] Request to ${endpoint} (encrypted body)`);
+
+    let rawText: string;
+    let httpStatus: number;
+
+    if (PAYSPRINT_PROXY_URL) {
+      const proxyResponse = await fetch(PAYSPRINT_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: fullUrl, headers, payload: { body: encryptedBody } }),
+        signal: controller.signal,
+      });
+      const proxyResult = await proxyResponse.json() as { status?: number; body?: string };
+      httpStatus = typeof proxyResult.status === "number" ? proxyResult.status : proxyResponse.status;
+      rawText = typeof proxyResult.body === "string" ? proxyResult.body : JSON.stringify(proxyResult);
+    } else {
+      const response = await fetch(fullUrl, {
+        method: "POST",
+        headers,
+        body: requestBody,
+        signal: controller.signal,
+      });
+      httpStatus = response.status;
+      rawText = await response.text();
+    }
+
+    clearTimeout(timeout);
+    const duration = Date.now() - startTime;
+    console.log(`[AEPS] Response from ${endpoint}: HTTP ${httpStatus} (${duration}ms)`);
+    console.log(`[AEPS] Body: ${rawText.substring(0, 500)}`);
+
+    let data: AepsResponse;
+    try {
+      data = JSON.parse(rawText) as AepsResponse;
+    } catch {
+      return { status: false, response_code: 500, message: "Invalid JSON response from PaySprint eKYC" };
+    }
+
+    await logAepsApiCall(endpoint, { ...innerPayload, piddata: "[REDACTED]" }, rawText, httpStatus, data.status, duration);
+    return data;
+  } catch (error: any) {
+    clearTimeout(timeout);
+    const duration = Date.now() - startTime;
+    if (error.name === "AbortError") {
+      return { status: false, response_code: 408, message: "eKYC request timeout" };
+    }
+    await logAepsApiCall(endpoint, { ...innerPayload, piddata: "[REDACTED]" }, String(error), 0, false, duration, String(error));
+    return { status: false, response_code: 500, message: `eKYC request failed: ${error.message}` };
+  }
 }
 
 export function getStoredEkycOtpreqid(merchantCode: string): string | undefined {

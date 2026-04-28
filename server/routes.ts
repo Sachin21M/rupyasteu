@@ -1461,7 +1461,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/ekyc/complete", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const merchant = await storage.getAepsMerchant((req as any).userId);
+      const [merchant, user] = await Promise.all([
+        storage.getAepsMerchant((req as any).userId),
+        storage.getUser((req as any).userId),
+      ]);
       if (!merchant || merchant.kycStatus !== "COMPLETED") {
         return res.status(403).json({ error: "Complete merchant KYC first" });
       }
@@ -1478,6 +1481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         merchantCode: merchant.merchantCode,
         aadhaar,
         pidXml,
+        mobile: user?.phone || "",
       });
 
       if (result.status || result.response_code === 1) {

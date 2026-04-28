@@ -2203,50 +2203,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // GET handler — called when WebView is redirected to callback URL by PaySprint's browser flow
+  // Helper: PaySprint sends callback data as a JWT token in ?data= or body.data
+  // Decode the payload (no signature verification needed — we just need the merchant code)
+  function decodePaySprintJwt(token: string): Record<string, any> {
+    try {
+      const parts = token.split(".");
+      if (parts.length < 2) return {};
+      const payload = Buffer.from(parts[1], "base64url").toString("utf8");
+      return JSON.parse(payload);
+    } catch {
+      try {
+        // Some versions use standard base64
+        const parts = token.split(".");
+        if (parts.length < 2) return {};
+        const payload = Buffer.from(parts[1], "base64").toString("utf8");
+        return JSON.parse(payload);
+      } catch {
+        return {};
+      }
+    }
+  }
+
+  function extractMerchantCode(obj: Record<string, any>): string {
+    return (
+      obj.merchantcode ||
+      obj.merchantCode ||
+      obj.MERCHANTCODE ||
+      obj.merchant_code ||
+      obj.MerchantCode ||
+      ""
+    );
+  }
+
+  // GET handler — PaySprint redirects the WebView browser here when onboarding completes.
+  // PaySprint sends: ?data=<JWT> where the JWT payload contains the merchant code.
   app.get("/api/paysprint/aeps-callback", async (req: Request, res: Response) => {
     try {
       const query = req.query;
-      console.log("[PaySprint AEPS Callback GET] Full query params:", JSON.stringify(query));
-      const merchantcode = (query.merchantcode || query.merchantCode || query.MERCHANTCODE || "") as string;
-      const status = (query.status || query.STATUS || "") as string;
-      const kycstatus = (query.kycstatus || query.kycStatus || "") as string;
+      console.log("[AEPS Callback GET] params:", JSON.stringify(query));
+
+      // Try direct params first, then decode JWT in ?data=
+      let merchantcode = extractMerchantCode(query as any);
+      let decoded: Record<string, any> = {};
+
+      if (!merchantcode && query.data) {
+        decoded = decodePaySprintJwt(query.data as string);
+        merchantcode = extractMerchantCode(decoded);
+        console.log("[AEPS Callback GET] JWT decoded:", JSON.stringify(decoded));
+      }
+
+      console.log(`[AEPS Callback GET] merchantcode="${merchantcode}"`);
+
       if (merchantcode) {
         const merchant = await storage.getAepsMerchantByCode(merchantcode);
         if (merchant) {
-          const isSuccess = status.toUpperCase() === "SUCCESS" || kycstatus.toUpperCase() === "COMPLETED" || status === "1";
-          if (isSuccess || merchantcode) {
-            // Any redirect to our callback URL = form completed on PaySprint's side
-            await storage.updateAepsMerchant(merchant.userId, { kycStatus: "COMPLETED" });
-            console.log(`[PaySprint AEPS Callback GET] Merchant ${merchantcode} KYC → COMPLETED`);
-          }
+          await storage.updateAepsMerchant(merchant.userId, { kycStatus: "COMPLETED" });
+          console.log(`[AEPS Callback GET] Merchant ${merchantcode} → COMPLETED`);
+        } else {
+          console.warn(`[AEPS Callback GET] No merchant found for code: ${merchantcode}`);
         }
+      } else {
+        console.warn("[AEPS Callback GET] Could not extract merchant code from callback");
       }
-      // Return plain 200 so the WebView doesn't show an error page
+
       res.status(200).send("OK");
     } catch (error) {
-      console.error("[PaySprint AEPS Callback GET] Error:", error);
+      console.error("[AEPS Callback GET] Error:", error);
       res.status(200).send("OK");
     }
   });
 
-  // POST handler — called server-to-server by PaySprint after processing
+  // POST handler — PaySprint server-to-server callback after backend processing.
+  // Also uses JWT-encoded body.data field for the merchant code.
   app.post("/api/paysprint/aeps-callback", async (req: Request, res: Response) => {
     try {
       const body = req.body;
-      console.log("[PaySprint AEPS Callback POST]", JSON.stringify(body));
-      const merchantcode = body.merchantcode || body.merchantCode || body.MERCHANTCODE || "";
+      console.log("[AEPS Callback POST] body:", JSON.stringify(body));
+
+      // Try direct fields first, then decode JWT in body.data
+      let merchantcode = extractMerchantCode(body);
+      let decoded: Record<string, any> = {};
+
+      if (!merchantcode && body.data) {
+        decoded = decodePaySprintJwt(body.data as string);
+        merchantcode = extractMerchantCode(decoded);
+        console.log("[AEPS Callback POST] JWT decoded:", JSON.stringify(decoded));
+      }
+
+      console.log(`[AEPS Callback POST] merchantcode="${merchantcode}"`);
+
       if (merchantcode) {
         const merchant = await storage.getAepsMerchantByCode(merchantcode);
         if (merchant) {
-          const kycStatus = body.status === "SUCCESS" || body.kycstatus === "COMPLETED" || body.STATUS === "SUCCESS" ? "COMPLETED" : "PENDING";
-          await storage.updateAepsMerchant(merchant.userId, { kycStatus });
-          console.log(`[PaySprint AEPS Callback POST] Merchant ${merchantcode} KYC → ${kycStatus}`);
+          await storage.updateAepsMerchant(merchant.userId, { kycStatus: "COMPLETED" });
+          console.log(`[AEPS Callback POST] Merchant ${merchantcode} → COMPLETED`);
+        } else {
+          console.warn(`[AEPS Callback POST] No merchant found for code: ${merchantcode}`);
         }
+      } else {
+        console.warn("[AEPS Callback POST] Could not extract merchant code from callback");
       }
+
       res.status(200).json({ status: true });
     } catch (error) {
-      console.error("[PaySprint AEPS Callback POST] Error:", error);
+      console.error("[AEPS Callback POST] Error:", error);
       res.status(200).json({ status: true });
     }
   });

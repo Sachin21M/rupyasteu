@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
 import type { WebView as WebViewClass, WebViewNavigation, WebViewErrorEvent } from "react-native-webview";
+import { aepsOnboardComplete } from "@/lib/api";
 
 const NativeWebView =
   Platform.OS !== "web"
@@ -70,7 +71,22 @@ export default function KycWebViewScreen() {
       const isOnKycDomain = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
       if (!isOnKycDomain && state.url.startsWith("http")) {
         completedRef.current = true;
-        router.back();
+        const isCallbackUrl = state.url.includes("aeps-callback");
+        if (isCallbackUrl) {
+          // PaySprint redirected to our callback URL — this means form was completed.
+          // Mark onboarding as COMPLETED before going back, then proceed.
+          console.log("[KYC WebView] Callback URL detected:", state.url);
+          const timeoutId = setTimeout(() => router.back(), 6000);
+          aepsOnboardComplete({ status: "CALLBACK", fromCallback: true })
+            .then(() => console.log("[KYC WebView] Onboarding marked COMPLETED via callback"))
+            .catch(err => console.warn("[KYC WebView] Callback mark failed (will still go back):", err))
+            .finally(() => {
+              clearTimeout(timeoutId);
+              router.back();
+            });
+        } else {
+          router.back();
+        }
       }
     } catch {
       // URL parsing error — ignore

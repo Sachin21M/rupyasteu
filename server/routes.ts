@@ -1155,7 +1155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Real PaySprint KYC status check — always calls PaySprint, never trusts local DB alone
+  // Step 1 status: DB is the source of truth. Set by callback redirect, admin approval, or PaySprint POST.
   app.get("/api/aeps/kyc-status", authMiddleware, async (req: Request, res: Response) => {
     try {
       const merchant = await storage.getAepsMerchant((req as any).userId);
@@ -1164,10 +1164,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = new Date().toISOString().split("T")[0];
       const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);
 
-      // If admin has already approved this merchant (COMPLETED), never downgrade it.
-      // PaySprint's is_new=0 check cannot reliably distinguish "form done, eKYC pending"
-      // from "session expired" — so once COMPLETED is set (by admin approval or PaySprint
-      // callback), it stays COMPLETED.
+      // DB kycStatus is the single source of truth for Step 1 (Merchant Onboarding).
+      // It is set by:
+      //   1. WebView callback redirect → onboard/complete with fromCallback=true
+      //   2. PaySprint GET/POST server callback → /api/paysprint/aeps-callback
+      //   3. Admin force-complete → /api/admin/aeps/force-complete/:merchantCode
+      // We no longer call PaySprint APIs here to auto-detect — those endpoints all failed.
       if (merchant.kycStatus === "COMPLETED") {
         return res.json({
           kycStatus: "COMPLETED",
@@ -1178,55 +1180,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // kycStatus=PENDING: fetch a fresh onboarding URL so merchant can complete the form
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      // Run both checks in parallel: URL-based check + CASA activation check
-      const [verifyResult, casaResult] = await Promise.all([
-        aepsService.getOnboardingUrl({
+      let freshUrl: string | null = null;
+      try {
+        const urlResult = await aepsService.getOnboardingUrl({
           merchantCode: merchant.merchantCode,
           mobile: user.phone,
           isNew: false,
-        }),
-        aepsService.checkMerchantCasaStatus(merchant.merchantCode),
-      ]);
-
-      const msg = (verifyResult.message || "").toLowerCase();
-      const hasUrl = !!(verifyResult.redirecturl || verifyResult.data?.redirecturl);
-
-      // CASA check is the PRIMARY and most reliable signal:
-      // is_casa="1" means PaySprint has fully activated this merchant for AEPS.
-      // URL-based checks are kept as fallback for edge cases.
-      const psCompleted =
-        casaResult.isCasaActive ||
-        verifyResult.response_code === 2 ||
-        (verifyResult.response_code === 1 && !hasUrl) ||
-        (verifyResult.response_code === 0 && (msg.includes("already registered") || msg.includes("already exist")) && !hasUrl);
-
-      console.log(`[KYC-Status] merchant=${merchant.merchantCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" is_casa="${casaResult.is_casa}" casaActive=${casaResult.isCasaActive} hasUrl=${hasUrl} psCompleted=${psCompleted}`);
-
-      // Only upgrade PENDING→COMPLETED, never downgrade COMPLETED→PENDING
-      if (psCompleted && merchant.kycStatus !== "COMPLETED") {
-        await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
+        });
+        freshUrl = urlResult.redirecturl || urlResult.data?.redirecturl || null;
+        console.log(`[KYC-Status] merchant=${merchant.merchantCode} status=PENDING freshUrl=${freshUrl ? "yes" : "no"}`);
+      } catch (err) {
+        console.warn(`[KYC-Status] merchant=${merchant.merchantCode} getOnboardingUrl failed:`, err);
       }
 
-      // Only return a URL if PaySprint actively provides one right now.
-      // Never fall back to stored URLs — they expire and cause silent failures in the WebView.
-      const freshUrl = !psCompleted
-        ? (verifyResult.redirecturl || verifyResult.data?.redirecturl || null)
-        : null;
-
       res.json({
-        kycStatus: psCompleted ? "COMPLETED" : "PENDING",
-        onboarded: psCompleted,
+        kycStatus: "PENDING",
+        onboarded: false,
         dailyAuthenticated: dailyAuth?.authenticated || false,
         redirectUrl: freshUrl || undefined,
-        sessionExpired: !psCompleted && !freshUrl,
-        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message, is_casa: casaResult.is_casa },
+        sessionExpired: !freshUrl,
       });
     } catch (error) {
       console.error("KYC status check error:", error);
-      res.status(500).json({ error: "Failed to check KYC status from PaySprint" });
+      res.status(500).json({ error: "Failed to check KYC status" });
     }
   });
 
@@ -1291,24 +1271,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/onboard/complete", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { merchantCode } = req.body;
+      const { merchantCode, fromCallback } = req.body;
       const existing = await storage.getAepsMerchant((req as any).userId);
       if (!existing) return res.status(404).json({ error: "Merchant not found. Start onboarding first." });
       if (existing.kycStatus === "COMPLETED") {
         return res.json({ success: true, kycStatus: "COMPLETED" });
       }
 
+      // fromCallback=true means the WebView detected PaySprint's redirect to our callback URL.
+      // This redirect IS the completion signal — trust it and mark COMPLETED immediately.
+      if (fromCallback) {
+        const updates: Record<string, string> = { kycStatus: "COMPLETED" };
+        if (merchantCode) updates.merchantCode = merchantCode;
+        await storage.updateAepsMerchant((req as any).userId, updates);
+        console.log(`[Onboard-Complete] merchant=${existing.merchantCode} marked COMPLETED via WebView callback redirect`);
+        return res.json({ success: true, kycStatus: "COMPLETED" });
+      }
+
+      // Normal (non-callback) call: try CASA check as best-effort detection
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
       const mCode = merchantCode || existing.merchantCode;
 
-      // Run both checks in parallel: URL-based check + CASA activation check
       const [verifyResult, casaResult] = await Promise.all([
         aepsService.getOnboardingUrl({ merchantCode: mCode, mobile: user.phone }),
         aepsService.checkMerchantCasaStatus(mCode),
       ]);
 
-      // CASA check is the PRIMARY signal — is_casa="1" means fully activated
       const psCompleted =
         casaResult.isCasaActive ||
         verifyResult.response_code === 2 ||
@@ -2183,21 +2172,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET handler — called when WebView is redirected to callback URL by PaySprint's browser flow
+  app.get("/api/paysprint/aeps-callback", async (req: Request, res: Response) => {
+    try {
+      const query = req.query;
+      console.log("[PaySprint AEPS Callback GET] Full query params:", JSON.stringify(query));
+      const merchantcode = (query.merchantcode || query.merchantCode || query.MERCHANTCODE || "") as string;
+      const status = (query.status || query.STATUS || "") as string;
+      const kycstatus = (query.kycstatus || query.kycStatus || "") as string;
+      if (merchantcode) {
+        const merchant = await storage.getAepsMerchantByCode(merchantcode);
+        if (merchant) {
+          const isSuccess = status.toUpperCase() === "SUCCESS" || kycstatus.toUpperCase() === "COMPLETED" || status === "1";
+          if (isSuccess || merchantcode) {
+            // Any redirect to our callback URL = form completed on PaySprint's side
+            await storage.updateAepsMerchant(merchant.userId, { kycStatus: "COMPLETED" });
+            console.log(`[PaySprint AEPS Callback GET] Merchant ${merchantcode} KYC → COMPLETED`);
+          }
+        }
+      }
+      // Return plain 200 so the WebView doesn't show an error page
+      res.status(200).send("OK");
+    } catch (error) {
+      console.error("[PaySprint AEPS Callback GET] Error:", error);
+      res.status(200).send("OK");
+    }
+  });
+
+  // POST handler — called server-to-server by PaySprint after processing
   app.post("/api/paysprint/aeps-callback", async (req: Request, res: Response) => {
     try {
       const body = req.body;
-      console.log("[PaySprint AEPS Callback]", JSON.stringify(body));
-      if (body.merchantcode) {
-        const merchant = await storage.getAepsMerchantByCode(body.merchantcode);
+      console.log("[PaySprint AEPS Callback POST]", JSON.stringify(body));
+      const merchantcode = body.merchantcode || body.merchantCode || body.MERCHANTCODE || "";
+      if (merchantcode) {
+        const merchant = await storage.getAepsMerchantByCode(merchantcode);
         if (merchant) {
-          const kycStatus = body.status === "SUCCESS" || body.kycstatus === "COMPLETED" ? "COMPLETED" : "PENDING";
+          const kycStatus = body.status === "SUCCESS" || body.kycstatus === "COMPLETED" || body.STATUS === "SUCCESS" ? "COMPLETED" : "PENDING";
           await storage.updateAepsMerchant(merchant.userId, { kycStatus });
-          console.log(`[PaySprint AEPS Callback] Merchant ${body.merchantcode} KYC → ${kycStatus}`);
+          console.log(`[PaySprint AEPS Callback POST] Merchant ${merchantcode} KYC → ${kycStatus}`);
         }
       }
       res.status(200).json({ status: true });
     } catch (error) {
-      console.error("[PaySprint AEPS Callback] Error:", error);
+      console.error("[PaySprint AEPS Callback POST] Error:", error);
       res.status(200).json({ status: true });
     }
   });

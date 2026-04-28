@@ -90,6 +90,7 @@ export default function AepsServicesScreen() {
   const kycUrlOpenedRef = useRef(false);
   const kycWebviewUsedRef = useRef(false);
   const [kycVerifyingBanner, setKycVerifyingBanner] = useState(false);
+  const [kycRejectionReason, setKycRejectionReason] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authAadhaar, setAuthAadhaar] = useState("");
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
@@ -165,12 +166,17 @@ export default function AepsServicesScreen() {
       setEkycDone(result.ekycDone || false);
       setTwoFaRegistered(result.twoFaRegistered || false);
       setDailyAuthenticated(result.dailyAuthenticated || false);
-      setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
+      const dbKycStatus = result.merchant?.kycStatus || "NOT_STARTED";
+      setKycStatus(dbKycStatus);
       if (result.merchant?.merchantCode) {
         setMerchantCode(result.merchant.merchantCode);
       }
       if (result.merchant?.kycRedirectUrl) {
         setKycRedirectUrl(result.merchant.kycRedirectUrl);
+      }
+      // If PENDING, silently check PaySprint for real status (Approved/Rejected)
+      if (dbKycStatus === "PENDING" && result.merchant?.merchantCode) {
+        verifyKycFromPaySprint(false);
       }
     } catch {
       setOnboarded(false);
@@ -211,7 +217,6 @@ export default function AepsServicesScreen() {
   }
 
   async function verifyKycFromPaySprint(allowRedirect = false) {
-    // Deduplicate concurrent calls (e.g. immediate check + first interval tick)
     if (kycVerifyingRef.current) return;
     kycVerifyingRef.current = true;
     try {
@@ -220,11 +225,18 @@ export default function AepsServicesScreen() {
         stopKycPolling();
         setOnboarded(true);
         setKycStatus("COMPLETED");
+        setKycRejectionReason("");
         setKycIncompleteWarning(false);
         setKycVerifyingBanner(false);
         Alert.alert("KYC Verified!", "Your AEPS merchant account is now active. You can perform AEPS transactions.");
+      } else if (result.kycStatus === "REJECTED" || result.rejectionReason) {
+        // Bank ne reject kar diya — stop polling aur reason dikhao
+        stopKycPolling();
+        setKycVerifyingBanner(false);
+        setKycIncompleteWarning(false);
+        setKycStatus("REJECTED");
+        setKycRejectionReason(result.rejectionReason || "Bank ne onboarding reject kar di.");
       } else if (allowRedirect && result.redirectUrl) {
-        // PaySprint has an active KYC session — open it so the merchant can resume
         setKycIncompleteWarning(false);
         setKycVerifyingBanner(false);
         if (Platform.OS === "web") {
@@ -237,22 +249,18 @@ export default function AepsServicesScreen() {
           router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
         }
       } else if (allowRedirect && result.sessionExpired) {
-        // PaySprint session expired — user can get a fresh link by tapping the button again
         setKycVerifyingBanner(false);
         Alert.alert(
           "KYC Session Expired",
           "Your KYC session has expired. Please tap 'Complete Your KYC Setup' to get a fresh link and complete the process."
         );
       } else {
-        // While a polling loop is running, stay silent — keep the banner visible
-        // and let the next poll or the 60-second timeout handle the final verdict.
         if (!pollingRef.current) {
           setKycVerifyingBanner(false);
           setKycIncompleteWarning(true);
         }
       }
     } catch {
-      // Silent fail; keep the banner if polling is still active
       if (!pollingRef.current) {
         setKycVerifyingBanner(false);
       }
@@ -642,31 +650,46 @@ export default function AepsServicesScreen() {
                 )}
                 {merchantCode ? (
                   <View>
-                    {kycIncompleteWarning && (
+                    {kycStatus === "REJECTED" && kycRejectionReason ? (
+                      <View style={styles.kycRejectedBox}>
+                        <Ionicons name="close-circle" size={18} color="#DC2626" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.kycRejectedTitle}>Onboarding Rejected</Text>
+                          <Text style={styles.kycRejectedReason}>{kycRejectionReason}</Text>
+                          <Text style={styles.kycRejectedHint}>
+                            Please contact PaySprint support with your Merchant Code for resolution.
+                          </Text>
+                        </View>
+                      </View>
+                    ) : kycIncompleteWarning ? (
                       <View style={styles.kycWarningBox}>
                         <Ionicons name="time-outline" size={16} color="#F59E0B" />
                         <Text style={styles.kycWarningText}>
-                          KYC not yet completed on PaySprint. Please finish all steps on the verification page, then come back — we'll detect it automatically.
+                          PaySprint aapka Aadhaar verify kar raha hai. 15-30 minute baad dobara check karein.
                         </Text>
                       </View>
+                    ) : null}
+                    {kycStatus !== "REJECTED" && (
+                      <>
+                        <Pressable
+                          style={[styles.setupBtn, { backgroundColor: Colors.primary }, onboardingLoading && { opacity: 0.6 }]}
+                          onPress={handleOpenKyc}
+                          disabled={onboardingLoading}
+                        >
+                          {onboardingLoading ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <>
+                              <Ionicons name="open-outline" size={16} color="#fff" />
+                              <Text style={styles.setupBtnText}>Complete Your KYC Setup</Text>
+                            </>
+                          )}
+                        </Pressable>
+                        <Text style={styles.kycAutoHint}>
+                          After completing KYC, return to this app — your status will update automatically.
+                        </Text>
+                      </>
                     )}
-                    <Pressable
-                      style={[styles.setupBtn, { backgroundColor: Colors.primary }, onboardingLoading && { opacity: 0.6 }]}
-                      onPress={handleOpenKyc}
-                      disabled={onboardingLoading}
-                    >
-                      {onboardingLoading ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <>
-                          <Ionicons name="open-outline" size={16} color="#fff" />
-                          <Text style={styles.setupBtnText}>Complete Your KYC Setup</Text>
-                        </>
-                      )}
-                    </Pressable>
-                    <Text style={styles.kycAutoHint}>
-                      After completing KYC, return to this app — your status will update automatically.
-                    </Text>
                   </View>
                 ) : null}
               </>
@@ -1186,6 +1209,36 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: "#92400E",
     lineHeight: 18,
+  },
+  kycRejectedBox: {
+    flexDirection: "row" as const,
+    alignItems: "flex-start" as const,
+    gap: 10,
+    backgroundColor: "#FEF2F2",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    padding: 12,
+    marginBottom: 10,
+  },
+  kycRejectedTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#DC2626",
+    marginBottom: 2,
+  },
+  kycRejectedReason: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "#991B1B",
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  kycRejectedHint: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: "#B91C1C",
+    lineHeight: 16,
   },
   kycAutoHint: {
     fontSize: 11,

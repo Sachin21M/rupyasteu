@@ -1180,16 +1180,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // kycStatus=PENDING in DB — ask PaySprint's onboarding URL API.
-      // Its response tells us two things:
-      //   1. Whether the merchant is already registered (no URL returned / specific response codes)
-      //   2. If not done, the fresh URL to show in the WebView
+      // kycStatus=PENDING in DB — check PaySprint for real status.
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
       let freshUrl: string | null = null;
       let psCompleted = false;
 
+      // 1. Get onboarding URL (to check if already registered + get fresh WebView URL)
       try {
         const urlResult = await aepsService.getOnboardingUrl({
           merchantCode: merchant.merchantCode,
@@ -1201,10 +1199,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const msg = (urlResult.message || "").toLowerCase();
         const code = urlResult.response_code;
 
-        // PaySprint signals completion when:
-        //   response_code=2          → explicit "already completed"
-        //   response_code=1, no URL  → registered but no new session needed
-        //   response_code=0, no URL, message has "already registered/exist"
         psCompleted =
           code === 2 ||
           (code === 1 && !freshUrl) ||
@@ -1215,10 +1209,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.warn(`[KYC-Status] merchant=${merchant.merchantCode} getOnboardingUrl failed:`, err);
       }
 
-      // Auto-upgrade PENDING → COMPLETED when PaySprint confirms registration
+      // Auto-upgrade PENDING → COMPLETED when PaySprint URL API confirms registration
       if (psCompleted) {
         await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
-        console.log(`[KYC-Status] merchant=${merchant.merchantCode} auto-upgraded to COMPLETED via PaySprint response`);
+        console.log(`[KYC-Status] merchant=${merchant.merchantCode} auto-upgraded to COMPLETED`);
         return res.json({
           kycStatus: "COMPLETED",
           onboarded: true,
@@ -1226,6 +1220,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
           twoFaRegistered: merchant.is2FaRegistered || false,
           dailyAuthenticated: dailyAuth?.authenticated || false,
         });
+      }
+
+      // 2. Check real onboard status across all banks (getonboardstatus API)
+      try {
+        const onboardStatus = await aepsService.getOnboardStatus(merchant.merchantCode, user.phone);
+        console.log(`[KYC-Status] merchant=${merchant.merchantCode} onboardStatus=${onboardStatus.overallStatus} approvedBank=${onboardStatus.approvedBank}`);
+
+        if (onboardStatus.overallStatus === "APPROVED") {
+          // At least one bank approved — mark COMPLETED
+          await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
+          return res.json({
+            kycStatus: "COMPLETED",
+            onboarded: true,
+            ekycDone: merchant.isKycDone || false,
+            twoFaRegistered: merchant.is2FaRegistered || false,
+            dailyAuthenticated: dailyAuth?.authenticated || false,
+          });
+        }
+
+        if (onboardStatus.overallStatus === "REJECTED") {
+          // All banks rejected — return rejection info to user
+          const primaryReason = onboardStatus.rejectedReasons[0] || "Bank ne onboarding reject kar di";
+          return res.json({
+            kycStatus: "REJECTED",
+            onboarded: false,
+            dailyAuthenticated: dailyAuth?.authenticated || false,
+            rejectionReason: primaryReason,
+            rejectedReasons: onboardStatus.rejectedReasons,
+            banks: onboardStatus.banks,
+          });
+        }
+      } catch (err) {
+        console.warn(`[KYC-Status] merchant=${merchant.merchantCode} getOnboardStatus failed:`, err);
       }
 
       res.json({

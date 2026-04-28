@@ -409,6 +409,73 @@ export async function checkMerchantCasaStatus(merchantCode: string): Promise<{ i
   return { isCasaActive, is_casa: isCasaRaw, raw: result };
 }
 
+const ONBOARD_PIPES = ["bank2", "bank3", "bank5", "bank6"];
+
+export interface OnboardBankStatus {
+  pipe: string;
+  isApproved: boolean;
+  isRejected: boolean;
+  isPending: boolean;
+  reason: string;
+}
+
+export interface OnboardStatusResult {
+  overallStatus: "APPROVED" | "REJECTED" | "PENDING" | "UNKNOWN";
+  approvedBank: string | null;
+  rejectedReasons: string[];
+  banks: OnboardBankStatus[];
+}
+
+/**
+ * Check merchant AEPS onboarding status across all banks via PaySprint's
+ * getonboardstatus endpoint. Returns per-bank approval/rejection reasons.
+ * Strips hyphens from merchant code (PaySprint requires alphanumeric only).
+ */
+export async function getOnboardStatus(merchantCode: string, mobile: string): Promise<OnboardStatusResult> {
+  const psCode = merchantCode.replace(/-/g, "");
+
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  if (!jwtTokenEnv) {
+    return { overallStatus: "UNKNOWN", approvedBank: null, rejectedReasons: [], banks: [] };
+  }
+
+  const bankResults: OnboardBankStatus[] = [];
+
+  for (const pipe of ONBOARD_PIPES) {
+    try {
+      const result = await makeAepsRequest("/service/onboard/onboard/getonboardstatus", {
+        merchantcode: psCode,
+        mobile,
+        pipe,
+      }) as AepsResponse & { is_approved?: string };
+
+      const isApproved = result.is_approved === "Approved" || result.is_approved === "approved";
+      const isRejected = result.is_approved === "Rejected" || result.is_approved === "rejected";
+      const reason = result.message || "";
+
+      console.log(`[OnboardStatus] merchant=${psCode} pipe=${pipe} approved=${isApproved} rejected=${isRejected} msg="${reason}"`);
+
+      bankResults.push({ pipe, isApproved, isRejected, isPending: !isApproved && !isRejected, reason });
+    } catch (err) {
+      console.warn(`[OnboardStatus] merchant=${psCode} pipe=${pipe} error:`, err);
+      bankResults.push({ pipe, isApproved: false, isRejected: false, isPending: true, reason: "Check failed" });
+    }
+  }
+
+  const approvedBank = bankResults.find(b => b.isApproved)?.pipe || null;
+  const rejectedBanks = bankResults.filter(b => b.isRejected);
+  const rejectedReasons = rejectedBanks.map(b => b.reason).filter(Boolean);
+
+  let overallStatus: OnboardStatusResult["overallStatus"] = "PENDING";
+  if (approvedBank) {
+    overallStatus = "APPROVED";
+  } else if (rejectedBanks.length === ONBOARD_PIPES.length) {
+    overallStatus = "REJECTED";
+  }
+
+  return { overallStatus, approvedBank, rejectedReasons, banks: bankResults };
+}
+
 export async function getOnboardingUrl(params: {
   merchantCode: string;
   mobile: string;

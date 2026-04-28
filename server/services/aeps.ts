@@ -33,14 +33,23 @@ export function extractAndEncryptPid(pidXml: string): string {
   if (errMatch && errMatch[1] !== "0") {
     throw new Error(`Biometric capture failed (errCode=${errMatch[1]})`);
   }
+  if (!pidXml.includes("<Skey") && !pidXml.includes("<Skey>")) {
+    throw new Error("Invalid PID XML: missing <Skey> (session key)");
+  }
+  if (!pidXml.includes("<Hmac>") && !pidXml.includes("<Hmac ")) {
+    throw new Error("Invalid PID XML: missing <Hmac>");
+  }
   const dataMatch = pidXml.match(/<Data[^>]*>([^<]+)<\/Data>/);
   if (!dataMatch || !dataMatch[1]) {
     throw new Error("Invalid PID XML: <Data> tag missing or empty");
   }
   const rawData = dataMatch[1].trim();
-  if (rawData.length < 100) {
-    throw new Error("Invalid biometric data: PID too short");
+  if (rawData.length < 500) {
+    throw new Error(`Invalid biometric data: PID <Data> too short (${rawData.length} chars, need ≥ 500)`);
   }
+
+  console.log("[eKYC] PID length:", pidXml.length);
+  console.log("[eKYC] Extracted data length:", rawData.length);
 
   const keyHex = process.env.PAYSPRINT_AES_KEY || "";
   const ivHex = process.env.PAYSPRINT_AES_IV || "";
@@ -50,13 +59,16 @@ export function extractAndEncryptPid(pidXml: string): string {
   const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
   let encrypted = cipher.update(rawData, "utf8", "base64");
   encrypted += cipher.final("base64");
+
+  console.log("[eKYC] Encrypted PID length:", encrypted.length);
+
   return encrypted;
 }
 
 const SENSITIVE_KEYS = new Set([
   "adhaarnumber", "aadhaar", "aadhar", "aadharnumber",
   "piddata", "pid", "biometric", "biometricdata",
-  "hmac", "skey", "ci", "sessionkey",
+  "data", "hmac", "skey", "ci", "sessionkey",
 ]);
 
 function maskSensitiveFields(obj: unknown): unknown {
@@ -570,7 +582,7 @@ export async function ekycComplete(params: {
   return makeAepsRequest("/service/aeps/kyc/V3/kyc", {
     refid,
     aadhaar: params.aadhaar,
-    piddata: encryptedPid,
+    data: encryptedPid,
     merchantcode: params.merchantCode,
     accessmode: "APP",
   });

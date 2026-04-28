@@ -1,5 +1,57 @@
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { storage } from "../storage";
+
+// In-memory store for eKYC OTP sessions (merchantCode → otpreqid)
+const ekycOtpStore = new Map<string, { otpreqid: string; expiresAt: number }>();
+
+function cleanExpiredEkycSessions() {
+  const now = Date.now();
+  for (const [key, val] of ekycOtpStore.entries()) {
+    if (val.expiresAt < now) ekycOtpStore.delete(key);
+  }
+}
+
+export function encryptAesBody(payload: Record<string, unknown>): string {
+  const keyHex = process.env.PAYSPRINT_AES_KEY || "";
+  const ivHex = process.env.PAYSPRINT_AES_IV || "";
+  if (!keyHex || !ivHex) throw new Error("AES key/IV not configured");
+  const key = Buffer.from(keyHex, "utf8").slice(0, 16);
+  const iv = Buffer.from(ivHex, "utf8").slice(0, 16);
+  const jsonStr = JSON.stringify(payload);
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
+  let encrypted = cipher.update(jsonStr, "utf8", "base64");
+  encrypted += cipher.final("base64");
+  return encrypted;
+}
+
+export function extractAndEncryptPid(pidXml: string): string {
+  if (!pidXml.includes("<PidData>") && !pidXml.includes("<PidData ")) {
+    throw new Error("Invalid PID XML: missing <PidData>");
+  }
+  const errMatch = pidXml.match(/errCode="(\d+)"/);
+  if (errMatch && errMatch[1] !== "0") {
+    throw new Error(`Biometric capture failed (errCode=${errMatch[1]})`);
+  }
+  const dataMatch = pidXml.match(/<Data[^>]*>([^<]+)<\/Data>/);
+  if (!dataMatch || !dataMatch[1]) {
+    throw new Error("Invalid PID XML: <Data> tag missing or empty");
+  }
+  const rawData = dataMatch[1].trim();
+  if (rawData.length < 100) {
+    throw new Error("Invalid biometric data: PID too short");
+  }
+
+  const keyHex = process.env.PAYSPRINT_AES_KEY || "";
+  const ivHex = process.env.PAYSPRINT_AES_IV || "";
+  if (!keyHex || !ivHex) throw new Error("AES key/IV not configured");
+  const key = Buffer.from(keyHex, "utf8").slice(0, 16);
+  const iv = Buffer.from(ivHex, "utf8").slice(0, 16);
+  const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
+  let encrypted = cipher.update(rawData, "utf8", "base64");
+  encrypted += cipher.final("base64");
+  return encrypted;
+}
 
 const SENSITIVE_KEYS = new Set([
   "adhaarnumber", "aadhaar", "aadhar", "aadharnumber",
@@ -301,8 +353,17 @@ function simulateAepsResponse(endpoint: string, payload: Record<string, unknown>
       data: { redirecturl: "https://api.paysprint.in/onboard/kyc-form" },
     };
   }
-  if (endpoint.includes("Twofactorkyc")) {
+  if (endpoint.includes("Twofactorkyc") || endpoint.includes("v6/authentication")) {
     return { status: true, response_code: 1, message: "2FA operation successful" };
+  }
+  if (endpoint.includes("send_otp")) {
+    return { status: true, response_code: 1, message: "OTP sent successfully", otpreqid: `OTPREQ${Date.now()}` } as any;
+  }
+  if (endpoint.includes("verify_otp")) {
+    return { status: true, response_code: 1, message: "OTP verified successfully" };
+  }
+  if (endpoint.includes("/V3/kyc")) {
+    return { status: true, response_code: 1, message: "eKYC completed successfully" };
   }
   return { status: true, response_code: 1, message: "Success" };
 }
@@ -367,7 +428,57 @@ export async function twoFactorAuthentication(params: {
   timestamp: string;
   is_iris: string;
 }): Promise<AepsResponse> {
-  return makeAepsRequest("/service/aeps/kyc/Twofactorkyc/authentication", params);
+  return makeAepsRequest("/service/aeps/kyc/v6/authentication", params);
+}
+
+export async function ekycSendOtp(merchantCode: string): Promise<AepsResponse & { otpreqid?: string }> {
+  cleanExpiredEkycSessions();
+  const result = await makeAepsRequest("/service/aeps/kyc/V3/send_otp", { merchantcode: merchantCode }) as AepsResponse & { otpreqid?: string };
+  if (result.status && result.otpreqid) {
+    ekycOtpStore.set(merchantCode, {
+      otpreqid: result.otpreqid,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+    console.log(`[eKYC] OTP sent for merchant ${merchantCode}, otpreqid stored`);
+  }
+  return result;
+}
+
+export async function ekycVerifyOtp(merchantCode: string, otp: string, otpreqid: string): Promise<AepsResponse> {
+  return makeAepsRequest("/service/aeps/kyc/V3/verify_otp", {
+    merchantcode: merchantCode,
+    otp,
+    otpreqid,
+  });
+}
+
+export async function ekycComplete(params: {
+  merchantCode: string;
+  aadhaar: string;
+  pidXml: string;
+}): Promise<AepsResponse> {
+  const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
+  const encryptedPid = jwtTokenEnv
+    ? extractAndEncryptPid(params.pidXml)
+    : "SIMULATED_ENCRYPTED_PID_FOR_TESTING_ONLY";
+  const refid = `EKYC${Date.now()}${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+  console.log(`[eKYC] Complete for merchant ${params.merchantCode}, refid=${refid}, pidLen=${params.pidXml.length}, encryptedLen=${encryptedPid.length}`);
+  return makeAepsRequest("/service/aeps/kyc/V3/kyc", {
+    refid,
+    aadhaar: params.aadhaar,
+    piddata: encryptedPid,
+    merchantcode: params.merchantCode,
+    accessmode: "APP",
+  });
+}
+
+export function getStoredEkycOtpreqid(merchantCode: string): string | undefined {
+  cleanExpiredEkycSessions();
+  return ekycOtpStore.get(merchantCode)?.otpreqid;
+}
+
+export function clearEkycSession(merchantCode: string): void {
+  ekycOtpStore.delete(merchantCode);
 }
 
 export async function balanceEnquiry(params: {

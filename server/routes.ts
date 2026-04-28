@@ -1146,6 +1146,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         merchant,
         onboarded: merchant.kycStatus === "COMPLETED",
+        ekycDone: merchant.isKycDone || false,
+        twoFaRegistered: merchant.is2FaRegistered || false,
         dailyAuthenticated: dailyAuth?.authenticated || false,
       });
     } catch (error) {
@@ -1170,6 +1172,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           kycStatus: "COMPLETED",
           onboarded: true,
+          ekycDone: merchant.isKycDone || false,
+          twoFaRegistered: merchant.is2FaRegistered || false,
           dailyAuthenticated: dailyAuth?.authenticated || false,
         });
       }
@@ -1348,10 +1352,141 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/aeps/ekyc/send-otp", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "Complete merchant KYC (onboarding) first" });
+      }
+      if (merchant.isKycDone) {
+        return res.json({ success: true, message: "eKYC already completed", alreadyDone: true });
+      }
+
+      const result = await aepsService.ekycSendOtp(merchant.merchantCode);
+      const otpreqid = result.otpreqid || (result as any).data?.otpreqid;
+
+      if (result.status && otpreqid) {
+        return res.json({ success: true, message: result.message, otpreqid });
+      }
+      res.json({ success: false, message: result.message || "Failed to send OTP", response_code: result.response_code });
+    } catch (error) {
+      console.error("eKYC send-otp error:", error);
+      res.status(500).json({ error: "Failed to send eKYC OTP" });
+    }
+  });
+
+  app.post("/api/aeps/ekyc/verify-otp", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "Complete merchant KYC first" });
+      }
+      if (merchant.isKycDone) {
+        return res.json({ success: true, message: "eKYC already completed", alreadyDone: true });
+      }
+
+      const { otp, otpreqid } = req.body;
+      if (!otp || !otpreqid) {
+        return res.status(400).json({ error: "OTP and otpreqid are required" });
+      }
+
+      const storedOtpreqid = aepsService.getStoredEkycOtpreqid(merchant.merchantCode);
+      const resolvedOtpreqid = otpreqid || storedOtpreqid;
+      if (!resolvedOtpreqid) {
+        return res.status(400).json({ error: "OTP session expired. Please send OTP again." });
+      }
+
+      const result = await aepsService.ekycVerifyOtp(merchant.merchantCode, otp, resolvedOtpreqid);
+      res.json({ success: result.status, message: result.message, response_code: result.response_code });
+    } catch (error) {
+      console.error("eKYC verify-otp error:", error);
+      res.status(500).json({ error: "Failed to verify OTP" });
+    }
+  });
+
+  app.post("/api/aeps/ekyc/complete", authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "Complete merchant KYC first" });
+      }
+      if (merchant.isKycDone) {
+        return res.json({ success: true, message: "eKYC already completed", alreadyDone: true });
+      }
+
+      const { aadhaar, pidXml } = req.body;
+      if (!aadhaar || !pidXml) {
+        return res.status(400).json({ error: "Aadhaar number and biometric PID are required" });
+      }
+
+      const result = await aepsService.ekycComplete({
+        merchantCode: merchant.merchantCode,
+        aadhaar,
+        pidXml,
+      });
+
+      if (result.status || result.response_code === 1) {
+        await storage.updateAepsMerchant((req as any).userId, { isKycDone: true });
+        aepsService.clearEkycSession(merchant.merchantCode);
+        console.log(`[eKYC] Merchant ${merchant.merchantCode} eKYC marked as done`);
+        return res.json({ success: true, message: "eKYC completed successfully" });
+      }
+
+      res.json({ success: false, message: result.message || "eKYC failed", response_code: result.response_code });
+    } catch (error: any) {
+      console.error("eKYC complete error:", error);
+      res.status(500).json({ error: error.message || "eKYC failed" });
+    }
+  });
+
   app.post("/api/aeps/2fa/register", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const result = await aepsService.twoFactorRegistration(req.body);
-      res.json({ success: result.status, message: result.message, data: result.data });
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const merchant = await storage.getAepsMerchant((req as any).userId);
+      if (!merchant || merchant.kycStatus !== "COMPLETED") {
+        return res.status(403).json({ error: "Complete merchant KYC first" });
+      }
+      if (!merchant.isKycDone) {
+        return res.status(403).json({ error: "Complete eKYC verification first" });
+      }
+
+      const { aadhaarNumber, data: biometricData, pidXml, latitude, longitude } = req.body;
+      const pidData = pidXml || biometricData;
+      if (!pidData) {
+        return res.status(400).json({ error: "Biometric PID data is required" });
+      }
+
+      const _now = new Date();
+      const timestamp = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")} ${String(_now.getHours()).padStart(2,"0")}:${String(_now.getMinutes()).padStart(2,"0")}:${String(_now.getSeconds()).padStart(2,"0")}`;
+      const referenceNo = `REG${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+
+      const PS_PARTNER_ID_REG = process.env.PAYSPRINT_PARTNER_ID || "";
+      const fullPayload = {
+        accessmodetype: "APP",
+        adhaarnumber: aadhaarNumber || "",
+        mobilenumber: user.phone,
+        latitude: latitude || "0.0",
+        longitude: longitude || "0.0",
+        referenceno: referenceNo,
+        submerchantid: (merchant.merchantCode || PS_PARTNER_ID_REG).replace(/[^a-zA-Z0-9]/g, ""),
+        data: pidData,
+        ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
+        timestamp,
+        is_iris: "No",
+      };
+
+      const result = await aepsService.twoFactorRegistration(fullPayload);
+
+      // response_code 1 = success; errorcode 2 = already registered (treat as success)
+      const isSuccess = result.status || result.response_code === 1 || (result as any).errorcode === 2;
+      if (isSuccess) {
+        await storage.updateAepsMerchant((req as any).userId, { is2FaRegistered: true });
+        console.log(`[2FA Register] Merchant ${merchant.merchantCode} marked as registered`);
+      }
+
+      res.json({ success: isSuccess, message: result.message, data: result.data, response_code: result.response_code });
     } catch (error) {
       console.error("AEPS 2FA register error:", error);
       res.status(500).json({ error: "2FA registration failed" });
@@ -1371,6 +1506,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const merchant = await storage.getAepsMerchant((req as any).userId);
       if (!merchant || merchant.kycStatus !== "COMPLETED") {
         return res.status(403).json({ error: "Complete merchant onboarding first" });
+      }
+      if (!merchant.isKycDone) {
+        return res.status(403).json({ error: "Complete eKYC verification first" });
+      }
+      if (!merchant.is2FaRegistered) {
+        return res.status(403).json({ error: "Complete 2FA registration first" });
       }
 
       const _now2fa = new Date();

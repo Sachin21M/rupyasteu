@@ -16,7 +16,7 @@ import { router, useFocusEffect, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
+import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, aeps2faRegister, aepsEkycSendOtp, aepsEkycVerifyOtp, aepsEkycComplete, getAepsKycStatus } from "@/lib/api";
 import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
@@ -76,6 +76,8 @@ export default function AepsServicesScreen() {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [onboarded, setOnboarded] = useState(false);
+  const [ekycDone, setEkycDone] = useState(false);
+  const [twoFaRegistered, setTwoFaRegistered] = useState(false);
   const [dailyAuthenticated, setDailyAuthenticated] = useState(false);
   const [kycStatus, setKycStatus] = useState("NOT_STARTED");
   const [merchantCode, setMerchantCode] = useState("");
@@ -93,6 +95,17 @@ export default function AepsServicesScreen() {
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
   const [rdChecking, setRdChecking] = useState(false);
   const [rdDiagnostics, setRdDiagnostics] = useState<string[]>([]);
+
+  // eKYC state
+  const [ekycStep, setEkycStep] = useState<"idle" | "otp_sent" | "otp_verified">("idle");
+  const [ekycAadhaar, setEkycAadhaar] = useState("");
+  const [ekycOtp, setEkycOtp] = useState("");
+  const [ekycOtpreqid, setEkycOtpreqid] = useState("");
+  const [ekycLoading, setEkycLoading] = useState(false);
+
+  // 2FA Registration state
+  const [regAadhaar, setRegAadhaar] = useState("");
+  const [regLoading, setRegLoading] = useState(false);
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
@@ -149,6 +162,8 @@ export default function AepsServicesScreen() {
     try {
       const result = await getAepsMerchant();
       setOnboarded(result.onboarded || false);
+      setEkycDone(result.ekycDone || false);
+      setTwoFaRegistered(result.twoFaRegistered || false);
       setDailyAuthenticated(result.dailyAuthenticated || false);
       setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
       if (result.merchant?.merchantCode) {
@@ -159,6 +174,8 @@ export default function AepsServicesScreen() {
       }
     } catch {
       setOnboarded(false);
+      setEkycDone(false);
+      setTwoFaRegistered(false);
       setDailyAuthenticated(false);
       setKycStatus("NOT_STARTED");
     } finally {
@@ -310,6 +327,136 @@ export default function AepsServicesScreen() {
     }
   }
 
+  async function handleEkycSendOtp() {
+    setEkycLoading(true);
+    try {
+      const result = await aepsEkycSendOtp();
+      if (result.alreadyDone) {
+        setEkycDone(true);
+        return;
+      }
+      if (result.success && result.otpreqid) {
+        setEkycOtpreqid(result.otpreqid);
+        setEkycStep("otp_sent");
+        Alert.alert("OTP Sent", "An OTP has been sent to your Aadhaar-linked mobile number. Enter it below.");
+      } else {
+        Alert.alert("Failed", result.message || result.error || "Could not send OTP. Please try again.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to send OTP");
+    } finally {
+      setEkycLoading(false);
+    }
+  }
+
+  async function handleEkycVerifyOtp() {
+    if (ekycOtp.length < 4) {
+      Alert.alert("Invalid OTP", "Please enter the OTP received on your Aadhaar-linked mobile.");
+      return;
+    }
+    setEkycLoading(true);
+    try {
+      const result = await aepsEkycVerifyOtp({ otp: ekycOtp, otpreqid: ekycOtpreqid });
+      if (result.alreadyDone) {
+        setEkycDone(true);
+        return;
+      }
+      if (result.success) {
+        setEkycStep("otp_verified");
+        Alert.alert("OTP Verified", "OTP verified successfully. Now scan your fingerprint to complete eKYC.");
+      } else {
+        Alert.alert("OTP Invalid", result.message || "Incorrect OTP. Please check and try again.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "OTP verification failed");
+    } finally {
+      setEkycLoading(false);
+    }
+  }
+
+  async function handleEkycComplete() {
+    if (Platform.OS !== "web" && ekycAadhaar.length !== 12) {
+      Alert.alert("Aadhaar Required", "Enter your 12-digit Aadhaar number.");
+      return;
+    }
+    setEkycLoading(true);
+    try {
+      const captureResult = await captureFingerprint();
+      if (!captureResult.success) {
+        Alert.alert(
+          "Scan Failed",
+          captureResult.error || "Could not capture fingerprint.",
+          [
+            { text: "OK", style: "cancel" },
+            { text: "Try Again", onPress: () => { setEkycLoading(false); setTimeout(handleEkycComplete, 300); } },
+          ]
+        );
+        setEkycLoading(false);
+        return;
+      }
+
+      const result = await aepsEkycComplete({
+        aadhaar: ekycAadhaar,
+        pidXml: captureResult.pidData,
+      });
+
+      if (result.success) {
+        setEkycDone(true);
+        setEkycStep("idle");
+        Alert.alert("eKYC Complete", "Your eKYC has been completed successfully. Now complete 2FA registration.");
+      } else {
+        Alert.alert("eKYC Failed", result.message || result.error || "eKYC could not be completed. Please try again.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "eKYC failed");
+    } finally {
+      setEkycLoading(false);
+    }
+  }
+
+  async function handleTwoFaRegister() {
+    if (Platform.OS !== "web" && regAadhaar.length !== 12) {
+      Alert.alert("Aadhaar Required", "Enter your 12-digit Aadhaar number.");
+      return;
+    }
+    setRegLoading(true);
+    try {
+      const captureResult = await captureFingerprint();
+      if (!captureResult.success) {
+        Alert.alert(
+          "Scan Failed",
+          captureResult.error || "Could not capture fingerprint.",
+          [
+            { text: "OK", style: "cancel" },
+            { text: "Try Again", onPress: () => { setRegLoading(false); setTimeout(handleTwoFaRegister, 300); } },
+          ]
+        );
+        setRegLoading(false);
+        return;
+      }
+      if (captureResult.deviceInfo) setRdDevice(captureResult.deviceInfo);
+
+      const result = await aeps2faRegister({
+        aadhaarNumber: regAadhaar,
+        pidXml: captureResult.pidData,
+        data: captureResult.pidData,
+        latitude: "0.0",
+        longitude: "0.0",
+      });
+
+      if (result.success) {
+        setTwoFaRegistered(true);
+        Alert.alert("Registration Complete", "2FA biometric registration successful. Now complete daily authentication to start transactions.");
+      } else {
+        Alert.alert("Registration Failed", result.message || result.error || "2FA registration failed. Please try again.");
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "2FA registration failed");
+    } finally {
+      setRegLoading(false);
+    }
+  }
+
   async function handleDailyAuth() {
     if (Platform.OS !== "web" && authAadhaar.length !== 12) {
       Alert.alert("Aadhaar Required", "Enter your 12-digit Aadhaar number before scanning.");
@@ -425,6 +572,36 @@ export default function AepsServicesScreen() {
         </View>
       )}
 
+      <View style={styles.stepsProgress}>
+        {([
+          { label: "KYC", done: onboarded, active: !onboarded },
+          { label: "eKYC", done: ekycDone, active: onboarded && !ekycDone },
+          { label: "2FA Reg", done: twoFaRegistered, active: onboarded && ekycDone && !twoFaRegistered },
+          { label: "Daily Auth", done: dailyAuthenticated, active: onboarded && ekycDone && twoFaRegistered && !dailyAuthenticated },
+        ] as { label: string; done: boolean; active: boolean }[]).map((step, i, arr) => (
+          <View key={i} style={{ flex: 1, alignItems: "center" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", width: "100%" }}>
+              {i > 0 && <View style={{ flex: 1, height: 2, backgroundColor: arr[i - 1].done ? Colors.success : "#E5E7EB" }} />}
+              <View style={[
+                styles.stepProgressDot,
+                step.done && styles.stepProgressDotDone,
+                step.active && styles.stepProgressDotActive,
+              ]}>
+                {step.done
+                  ? <Ionicons name="checkmark" size={11} color="#fff" />
+                  : <Text style={styles.stepProgressNum}>{i + 1}</Text>}
+              </View>
+              {i < arr.length - 1 && <View style={{ flex: 1, height: 2, backgroundColor: step.done ? Colors.success : "#E5E7EB" }} />}
+            </View>
+            <Text style={[
+              styles.stepProgressLabel,
+              step.done && { color: Colors.success },
+              step.active && { color: Colors.primary, fontFamily: "Inter_600SemiBold" as const },
+            ]}>{step.label}</Text>
+          </View>
+        ))}
+      </View>
+
       {!onboarded && (
         <View style={styles.setupSection}>
           <View style={styles.setupCard}>
@@ -498,7 +675,191 @@ export default function AepsServicesScreen() {
         </View>
       )}
 
-      {onboarded && !dailyAuthenticated && (
+      {onboarded && !ekycDone && (
+        <View style={styles.setupSection}>
+          <View style={[styles.setupCard, { borderColor: "#8B5CF6" }]}>
+            <View style={styles.setupStep}>
+              <View style={[styles.stepBadge, { backgroundColor: "#8B5CF6" }]}>
+                <Ionicons name="shield-checkmark" size={16} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.setupTitle}>eKYC Verification</Text>
+                <Text style={styles.setupSub}>
+                  {ekycStep === "idle" ? "Verify your identity via OTP to activate AEPS" : ekycStep === "otp_sent" ? "Enter OTP sent to your Aadhaar-linked mobile" : "Scan fingerprint to complete eKYC"}
+                </Text>
+              </View>
+            </View>
+
+            {ekycStep === "idle" && (
+              <>
+                {Platform.OS !== "web" && (
+                  <TextInput
+                    style={styles.aadhaarInput}
+                    placeholder="Your 12-digit Aadhaar number"
+                    placeholderTextColor={Colors.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={12}
+                    value={ekycAadhaar}
+                    onChangeText={setEkycAadhaar}
+                    editable={!ekycLoading}
+                  />
+                )}
+                <Pressable
+                  style={[styles.setupBtn, { backgroundColor: "#8B5CF6" }, ekycLoading && { opacity: 0.5 }]}
+                  onPress={handleEkycSendOtp}
+                  disabled={ekycLoading}
+                >
+                  {ekycLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="phone-portrait" size={16} color="#fff" />
+                      <Text style={styles.setupBtnText}>Send OTP</Text>
+                    </>
+                  )}
+                </Pressable>
+              </>
+            )}
+
+            {ekycStep === "otp_sent" && (
+              <>
+                <TextInput
+                  style={styles.aadhaarInput}
+                  placeholder="Enter OTP"
+                  placeholderTextColor={Colors.textSecondary}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  value={ekycOtp}
+                  onChangeText={setEkycOtp}
+                  editable={!ekycLoading}
+                />
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <Pressable
+                    style={[styles.setupBtn, { backgroundColor: "#9CA3AF", flex: 0.4 }, ekycLoading && { opacity: 0.5 }]}
+                    onPress={() => { setEkycStep("idle"); setEkycOtp(""); }}
+                    disabled={ekycLoading}
+                  >
+                    <Text style={styles.setupBtnText}>Resend</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.setupBtn, { backgroundColor: "#8B5CF6" }, (ekycLoading || ekycOtp.length < 4) && { opacity: 0.5 }]}
+                    onPress={handleEkycVerifyOtp}
+                    disabled={ekycLoading || ekycOtp.length < 4}
+                  >
+                    {ekycLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.setupBtnText}>Verify OTP</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+            {ekycStep === "otp_verified" && (
+              <>
+                <View style={[styles.kycWarningBox, { backgroundColor: "#EDE9FE", borderColor: "#C4B5FD" }]}>
+                  <Ionicons name="checkmark-circle" size={16} color="#7C3AED" />
+                  <Text style={[styles.kycWarningText, { color: "#5B21B6" }]}>OTP verified! Now scan your fingerprint to complete eKYC.</Text>
+                </View>
+                {Platform.OS !== "web" && (
+                  <>
+                    {!ekycAadhaar && (
+                      <TextInput
+                        style={styles.aadhaarInput}
+                        placeholder="Your 12-digit Aadhaar number"
+                        placeholderTextColor={Colors.textSecondary}
+                        keyboardType="number-pad"
+                        maxLength={12}
+                        value={ekycAadhaar}
+                        onChangeText={setEkycAadhaar}
+                        editable={!ekycLoading}
+                      />
+                    )}
+                    <View style={styles.rdStatusRow}>
+                      <View style={[styles.rdDot, { backgroundColor: rdDevice ? Colors.success : "#EF4444" }]} />
+                      <Text style={[styles.rdStatusText, { color: rdDevice ? Colors.success : Colors.textSecondary }]}>
+                        {rdChecking ? "Scanning..." : rdDevice ? `${rdDevice.manufacturer} ${rdDevice.model}` : "No RD device found"}
+                      </Text>
+                    </View>
+                  </>
+                )}
+                <Pressable
+                  style={[styles.setupBtn, { backgroundColor: "#8B5CF6" }, (ekycLoading || (Platform.OS !== "web" && ekycAadhaar.length !== 12)) && { opacity: 0.5 }]}
+                  onPress={handleEkycComplete}
+                  disabled={ekycLoading || (Platform.OS !== "web" && ekycAadhaar.length !== 12)}
+                >
+                  {ekycLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <MaterialCommunityIcons name="fingerprint" size={18} color="#fff" />
+                      <Text style={styles.setupBtnText}>Complete eKYC</Text>
+                    </>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </View>
+        </View>
+      )}
+
+      {onboarded && ekycDone && !twoFaRegistered && (
+        <View style={styles.setupSection}>
+          <View style={[styles.setupCard, { borderColor: "#F59E0B" }]}>
+            <View style={styles.setupStep}>
+              <View style={[styles.stepBadge, { backgroundColor: "#F59E0B" }]}>
+                <MaterialCommunityIcons name="fingerprint" size={16} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.setupTitle}>2FA Registration</Text>
+                <Text style={styles.setupSub}>One-time biometric registration to enable AEPS transactions</Text>
+              </View>
+            </View>
+            {Platform.OS !== "web" && (
+              <>
+                <TextInput
+                  style={styles.aadhaarInput}
+                  placeholder="Your 12-digit Aadhaar number"
+                  placeholderTextColor={Colors.textSecondary}
+                  keyboardType="number-pad"
+                  maxLength={12}
+                  value={regAadhaar}
+                  onChangeText={setRegAadhaar}
+                  editable={!regLoading}
+                />
+                <View style={styles.rdStatusRow}>
+                  <View style={[styles.rdDot, { backgroundColor: rdDevice ? Colors.success : "#EF4444" }]} />
+                  <Text style={[styles.rdStatusText, { color: rdDevice ? Colors.success : Colors.textSecondary }]}>
+                    {rdChecking ? "Scanning..." : rdDevice ? `${rdDevice.manufacturer} ${rdDevice.model}` : "No RD device found"}
+                  </Text>
+                  {!rdDevice && !rdChecking && (
+                    <Pressable onPress={checkRdDevice} hitSlop={8}>
+                      <Ionicons name="refresh" size={18} color={Colors.primary} />
+                    </Pressable>
+                  )}
+                </View>
+              </>
+            )}
+            <Pressable
+              style={[styles.setupBtn, { backgroundColor: "#F59E0B" }, (regLoading || (Platform.OS !== "web" && regAadhaar.length !== 12)) && { opacity: 0.5 }]}
+              onPress={handleTwoFaRegister}
+              disabled={regLoading || (Platform.OS !== "web" && regAadhaar.length !== 12)}
+            >
+              {regLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="fingerprint" size={18} color="#fff" />
+                  <Text style={styles.setupBtnText}>Register Biometric</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {onboarded && ekycDone && twoFaRegistered && !dailyAuthenticated && (
         <View style={styles.setupSection}>
           <View style={[styles.setupCard, { borderColor: "#6366F1" }]}>
             <View style={styles.setupStep}>
@@ -553,7 +914,7 @@ export default function AepsServicesScreen() {
         </View>
       )}
 
-      {onboarded && dailyAuthenticated && (
+      {onboarded && ekycDone && twoFaRegistered && dailyAuthenticated && (
         <View style={styles.statusBanner}>
           <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
           <Text style={styles.statusText}>Ready for AEPS transactions</Text>
@@ -569,10 +930,10 @@ export default function AepsServicesScreen() {
               style={({ pressed }) => [
                 styles.serviceCard,
                 pressed && { transform: [{ scale: 0.97 }], opacity: 0.9 },
-                (!onboarded || !dailyAuthenticated) && { opacity: 0.5 },
+                (!onboarded || !ekycDone || !twoFaRegistered || !dailyAuthenticated) && { opacity: 0.5 },
               ]}
               onPress={() => handleServicePress(service)}
-              disabled={!onboarded || !dailyAuthenticated}
+              disabled={!onboarded || !ekycDone || !twoFaRegistered || !dailyAuthenticated}
             >
               <View style={[styles.serviceIconWrap, { backgroundColor: service.color + "15" }]}>
                 {service.icon}
@@ -948,5 +1309,50 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
     marginTop: 2,
+  },
+  stepsProgress: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginHorizontal: 20,
+    marginBottom: 20,
+    gap: 0,
+  },
+  stepProgressItem: {
+    flex: 1,
+    alignItems: "center",
+    flexDirection: "column",
+    position: "relative",
+  },
+  stepProgressDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#E5E7EB",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  stepProgressDotDone: {
+    backgroundColor: Colors.success,
+  },
+  stepProgressDotActive: {
+    backgroundColor: Colors.primary,
+  },
+  stepProgressNum: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    color: "#6B7280",
+  },
+  stepProgressLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+    color: "#9CA3AF",
+    textAlign: "center",
+  },
+  stepProgressLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: "#E5E7EB",
   },
 });

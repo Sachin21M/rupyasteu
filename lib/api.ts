@@ -172,6 +172,27 @@ export async function aeps2faAuthenticate(data: Record<string, unknown>) {
   return handleAepsResponse(res);
 }
 
+export async function aepsEkycSendOtp() {
+  const res = await authFetch("/api/aeps/ekyc/send-otp", { method: "POST", body: JSON.stringify({}) });
+  return handleAepsResponse(res);
+}
+
+export async function aepsEkycVerifyOtp(data: { otp: string; otpreqid: string }) {
+  const res = await authFetch("/api/aeps/ekyc/verify-otp", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return handleAepsResponse(res);
+}
+
+export async function aepsEkycComplete(data: { aadhaar: string; pidXml: string }) {
+  const res = await authFetch("/api/aeps/ekyc/complete", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return handleAepsResponse(res);
+}
+
 export async function performAepsTransaction(data: {
   type: string;
   aadhaarNumber: string;

@@ -84,6 +84,8 @@ async function initAepsTables() {
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS firm_name VARCHAR(100) NOT NULL DEFAULT ''",
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS kyc_redirect_url TEXT",
       "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS created_by VARCHAR(20) DEFAULT 'self'",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS is_kyc_done BOOLEAN NOT NULL DEFAULT FALSE",
+      "ALTER TABLE aeps_merchants ADD COLUMN IF NOT EXISTS is_2fa_registered BOOLEAN NOT NULL DEFAULT FALSE",
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_aeps_merchants_user_id ON aeps_merchants(user_id)",
     ];
     for (const q of alterQueries) {
@@ -341,6 +343,8 @@ function rowToAepsMerchant(row: any): AepsMerchant {
     bankPipes: row.bank_pipes,
     kycRedirectUrl: row.kyc_redirect_url || undefined,
     createdBy: row.created_by || 'self',
+    isKycDone: row.is_kyc_done || false,
+    is2FaRegistered: row.is_2fa_registered || false,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
   };
@@ -584,6 +588,8 @@ export class PgStorage implements IStorage {
     if (data.phone !== undefined) { fields.push(`phone = $${idx++}`); values.push(data.phone); }
     if (data.firmName !== undefined) { fields.push(`firm_name = $${idx++}`); values.push(data.firmName); }
     if (data.kycRedirectUrl !== undefined) { fields.push(`kyc_redirect_url = $${idx++}`); values.push(data.kycRedirectUrl); }
+    if (data.isKycDone !== undefined) { fields.push(`is_kyc_done = $${idx++}`); values.push(data.isKycDone); }
+    if (data.is2FaRegistered !== undefined) { fields.push(`is_2fa_registered = $${idx++}`); values.push(data.is2FaRegistered); }
 
     if (fields.length === 0) return this.getAepsMerchant(userId);
 

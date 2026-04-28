@@ -82,10 +82,6 @@ export interface AepsMerchant {
   bankPipes: string;
   kycRedirectUrl?: string;
   createdBy?: string;
-  twoFaRegistered?: boolean;
-  kycOtpReqid?: string;
-  kycOtpAadhaar?: string;
-  kycOtpExpiresAt?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -133,17 +129,6 @@ export interface AepsApiLog {
   success: boolean;
   durationMs: number;
   errorMessage?: string;
-  createdAt: string;
-}
-
-export interface KycAttempt {
-  id: string;
-  userId: string;
-  merchantCode: string;
-  step: "SEND_OTP" | "VERIFY_OTP";
-  success: boolean;
-  responseCode: string;
-  responseMessage: string;
   createdAt: string;
 }
 

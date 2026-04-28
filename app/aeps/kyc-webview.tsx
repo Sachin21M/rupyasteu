@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -6,250 +6,234 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
-  Linking,
-  Alert,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import Colors from "@/constants/colors";
-import { kycWebviewComplete } from "@/lib/api";
+import type { WebView as WebViewClass, WebViewNavigation, WebViewErrorEvent } from "react-native-webview";
 
-type DoneState = "idle" | "submitting" | "submitted" | "verified";
+const NativeWebView =
+  Platform.OS !== "web"
+    ? (require("react-native-webview") as { WebView: typeof WebViewClass }).WebView
+    : null;
 
-export default function KycWebviewScreen() {
+const KYC_DOMAIN = "merchantkyc.com";
+
+
+type PermissionState = "requesting" | "granted" | "denied";
+
+export default function KycWebViewScreen() {
   const { url } = useLocalSearchParams<{ url: string }>();
   const insets = useSafeAreaInsets();
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
 
-  const [loading, setLoading] = useState(true);
-  const [webViewError, setWebViewError] = useState(false);
-  const [doneState, setDoneState] = useState<DoneState>("idle");
+  const [permState, setPermState] = useState<PermissionState>("requesting");
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [webviewLoading, setWebviewLoading] = useState(true);
+  const [webviewError, setWebviewError] = useState<string | null>(null);
   const completedRef = useRef(false);
 
-  const decodedUrl = url ? decodeURIComponent(url) : "";
-
   useEffect(() => {
-    if (Platform.OS !== "web") {
-      Location.requestForegroundPermissionsAsync().catch(() => {});
-    }
+    requestLocation();
   }, []);
 
-  async function handleFormComplete(fromCallback = false) {
-    if (completedRef.current) return;
-    if (!fromCallback) {
-      Alert.alert(
-        "Confirm Submission",
-        "Only tap this after you have fully submitted the KYC form in the browser above. Have you completed all steps?",
-        [
-          { text: "Not Yet", style: "cancel" },
-          { text: "Yes, I'm Done", onPress: () => doComplete() },
-        ]
-      );
-      return;
-    }
-    doComplete();
-  }
-
-  async function doComplete() {
-    if (completedRef.current) return;
-    completedRef.current = true;
-    setDoneState("submitting");
+  async function requestLocation() {
+    setPermState("requesting");
     try {
-      const result = await kycWebviewComplete();
-      if (result.kycStatus === "COMPLETED" || result.verified) {
-        setDoneState("verified");
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        try {
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        } catch {
+          // Position unavailable (emulator) — still proceed; WebView native
+          // geolocation will attempt its own resolution
+        }
+        setPermState("granted");
       } else {
-        setDoneState("submitted");
+        setPermState("denied");
       }
     } catch {
-      setDoneState("submitted");
+      // Unexpected error requesting permission — treat as denied
+      setPermState("denied");
     }
   }
 
-  const Header = ({ showBack = true }: { showBack?: boolean }) => (
+  function handleNavigationStateChange(state: WebViewNavigation) {
+    if (!state.url || completedRef.current) return;
+    try {
+      const host = new URL(state.url).hostname;
+      const isOnKycDomain = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
+      if (!isOnKycDomain && state.url.startsWith("http")) {
+        completedRef.current = true;
+        router.back();
+      }
+    } catch {
+      // URL parsing error — ignore
+    }
+  }
+
+  function handleBack() {
+    router.back();
+  }
+
+  function handleWebViewError(e: WebViewErrorEvent) {
+    const desc = e.nativeEvent?.description || "";
+    const domain = e.nativeEvent?.url || "";
+    console.warn("[KYC WebView] Load error:", desc, domain);
+    setWebviewLoading(false);
+    setWebviewError("Your KYC session has expired or is unavailable. Please go back and ask your admin to regenerate your KYC link, then try again immediately.");
+  }
+
+  // Inject coords override on Android only — iOS WebView resolves geolocation via
+  // native CoreLocation; Android WebView benefits from the pre-fetched coord shim.
+  const injectedJs =
+    Platform.OS === "android" && coords
+      ? `(function(){var loc={coords:{latitude:${coords.lat},longitude:${coords.lng},accuracy:20,altitude:null,altitudeAccuracy:null,heading:null,speed:null},timestamp:Date.now()};navigator.geolocation.getCurrentPosition=function(s){s(loc);};navigator.geolocation.watchPosition=function(s){setTimeout(function(){s(loc);},50);return 1;}; })();true;`
+      : undefined;
+
+  const Header = () => (
     <View style={[styles.header, { paddingTop: topPadding }]}>
-      {showBack ? (
-        <Pressable onPress={() => router.back()} style={styles.backBtn} testID="kyc-webview-back">
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </Pressable>
-      ) : (
-        <View style={{ width: 44 }} />
-      )}
-      <Text style={styles.headerTitle}>KYC Verification</Text>
+      <Pressable onPress={handleBack} style={styles.backBtn} testID="kyc-back">
+        <Ionicons name="arrow-back" size={24} color={Colors.text} />
+      </Pressable>
+      <Text style={styles.headerTitle}>KYC Setup</Text>
       <View style={{ width: 44 }} />
     </View>
   );
 
-  if (doneState === "verified") {
-    return (
-      <View style={styles.container}>
-        <Header showBack={false} />
-        <View style={styles.centered}>
-          <View style={[styles.iconCircle, { backgroundColor: Colors.successLight }]}>
-            <Ionicons name="shield-checkmark" size={48} color={Colors.success} />
-          </View>
-          <Text style={styles.doneTitle}>KYC Verified!</Text>
-          <Text style={styles.doneSubtitle}>
-            Your AEPS merchant account is now active. You can start performing transactions.
-          </Text>
-          <Pressable style={styles.primaryBtn} onPress={() => router.back()} testID="kyc-done-btn">
-            <Text style={styles.primaryBtnText}>Done</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  if (doneState === "submitted" || doneState === "submitting") {
-    return (
-      <View style={styles.container}>
-        <Header showBack={doneState !== "submitting"} />
-        <View style={styles.centered}>
-          {doneState === "submitting" ? (
-            <>
-              <ActivityIndicator size="large" color={Colors.primary} />
-              <Text style={styles.processingText}>Verifying your submission…</Text>
-            </>
-          ) : (
-            <>
-              <View style={[styles.iconCircle, { backgroundColor: Colors.warningLight }]}>
-                <Ionicons name="time-outline" size={48} color={Colors.warning} />
-              </View>
-              <Text style={styles.doneTitle}>KYC Submitted</Text>
-              <Text style={styles.doneSubtitle}>
-                Your KYC form was submitted successfully. PaySprint is activating your account — this usually takes a few minutes.{"\n\n"}
-                Please come back and tap "Refresh" on the KYC screen after a few minutes, or ask your admin to approve from the admin panel.
-              </Text>
-              <Pressable style={styles.primaryBtn} onPress={() => router.back()} testID="kyc-done-btn">
-                <Text style={styles.primaryBtnText}>Back to KYC Status</Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-      </View>
-    );
-  }
-
-  if (!decodedUrl) {
+  if (permState === "requesting") {
     return (
       <View style={styles.container}>
         <Header />
         <View style={styles.centered}>
-          <Ionicons name="alert-circle-outline" size={48} color={Colors.error} />
-          <Text style={styles.doneTitle}>No KYC Link</Text>
-          <Text style={styles.doneSubtitle}>
-            No KYC URL was provided. Please go back and try again.
-          </Text>
-          <Pressable style={styles.primaryBtn} onPress={() => router.back()}>
-            <Text style={styles.primaryBtnText}>Go Back</Text>
-          </Pressable>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Requesting location permission…</Text>
         </View>
       </View>
     );
   }
 
-  if (Platform.OS === "web") {
+  if (permState === "denied") {
     return (
       <View style={styles.container}>
         <Header />
         <View style={styles.centered}>
-          <View style={[styles.iconCircle, { backgroundColor: Colors.primaryLight }]}>
-            <Ionicons name="open-outline" size={40} color={Colors.primary} />
+          <View style={styles.iconCircle}>
+            <Ionicons name="location-outline" size={40} color={Colors.primary} />
           </View>
-          <Text style={styles.doneTitle}>Complete KYC</Text>
-          <Text style={styles.doneSubtitle}>
-            Tap the button below to open the KYC form in a new browser tab. Complete all 5 steps, then come back here and tap "I've Completed the Form".
+          <Text style={styles.deniedTitle}>Location Access Needed</Text>
+          <Text style={styles.deniedText}>
+            PaySprint KYC verification requires your location to confirm your
+            presence. Please allow location access and tap Retry.
           </Text>
           <Pressable
-            style={styles.primaryBtn}
-            onPress={() => Linking.openURL(decodedUrl)}
-            testID="kyc-open-browser-btn"
+            style={styles.retryBtn}
+            onPress={() => {
+              requestLocation();
+            }}
+            testID="kyc-retry-location"
           >
-            <Ionicons name="open-outline" size={18} color="#fff" />
-            <Text style={styles.primaryBtnText}>Open KYC Form</Text>
+            <Text style={styles.retryBtnText}>Retry</Text>
           </Pressable>
-          <Pressable
-            style={styles.secondaryBtn}
-            onPress={handleFormComplete}
-            testID="kyc-web-done-btn"
-          >
-            <Text style={styles.secondaryBtnText}>I've Completed the Form</Text>
+          <Pressable style={styles.cancelLink} onPress={handleBack}>
+            <Text style={styles.cancelLinkText}>Cancel</Text>
           </Pressable>
         </View>
       </View>
     );
   }
 
-  const WebView = require("react-native-webview").WebView;
+  if (Platform.OS === "web" || !NativeWebView) {
+    return (
+      <View style={styles.container}>
+        <Header />
+        <View style={styles.centered}>
+          <Ionicons name="globe-outline" size={48} color={Colors.textSecondary} />
+          <Text style={styles.loadingText}>
+            Please open this feature on your mobile device.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Security: only allow merchantkyc.com (exact or subdomain)
+  let isValidKycUrl = false;
+  try {
+    const host = new URL(url ?? "").hostname;
+    isValidKycUrl = host === KYC_DOMAIN || host.endsWith(`.${KYC_DOMAIN}`);
+  } catch {
+    isValidKycUrl = false;
+  }
+
+  if (!isValidKycUrl) {
+    return (
+      <View style={styles.container}>
+        <Header />
+        <View style={styles.centered}>
+          <Ionicons name="warning-outline" size={48} color="#E53E3E" />
+          <Text style={styles.deniedTitle}>Invalid KYC URL</Text>
+          <Text style={styles.deniedText}>
+            The KYC link appears to be invalid. Please go back and try again.
+          </Text>
+          <Pressable style={styles.cancelLink} onPress={handleBack}>
+            <Text style={styles.cancelLinkText}>Go Back</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (webviewError) {
+    return (
+      <View style={styles.container}>
+        <Header />
+        <View style={styles.centered}>
+          <View style={[styles.iconCircle, { backgroundColor: "#FEE2E2" }]}>
+            <Ionicons name="time-outline" size={40} color="#EF4444" />
+          </View>
+          <Text style={styles.deniedTitle}>Session Expired</Text>
+          <Text style={styles.deniedText}>{webviewError}</Text>
+          <Pressable style={styles.cancelLink} onPress={handleBack}>
+            <Text style={[styles.cancelLinkText, { color: Colors.primary }]}>Go Back</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <Header />
-      <View style={styles.webViewContainer}>
-        {loading && (
-          <View style={styles.loadingOverlay}>
+      <View style={styles.webviewContainer}>
+        {webviewLoading && (
+          <View style={styles.webviewOverlay}>
             <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.loadingText}>Loading KYC Form…</Text>
+            <Text style={styles.loadingText}>Loading KYC page…</Text>
           </View>
         )}
-        {webViewError ? (
-          <View style={styles.centered}>
-            <Ionicons name="wifi-outline" size={48} color={Colors.textSecondary} />
-            <Text style={styles.doneTitle}>Failed to Load</Text>
-            <Text style={styles.doneSubtitle}>
-              Could not load the KYC form. Please check your internet connection and try again.
-            </Text>
-            <Pressable
-              style={styles.primaryBtn}
-              onPress={() => {
-                setWebViewError(false);
-                setLoading(true);
-              }}
-            >
-              <Text style={styles.primaryBtnText}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <WebView
-            source={{ uri: decodedUrl }}
-            style={styles.webView}
-            onLoadEnd={() => setLoading(false)}
-            onError={() => {
-              setLoading(false);
-              setWebViewError(true);
-            }}
-            onNavigationStateChange={(state: { url: string }) => {
-              const navUrl = state.url || "";
-              const isCallback =
-                navUrl.includes("rupyasetuapi.site/api/paysprint/aeps-callback") ||
-                navUrl.includes("rupyasetuapi.site/api/paysprint/callback");
-              if (isCallback) {
-                handleFormComplete(true);
-              }
-            }}
-            javaScriptEnabled
-            domStorageEnabled
-            geolocationEnabled
-            startInLoadingState
-            testID="kyc-webview"
-          />
-        )}
+        <NativeWebView
+          source={{ uri: url ?? "" }}
+          geolocationEnabled
+          javaScriptEnabled
+          domStorageEnabled
+          allowsFullscreenVideo
+          mediaPlaybackRequiresUserAction={false}
+          setSupportMultipleWindows={false}
+          mediaCapturePermissionGrantType="grant"
+          injectedJavaScriptBeforeContentLoaded={injectedJs}
+          onNavigationStateChange={handleNavigationStateChange}
+          onLoadEnd={() => setWebviewLoading(false)}
+          onError={handleWebViewError}
+          style={styles.webview}
+          testID="kyc-webview"
+        />
       </View>
-
-      {!loading && !webViewError && (
-        <View style={[styles.bottomBar, { paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 8 }]}>
-          <Pressable
-            style={styles.doneBtn}
-            onPress={handleFormComplete}
-            testID="kyc-form-done-btn"
-          >
-            <Ionicons name="checkmark-circle-outline" size={18} color={Colors.primary} />
-            <Text style={styles.doneBtnText}>I've Completed the Form</Text>
-          </Pressable>
-        </View>
-      )}
     </View>
   );
 }
@@ -257,7 +241,7 @@ export default function KycWebviewScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.surface,
   },
   header: {
     flexDirection: "row",
@@ -279,109 +263,74 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
     fontSize: 17,
-    fontFamily: "Inter_600SemiBold",
+    fontWeight: "600",
     color: Colors.text,
-  },
-  webViewContainer: {
-    flex: 1,
-  },
-  webView: {
-    flex: 1,
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: Colors.background,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    zIndex: 10,
-  },
-  loadingText: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    color: Colors.textSecondary,
   },
   centered: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,
-    gap: 16,
+    gap: 12,
   },
   iconCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.primaryLight,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.primaryLight,
+    marginBottom: 8,
   },
-  doneTitle: {
-    fontSize: 22,
-    fontFamily: "Inter_700Bold",
+  loadingText: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: "center",
+    marginTop: 12,
+  },
+  deniedTitle: {
+    fontSize: 18,
+    fontWeight: "700",
     color: Colors.text,
     textAlign: "center",
   },
-  doneSubtitle: {
+  deniedText: {
     fontSize: 14,
-    fontFamily: "Inter_400Regular",
     color: Colors.textSecondary,
     textAlign: "center",
-    lineHeight: 22,
+    lineHeight: 20,
   },
-  processingText: {
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    color: Colors.textSecondary,
+  retryBtn: {
     marginTop: 8,
-  },
-  primaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
     backgroundColor: Colors.primary,
-    borderRadius: 14,
+    borderRadius: 12,
+    paddingHorizontal: 40,
     paddingVertical: 14,
-    paddingHorizontal: 28,
-    gap: 8,
-    marginTop: 4,
-    minWidth: 200,
   },
-  primaryBtnText: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
+  retryBtnText: {
     color: "#fff",
-    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
   },
-  secondaryBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+  cancelLink: {
+    paddingVertical: 8,
   },
-  secondaryBtnText: {
+  cancelLinkText: {
     fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    color: Colors.primary,
-    textAlign: "center",
+    color: Colors.textSecondary,
   },
-  bottomBar: {
+  webviewContainer: {
+    flex: 1,
+    position: "relative",
+  },
+  webviewOverlay: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: Colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  doneBtn: {
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 10,
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 12,
+    zIndex: 10,
   },
-  doneBtnText: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    color: Colors.primary,
+  webview: {
+    flex: 1,
   },
 });

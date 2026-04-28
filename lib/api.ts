@@ -133,10 +133,7 @@ export async function updateLowBalanceThreshold(threshold: number) {
 async function handleAepsResponse(res: Response) {
   const data = await res.json();
   if (!res.ok) {
-    const err = new Error(data.error || `Request failed (${res.status})`) as Error & { errorCode?: string; retryable?: boolean };
-    if (data.errorCode) err.errorCode = data.errorCode;
-    if (data.retryable !== undefined) err.retryable = data.retryable;
-    throw err;
+    throw new Error(data.error || `Request failed (${res.status})`);
   }
   return data;
 }
@@ -204,30 +201,6 @@ export async function aepsOnboardComplete(data: { status: string; merchantCode?:
 
 export async function getAepsKycStatus() {
   const res = await authFetch("/api/aeps/kyc-status");
-  return handleAepsResponse(res);
-}
-
-export async function kycWebviewComplete() {
-  const res = await authFetch("/api/aeps/kyc-webview-complete", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-  return handleAepsResponse(res);
-}
-
-export async function aepsKycSendOtp(aadhaarNumber: string) {
-  const res = await authFetch("/api/aeps/kyc/send-otp", {
-    method: "POST",
-    body: JSON.stringify({ aadhaarNumber }),
-  });
-  return handleAepsResponse(res);
-}
-
-export async function aepsKycVerifyOtp(otp: string) {
-  const res = await authFetch("/api/aeps/kyc/verify-otp", {
-    method: "POST",
-    body: JSON.stringify({ otp }),
-  });
   return handleAepsResponse(res);
 }
 

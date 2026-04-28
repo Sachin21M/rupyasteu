@@ -10,15 +10,17 @@ function generateUniqueReqId(): number {
 }
 
 function generatePaysprintJWT(): { token: string; payload: Record<string, unknown> } {
-  const timestamp = Date.now(); // PaySprint expects milliseconds
+  const timestamp = Math.floor(Date.now() / 1000);
   const reqid = generateUniqueReqId();
   const payload = {
+    iss: "PAYSPRINT",
     timestamp,
     partnerId: PAYSPRINT_PARTNER_ID,
-    reqid: String(reqid),
+    product: "WALLET",
+    reqid,
   };
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
-  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256", noTimestamp: true });
+  const token = jwt.sign(payload, jwtTokenEnv, { algorithm: "HS256" });
   return { token, payload };
 }
 

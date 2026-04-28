@@ -16,8 +16,8 @@ import { router, useFocusEffect, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getAepsMerchant, aepsOnboard, aepsOnboardComplete, aeps2faRegister, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
-import { discoverRdDevice, captureFingerprint, isSimulated, PAYSPRINT_WADH } from "@/lib/rd-service";
+import { getAepsMerchant, aepsOnboard, aeps2faAuthenticate, getAepsKycStatus } from "@/lib/api";
+import { discoverRdDevice, captureFingerprint, isSimulated } from "@/lib/rd-service";
 import type { RdDeviceInfo } from "@/lib/rd-service";
 
 type ServiceType = {
@@ -90,7 +90,6 @@ export default function AepsServicesScreen() {
   const [kycVerifyingBanner, setKycVerifyingBanner] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authAadhaar, setAuthAadhaar] = useState("");
-  const [twoFaRegistered, setTwoFaRegistered] = useState(false);
   const [rdDevice, setRdDevice] = useState<RdDeviceInfo | null>(null);
   const [rdChecking, setRdChecking] = useState(false);
   const [rdDiagnostics, setRdDiagnostics] = useState<string[]>([]);
@@ -151,7 +150,6 @@ export default function AepsServicesScreen() {
       const result = await getAepsMerchant();
       setOnboarded(result.onboarded || false);
       setDailyAuthenticated(result.dailyAuthenticated || false);
-      setTwoFaRegistered(result.twoFaRegistered || false);
       setKycStatus(result.merchant?.kycStatus || "NOT_STARTED");
       if (result.merchant?.merchantCode) {
         setMerchantCode(result.merchant.merchantCode);
@@ -221,18 +219,6 @@ export default function AepsServicesScreen() {
           startKycPolling();
           router.push(`/aeps/kyc-webview?url=${encodeURIComponent(result.redirectUrl)}` as Href);
         }
-      } else if (result.kycFormSubmitted) {
-        // Merchant completed the KYC form but PaySprint hasn't activated the account yet.
-        // This is normal — PaySprint bank activation runs in the background (minutes).
-        stopKycPolling();
-        setKycVerifyingBanner(false);
-        setKycIncompleteWarning(false);
-        if (allowRedirect) {
-          Alert.alert(
-            "KYC Submitted",
-            "Your KYC form was submitted successfully. PaySprint is activating your account — this usually takes a few minutes.\n\nPlease come back and tap \"Check KYC Status\" after a few minutes, or ask your admin to approve from the admin panel."
-          );
-        }
       } else if (allowRedirect && result.sessionExpired) {
         // PaySprint session expired — admin must regenerate the KYC link
         setKycVerifyingBanner(false);
@@ -276,21 +262,7 @@ export default function AepsServicesScreen() {
           result.alreadyRegistered ||
           (result.error || result.message || "").toLowerCase().includes("already registered")
         ) {
-          // Merchant already exists in PaySprint — try onboard/complete to check if
-          // PaySprint has activated them (response_code=2). If yes → COMPLETED.
-          // If not yet → fall back to kyc-status to show appropriate pending message.
-          try {
-            const completeResult = await aepsOnboardComplete({ status: "completed" });
-            if (completeResult.success && completeResult.kycStatus === "COMPLETED") {
-              setOnboarded(true);
-              setKycStatus("COMPLETED");
-              setOnboardingLoading(false);
-              Alert.alert("KYC Verified!", "Your AEPS merchant account is now active. You can perform AEPS transactions.");
-              return;
-            }
-          } catch {
-            // ignore — fall through to verifyKycFromPaySprint
-          }
+          // Merchant already exists in PaySprint — check status and resume if URL available
           setOnboardingLoading(false);
           await verifyKycFromPaySprint(true);
           return;
@@ -338,11 +310,6 @@ export default function AepsServicesScreen() {
     }
   }
 
-  function isAlreadyRegisteredMsg(msg: string): boolean {
-    const m = (msg || "").toLowerCase();
-    return m.includes("already registered") || m.includes("already exist") || m.includes("already done");
-  }
-
   async function handleDailyAuth() {
     if (Platform.OS !== "web" && authAadhaar.length !== 12) {
       Alert.alert("Aadhaar Required", "Enter your 12-digit Aadhaar number before scanning.");
@@ -350,7 +317,7 @@ export default function AepsServicesScreen() {
     }
     setAuthLoading(true);
     try {
-      const captureResult = await captureFingerprint(undefined, undefined, PAYSPRINT_WADH.bank2);
+      const captureResult = await captureFingerprint();
       if (!captureResult.success) {
         Alert.alert(
           "Scan Failed",
@@ -365,40 +332,18 @@ export default function AepsServicesScreen() {
       }
       if (captureResult.deviceInfo) setRdDevice(captureResult.deviceInfo);
 
-      const bioPayload = {
+      const result = await aeps2faAuthenticate({
         aadhaarNumber: authAadhaar,
         data: captureResult.pidData,
         latitude: "0.0",
         longitude: "0.0",
-      };
-
-      // Step 1: Registration — only for merchants who haven't registered yet.
-      // If registration succeeds OR PaySprint says "already registered",
-      // immediately proceed to authentication with the same biometric scan.
-      if (!twoFaRegistered) {
-        const regResult = await aeps2faRegister(bioPayload);
-        const alreadyReg = regResult.alreadyRegistered || isAlreadyRegisteredMsg(regResult.message || "");
-
-        if (regResult.success || alreadyReg) {
-          // Mark registered locally so future sessions skip this step
-          setTwoFaRegistered(true);
-          // Fall through to authentication with same PID below
-        } else {
-          // Registration outright failed — show error and stop
-          Alert.alert("Registration Failed", regResult.message || "Biometric registration failed. Please try again.");
-          setAuthLoading(false);
-          return;
-        }
-      }
-
-      // Step 2: Daily authentication
-      const authResult = await aeps2faAuthenticate(bioPayload);
-      if (authResult.success) {
+      });
+      if (result.success) {
         setDailyAuthenticated(true);
         const devMsg = isSimulated() ? "" : `\n\nDevice: ${captureResult.deviceInfo?.manufacturer} ${captureResult.deviceInfo?.model}`;
         Alert.alert("Authenticated", `Daily 2FA authentication completed. You can now perform AEPS transactions.${devMsg}`);
       } else {
-        Alert.alert("Failed", authResult.message || "Authentication failed. Please try again.");
+        Alert.alert("Failed", result.message || "Authentication failed. Please try again.");
       }
     } catch (err: any) {
       Alert.alert("Error", err.message || "Authentication failed");

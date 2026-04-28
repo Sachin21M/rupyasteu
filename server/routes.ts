@@ -6,72 +6,13 @@ import { validateUtr, validatePhone, validateAmount } from "./utils/validators";
 import { generateOtp, sendSmsAlert } from "./utils/smsalert";
 import { initiateRecharge, checkRechargeStatus, getOperatorInfo, getOperatorList } from "./services/paysprint";
 import * as aepsService from "./services/aeps";
-import * as aepsReport from "./services/aeps-report";
+import { generateAepsReport } from "./services/aeps-report";
 import { sendOtpSchema, verifyOtpSchema, createRechargeSchema, submitUtrSchema, aepsTransactionSchema } from "../shared/schema";
 
 const PAYMENT_MODE = process.env.PAYMENT_MODE || "MANUAL";
 const PAYEE_UPI_ID = process.env.PAYEE_UPI_ID || "44789692406@sbi";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "rupyasetu@2026";
-
-// Maps PaySprint response codes from eKYC OTP endpoints to user-friendly context.
-// retryable=true means the user can retry OTP entry without requesting a new OTP.
-// retryable=false means the user must start over or contact support.
-function mapKycErrorCode(responseCode: string | number | undefined, rawMessage: string): {
-  userMessage: string;
-  retryable: boolean;
-  errorCode: string;
-} {
-  const code = String(responseCode ?? "").trim();
-  switch (code) {
-    case "404":
-    case "UID_DEACTIVATED":
-      return { userMessage: "This Aadhaar is not active. Please use a valid, active Aadhaar number.", retryable: false, errorCode: "AADHAAR_DEACTIVATED" };
-    case "569":
-    case "570":
-    case "540":
-      return { userMessage: "Aadhaar mobile number is not linked. Please link a mobile number with your Aadhaar via UIDAI before retrying.", retryable: false, errorCode: "MOBILE_NOT_LINKED" };
-    case "999":
-    case "576":
-    case "LIMIT_EXCEEDED":
-      return { userMessage: "KYC attempts limit exceeded for today. Please try again tomorrow.", retryable: false, errorCode: "DAILY_LIMIT_EXCEEDED" };
-    case "580":
-    case "OTP_EXPIRED":
-      return { userMessage: "The OTP has expired. Please request a new OTP.", retryable: false, errorCode: "OTP_EXPIRED" };
-    case "581":
-    case "OTP_INVALID":
-      return { userMessage: "Incorrect OTP. Please check the OTP sent to your Aadhaar-linked mobile and try again.", retryable: true, errorCode: "OTP_INVALID" };
-    case "AADHAAR_MISMATCH":
-    case "596":
-      return { userMessage: "Aadhaar details do not match. Please ensure you're using the correct Aadhaar number.", retryable: false, errorCode: "AADHAAR_MISMATCH" };
-    case "502":
-    case "503":
-    case "504":
-      return { userMessage: "PaySprint service is temporarily unavailable. Please try again in a few minutes.", retryable: false, errorCode: "SERVICE_UNAVAILABLE" };
-    default: {
-      const lower = rawMessage?.toLowerCase() || "";
-      if (lower.includes("invalid otp") || lower.includes("otp mismatch") || lower.includes("wrong otp")) {
-        return { userMessage: "Incorrect OTP. Please check the OTP sent to your Aadhaar-linked mobile and try again.", retryable: true, errorCode: "OTP_INVALID" };
-      }
-      if (lower.includes("expired")) {
-        return { userMessage: "The OTP has expired. Please request a new OTP.", retryable: false, errorCode: "OTP_EXPIRED" };
-      }
-      if (lower.includes("limit") || lower.includes("exceeded")) {
-        return { userMessage: "KYC attempts limit exceeded for today. Please try again tomorrow.", retryable: false, errorCode: "DAILY_LIMIT_EXCEEDED" };
-      }
-      if (lower.includes("not linked") || lower.includes("no mobile")) {
-        return { userMessage: "Aadhaar mobile number is not linked. Please link a mobile number with your Aadhaar via UIDAI.", retryable: false, errorCode: "MOBILE_NOT_LINKED" };
-      }
-      if (lower.includes("mismatch") || lower.includes("not match")) {
-        return { userMessage: "Aadhaar details do not match. Please ensure you're using the correct Aadhaar number.", retryable: false, errorCode: "AADHAAR_MISMATCH" };
-      }
-      return { userMessage: rawMessage || "Verification failed. Please try again.", retryable: false, errorCode: "UNKNOWN" };
-    }
-  }
-}
-
-// TTL for Aadhaar eKYC OTP sessions persisted to DB (must match PaySprint OTP validity).
-const KYC_OTP_TTL_MS = 10 * 60 * 1000;
 
 function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
@@ -142,10 +83,8 @@ async function autoOnboardMerchant(userId: string, phone: string, firmName: stri
 
 async function retryOnboarding(merchant: any, phone: string, firmName: string): Promise<void> {
   try {
-    // Strip non-alphanumeric from stored code — PaySprint only accepts alphanumeric submerchantid
-    const safeCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
     let onboardResult = await aepsService.getOnboardingUrl({
-      merchantCode: safeCode,
+      merchantCode: merchant.merchantCode,
       mobile: phone,
       email: "",
       firmName: firmName || "RupyaSetu",
@@ -154,7 +93,7 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
     if (!(onboardResult.redirecturl || onboardResult.data?.redirecturl)) {
       console.log(`[Auto-Onboard] is_new=1 failed (${onboardResult.message}), trying is_new=0...`);
       onboardResult = await aepsService.getOnboardingUrl({
-        merchantCode: safeCode,
+        merchantCode: merchant.merchantCode,
         mobile: phone,
         email: "",
         firmName: firmName || "RupyaSetu",
@@ -177,34 +116,6 @@ async function retryOnboarding(merchant: any, phone: string, firmName: string): 
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-
-  // One-time startup job: re-attempt onboarding for any merchant left in FAILED
-  // state with no KYC redirect URL (caused by the Task #79 auth regression).
-  // Runs asynchronously so it never delays server startup.
-  (async () => {
-    try {
-      await new Promise(r => setTimeout(r, 3000)); // wait 3 s for DB pool to warm up
-      const failedMerchants = await storage.getAllFailedMerchants();
-      if (failedMerchants.length === 0) {
-        console.log("[Startup] No FAILED merchants need re-onboarding.");
-        return;
-      }
-      console.log(`[Startup] Re-triggering onboarding for ${failedMerchants.length} FAILED merchant(s)...`);
-      for (const m of failedMerchants) {
-        const user = await storage.getUser(m.userId);
-        const phone = user?.phone || m.phone;
-        if (!phone) {
-          console.warn(`[Startup] Skipping merchant ${m.merchantCode} — no phone found`);
-          continue;
-        }
-        await retryOnboarding(m, phone, m.firmName || "RupyaSetu");
-        await new Promise(r => setTimeout(r, 500)); // small delay between calls
-      }
-      console.log("[Startup] FAILED merchant re-onboarding sweep complete.");
-    } catch (err: any) {
-      console.error("[Startup] Re-onboarding sweep error:", err.message);
-    }
-  })();
 
   app.post("/api/auth/send-otp", async (req: Request, res: Response) => {
     try {
@@ -1236,15 +1147,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         merchant,
         onboarded: merchant.kycStatus === "COMPLETED",
         dailyAuthenticated: dailyAuth?.authenticated || false,
-        twoFaRegistered: merchant.twoFaRegistered || false,
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch merchant info" });
     }
   });
 
-  // Returns stored DB KYC status — does NOT poll PaySprint on every request.
-  // KYC is marked COMPLETED only through trusted signals (kyc-webview-complete, onboard/complete, admin).
+  // Real PaySprint KYC status check — always calls PaySprint, never trusts local DB alone
   app.get("/api/aeps/kyc-status", authMiddleware, async (req: Request, res: Response) => {
     try {
       const merchant = await storage.getAepsMerchant((req as any).userId);
@@ -1253,60 +1162,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = new Date().toISOString().split("T")[0];
       const dailyAuth = await storage.getAepsDailyAuth((req as any).userId, today);
 
+      // If admin has already approved this merchant (COMPLETED), never downgrade it.
+      // PaySprint's is_new=0 check cannot reliably distinguish "form done, eKYC pending"
+      // from "session expired" — so once COMPLETED is set (by admin approval or PaySprint
+      // callback), it stays COMPLETED.
       if (merchant.kycStatus === "COMPLETED") {
         return res.json({
           kycStatus: "COMPLETED",
           onboarded: true,
           dailyAuthenticated: dailyAuth?.authenticated || false,
-          twoFaRegistered: merchant.twoFaRegistered || false,
         });
       }
 
-      // Do NOT call PaySprint here — PaySprint's is_new=0 response is unreliable and
-      // causes false-positive COMPLETED marking (response_code=1 with no URL is returned
-      // for brand-new merchants who haven't done KYC yet). KYC is only marked COMPLETED
-      // through trusted signals:
-      //   1. /api/aeps/kyc-webview-complete — verifies with PaySprint after WebView redirect
-      //   2. /api/aeps/onboard/complete — PaySprint response_code=2 only
-      //   3. Admin approve button in the admin panel
-      // Just return stored DB state and the stored KYC URL.
-      const rawUrl = merchant.kycRedirectUrl || null;
-      // "SUBMITTED" is a sentinel value set by kyc-webview-complete when the merchant
-      // completed the form but PaySprint has not yet confirmed (bank activation pending).
-      const kycFormSubmitted = rawUrl === "SUBMITTED";
-      const storedUrl = kycFormSubmitted ? null : rawUrl;
-      const sessionExpired = !storedUrl && !kycFormSubmitted && merchant.kycStatus !== "FAILED";
+      const user = await storage.getUser((req as any).userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
 
-      const otpSession = await storage.getKycOtpSession((req as any).userId);
-      const hasPendingOtp = !!otpSession && Date.now() < otpSession.expiresAt;
+      // Call PaySprint with is_new=false to check if merchant is already registered
+      const verifyResult = await aepsService.getOnboardingUrl({
+        merchantCode: merchant.merchantCode,
+        mobile: user.phone,
+        isNew: false,
+      });
 
-      console.log(`[KYC-Status] merchant=${merchant.merchantCode} dbStatus=${merchant.kycStatus} hasUrl=${!!storedUrl} submitted=${kycFormSubmitted} pendingOtp=${hasPendingOtp}`);
+      const msg = (verifyResult.message || "").toLowerCase();
+
+      // response_code 2 = "already registered/completed" on PaySprint's side
+      // response_code 1 with no redirecturl = also completed (some PaySprint versions)
+      // response_code 0 + "already registered" + no URL = form done, eKYC activation pending
+      //   → treat as completed so merchant can proceed to do AEPS (which IS the eKYC step)
+      const psCompleted =
+        verifyResult.response_code === 2 ||
+        (verifyResult.response_code === 1 && !(verifyResult.redirecturl || verifyResult.data?.redirecturl)) ||
+        (verifyResult.response_code === 0 && (msg.includes("already registered") || msg.includes("already exist")) && !(verifyResult.redirecturl || verifyResult.data?.redirecturl));
+
+      console.log(`[KYC-Status] merchant=${merchant.merchantCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psCompleted=${psCompleted}`);
+
+      // Only upgrade PENDING→COMPLETED, never downgrade COMPLETED→PENDING
+      if (psCompleted && merchant.kycStatus !== "COMPLETED") {
+        await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
+      }
+
+      // Only return a URL if PaySprint actively provides one right now.
+      // Never fall back to stored URLs — they expire and cause silent failures in the WebView.
+      const freshUrl = !psCompleted
+        ? (verifyResult.redirecturl || verifyResult.data?.redirecturl || null)
+        : null;
 
       res.json({
-        kycStatus: merchant.kycStatus || "PENDING",
-        onboarded: false,
+        kycStatus: psCompleted ? "COMPLETED" : "PENDING",
+        onboarded: psCompleted,
         dailyAuthenticated: dailyAuth?.authenticated || false,
-        twoFaRegistered: merchant.twoFaRegistered || false,
-        redirectUrl: storedUrl || undefined,
-        sessionExpired,
-        kycFormSubmitted,
-        hasPendingOtp,
+        redirectUrl: freshUrl || undefined,
+        sessionExpired: !psCompleted && !freshUrl,
+        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message },
       });
     } catch (error) {
       console.error("KYC status check error:", error);
-      res.status(500).json({ error: "Failed to check KYC status" });
+      res.status(500).json({ error: "Failed to check KYC status from PaySprint" });
     }
   });
 
   app.post("/api/aeps/onboard", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const rawCode = req.body.merchantCode;
-      if (!rawCode) {
-        return res.status(400).json({ error: "Merchant code is required" });
-      }
-      const merchantCode = String(rawCode).replace(/[^a-zA-Z0-9]/g, "");
+      const { merchantCode } = req.body;
       if (!merchantCode) {
-        return res.status(400).json({ error: "Merchant code must contain at least one alphanumeric character" });
+        return res.status(400).json({ error: "Merchant code is required" });
       }
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
@@ -1363,8 +1283,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/onboard/complete", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const rawCode = req.body.merchantCode;
-      const sanitizedCode = rawCode ? String(rawCode).replace(/[^a-zA-Z0-9]/g, "") : undefined;
+      const { merchantCode } = req.body;
       const existing = await storage.getAepsMerchant((req as any).userId);
       if (!existing) return res.status(404).json({ error: "Merchant not found. Start onboarding first." });
       if (existing.kycStatus === "COMPLETED") {
@@ -1373,22 +1292,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
-      const mCode = sanitizedCode || existing.merchantCode.replace(/[^a-zA-Z0-9]/g, "") || existing.merchantCode;
+      const mCode = merchantCode || existing.merchantCode;
       const verifyResult = await aepsService.getOnboardingUrl({
         merchantCode: mCode,
         mobile: user.phone,
       });
 
-      // Only trust response_code === 2 as a definitive "already registered" signal.
-      // response_code === 1 with no URL is NOT a reliable completed signal — PaySprint
-      // returns this for new merchants too, causing false-positive COMPLETED marking.
-      const psCompleted = verifyResult.response_code === 2;
-
-      console.log(`[Onboard-Complete] merchant=${mCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psCompleted=${psCompleted}`);
+      // response_code 2 = already registered on PaySprint (COMPLETED)
+      // response_code 1 with no redirecturl = also completed on some PaySprint versions
+      const psCompleted =
+        verifyResult.response_code === 2 ||
+        (verifyResult.response_code === 1 && !verifyResult.redirecturl);
 
       if (psCompleted) {
         const updates: Record<string, string> = { kycStatus: "COMPLETED" };
-        if (sanitizedCode) updates.merchantCode = sanitizedCode;
+        if (merchantCode) updates.merchantCode = merchantCode;
         await storage.updateAepsMerchant((req as any).userId, updates);
         res.json({ success: true, kycStatus: "COMPLETED" });
       } else {
@@ -1397,212 +1315,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("AEPS onboard complete error:", error);
       res.status(500).json({ error: "Onboarding verification failed" });
-    }
-  });
-
-  // Called by the WebView when PaySprint redirects the user away from merchantkyc.com.
-  // This is a trusted app-side signal that the user went through the PaySprint KYC form.
-  // We verify with PaySprint before setting COMPLETED:
-  //   - If PaySprint confirms (response_code=2): mark COMPLETED (definitive).
-  //   - If PaySprint does not yet confirm: clear the stored KYC URL and return PENDING
-  //     with kycFormSubmitted=true so the app can show "awaiting activation" rather
-  //     than "session expired." Admin can then approve or the merchant retries via
-  //     /api/aeps/onboard/complete after PaySprint activates in the background.
-  app.post("/api/aeps/kyc-webview-complete", authMiddleware, async (req: Request, res: Response) => {
-    try {
-      const merchant = await storage.getAepsMerchant((req as any).userId);
-      if (!merchant) return res.status(404).json({ error: "Merchant not found" });
-
-      if (merchant.kycStatus === "COMPLETED") {
-        return res.json({ success: true, kycStatus: "COMPLETED", verified: true });
-      }
-
-      const user = await storage.getUser((req as any).userId);
-      const safeCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
-
-      let psVerified = false;
-      try {
-        if (user) {
-          const verifyResult = await aepsService.getOnboardingUrl({
-            merchantCode: safeCode,
-            mobile: user.phone,
-            isNew: false,
-          });
-          psVerified = verifyResult.response_code === 2;
-          console.log(`[KYC-WebView] merchant=${safeCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" psVerified=${psVerified}`);
-        }
-      } catch (verifyErr: any) {
-        console.warn(`[KYC-WebView] PaySprint verify failed for ${safeCode}: ${verifyErr.message}`);
-      }
-
-      if (psVerified) {
-        // PaySprint confirmed — mark fully COMPLETED
-        await storage.updateAepsMerchant((req as any).userId, { kycStatus: "COMPLETED" });
-        console.log(`[KYC-WebView] Marked ${safeCode} COMPLETED (PaySprint confirmed)`);
-        return res.json({ success: true, kycStatus: "COMPLETED", verified: true });
-      }
-
-      // PaySprint not yet confirmed (bank activation runs in background on PaySprint's side).
-      // Clear the stored URL so kyc-status returns kycFormSubmitted=true instead of
-      // re-opening the WebView, and leave kycStatus as PENDING for admin/manual approval.
-      await storage.updateAepsMerchant((req as any).userId, { kycRedirectUrl: "SUBMITTED" });
-      console.log(`[KYC-WebView] Form submitted for ${safeCode} — awaiting PaySprint activation`);
-      res.json({ success: true, kycStatus: "PENDING", kycFormSubmitted: true, verified: false });
-    } catch (error) {
-      console.error("KYC webview complete error:", error);
-      res.status(500).json({ error: "Failed to update KYC status" });
-    }
-  });
-
-  // Aadhaar eKYC OTP — Step 1: send OTP to the Aadhaar-linked mobile.
-  // Returns success only; the otpreqid is stored server-side and never sent to the client.
-  app.post("/api/aeps/kyc/send-otp", authMiddleware, async (req: Request, res: Response) => {
-    try {
-      const userId = (req as any).userId as string;
-      const { aadhaarNumber } = req.body as { aadhaarNumber?: string };
-      if (!aadhaarNumber || !/^\d{12}$/.test(aadhaarNumber)) {
-        return res.status(400).json({ error: "Valid 12-digit Aadhaar number is required" });
-      }
-
-      const merchant = await storage.getAepsMerchant(userId);
-      if (!merchant) return res.status(404).json({ error: "Merchant account not found" });
-
-      const user = await storage.getUser(userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      if (merchant.kycStatus === "COMPLETED") {
-        return res.json({ success: true, alreadyVerified: true, message: "KYC is already completed." });
-      }
-
-      // Remove any stale OTP session before making a fresh request
-      await storage.deleteKycOtpSession(userId);
-
-      const result = await aepsService.sendKycOtp({
-        adhaarnumber: aadhaarNumber,
-        merchantcode: merchant.merchantCode,
-        mobile: merchant.phone || user.phone,
-      });
-
-      if (!result.status) {
-        const mapped = mapKycErrorCode(result.response_code, result.message || "");
-        console.error(`[KYC-SendOTP] Failed: code=${result.response_code} msg="${result.message}"`);
-        storage.insertKycAttempt({
-          userId,
-          merchantCode: merchant.merchantCode || "",
-          step: "SEND_OTP",
-          success: false,
-          responseCode: String(result.response_code ?? ""),
-          responseMessage: result.message || "",
-        }).catch(() => {});
-        return res.status(400).json({
-          error: mapped.userMessage,
-          errorCode: mapped.errorCode,
-          retryable: mapped.retryable,
-        });
-      }
-
-      const otpreqid: string = (result.data?.otpreqid ?? result.data?.otp_req_id ?? "") as string;
-      if (!otpreqid) {
-        console.error(`[KYC-SendOTP] No otpreqid in response: ${JSON.stringify(result).substring(0, 200)}`);
-        return res.status(500).json({ error: "OTP sent but request ID missing from PaySprint response." });
-      }
-
-      await storage.saveKycOtpSession(userId, otpreqid, aadhaarNumber, Date.now() + KYC_OTP_TTL_MS);
-      console.log(`[KYC-SendOTP] OTP sent for merchant=${merchant.merchantCode}`);
-      storage.insertKycAttempt({
-        userId,
-        merchantCode: merchant.merchantCode || "",
-        step: "SEND_OTP",
-        success: true,
-        responseCode: String(result.response_code ?? "1"),
-        responseMessage: result.message || "OTP sent",
-      }).catch(() => {});
-
-      res.json({ success: true, message: result.message || "OTP sent to Aadhaar-linked mobile number." });
-    } catch (error: any) {
-      console.error("KYC send-otp error:", error);
-      res.status(500).json({ error: "Failed to send KYC OTP. Please try again." });
-    }
-  });
-
-  // Aadhaar eKYC OTP — Step 2: verify OTP and mark KYC as COMPLETED on success.
-  // Uses the server-side otpreqid stored from send-otp — client cannot supply or modify it.
-  app.post("/api/aeps/kyc/verify-otp", authMiddleware, async (req: Request, res: Response) => {
-    try {
-      const userId = (req as any).userId as string;
-      const { otp } = req.body as { otp?: string };
-      if (!otp || !/^\d{4,8}$/.test(otp)) {
-        return res.status(400).json({ error: "Valid OTP is required" });
-      }
-
-      const entry = await storage.getKycOtpSession(userId);
-      if (!entry) {
-        return res.status(400).json({ error: "No pending OTP request found. Please request a new OTP." });
-      }
-      if (Date.now() > entry.expiresAt) {
-        await storage.deleteKycOtpSession(userId);
-        return res.status(400).json({ error: "OTP has expired. Please request a new one." });
-      }
-
-      const merchant = await storage.getAepsMerchant(userId);
-      if (!merchant) return res.status(404).json({ error: "Merchant account not found" });
-
-      const user = await storage.getUser(userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      if (merchant.kycStatus === "COMPLETED") {
-        await storage.deleteKycOtpSession(userId);
-        return res.json({ success: true, kycStatus: "COMPLETED", message: "KYC already completed." });
-      }
-
-      const result = await aepsService.verifyKycOtp({
-        otpreqid: entry.otpreqid,
-        otp,
-        merchantcode: merchant.merchantCode,
-        adhaarnumber: entry.aadhaarNumber,
-        mobile: merchant.phone || user.phone,
-      });
-
-      if (!result.status) {
-        const mapped = mapKycErrorCode(result.response_code, result.message || "");
-        console.error(`[KYC-VerifyOTP] Failed: code=${result.response_code} msg="${result.message}" retryable=${mapped.retryable}`);
-        storage.insertKycAttempt({
-          userId,
-          merchantCode: merchant.merchantCode || "",
-          step: "VERIFY_OTP",
-          success: false,
-          responseCode: String(result.response_code ?? ""),
-          responseMessage: result.message || "",
-        }).catch(() => {});
-        // For non-retryable errors (expired, rate limit, mismatch) clear the OTP session
-        // so the user is forced to go back and request a fresh OTP.
-        if (!mapped.retryable) {
-          await storage.deleteKycOtpSession(userId);
-        }
-        return res.status(400).json({
-          error: mapped.userMessage,
-          errorCode: mapped.errorCode,
-          retryable: mapped.retryable,
-        });
-      }
-
-      // OTP verified — remove the spent session and mark KYC completed.
-      await storage.deleteKycOtpSession(userId);
-      await storage.updateAepsMerchant(userId, { kycStatus: "COMPLETED" });
-      console.log(`[KYC-VerifyOTP] Merchant ${merchant.merchantCode} marked COMPLETED via eKYC OTP`);
-      storage.insertKycAttempt({
-        userId,
-        merchantCode: merchant.merchantCode || "",
-        step: "VERIFY_OTP",
-        success: true,
-        responseCode: String(result.response_code ?? "1"),
-        responseMessage: result.message || "OTP verified",
-      }).catch(() => {});
-
-      res.json({ success: true, kycStatus: "COMPLETED", message: "Aadhaar eKYC verified successfully!" });
-    } catch (error: any) {
-      console.error("KYC verify-otp error:", error);
-      res.status(500).json({ error: "Failed to verify KYC OTP. Please try again." });
     }
   });
 
@@ -1638,57 +1350,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/aeps/2fa/register", authMiddleware, async (req: Request, res: Response) => {
     try {
-      const { aadhaarNumber, data: biometricData, latitude, longitude } = req.body;
-      if (!biometricData) {
-        return res.status(400).json({ error: "Biometric data is required for 2FA registration" });
-      }
-
-      const user = await storage.getUser((req as any).userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      const merchant = await storage.getAepsMerchant((req as any).userId);
-      if (!merchant || merchant.kycStatus !== "COMPLETED") {
-        return res.status(403).json({ error: "Complete merchant onboarding first" });
-      }
-
-      const _now = new Date();
-      const timestamp = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,"0")}-${String(_now.getDate()).padStart(2,"0")} ${String(_now.getHours()).padStart(2,"0")}:${String(_now.getMinutes()).padStart(2,"0")}:${String(_now.getSeconds()).padStart(2,"0")}`;
-      const referenceNo = `REG${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
-
-      if (!aadhaarNumber) {
-        return res.status(400).json({ error: "Aadhaar number is required for 2FA registration" });
-      }
-      const merchantCode2faReg = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
-      if (!merchantCode2faReg) {
-        return res.status(400).json({ error: "Merchant code not found — complete merchant onboarding first" });
-      }
-
-      const fullPayload = {
-        accessmode: "Fingerprint",
-        adhaarnumber: aadhaarNumber,
-        mobilenumber: user.phone,
-        latitude: latitude || "0.0",
-        longitude: longitude || "0.0",
-        refid: referenceNo,
-        merchantcode: merchantCode2faReg,
-        piddata: aepsService.encryptPidForPaySprint(biometricData),
-        ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
-        timestamp,
-        is_iris: "0",
-      };
-      console.log(`[AEPS 2FA REG] merchantcode=${fullPayload.merchantcode} refid=${fullPayload.refid} dataLen=${biometricData?.length || 0}`);
-
-      const result = await aepsService.twoFactorRegistration(fullPayload);
-      if (result.status) {
-        await storage.updateAepsMerchant((req as any).userId, { twoFaRegistered: true } as any);
-      }
-      res.json({ success: result.status, message: result.message, data: result.data, alreadyRegistered: false });
-    } catch (error: any) {
+      const result = await aepsService.twoFactorRegistration(req.body);
+      res.json({ success: result.status, message: result.message, data: result.data });
+    } catch (error) {
       console.error("AEPS 2FA register error:", error);
-      const msg: string = error?.message || "";
-      if (msg.startsWith("[AEPS]")) {
-        return res.status(400).json({ error: msg.replace("[AEPS] ", "") });
-      }
       res.status(500).json({ error: "2FA registration failed" });
     }
   });
@@ -1708,32 +1373,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Complete merchant onboarding first" });
       }
 
-      if (!aadhaarNumber) {
-        return res.status(400).json({ error: "Aadhaar number is required for 2FA authentication" });
-      }
-      const merchantCode2faAuth = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
-      if (!merchantCode2faAuth) {
-        return res.status(400).json({ error: "Merchant code not found — complete merchant onboarding first" });
-      }
-
       const _now2fa = new Date();
       const timestamp = `${_now2fa.getFullYear()}-${String(_now2fa.getMonth()+1).padStart(2,"0")}-${String(_now2fa.getDate()).padStart(2,"0")} ${String(_now2fa.getHours()).padStart(2,"0")}:${String(_now2fa.getMinutes()).padStart(2,"0")}:${String(_now2fa.getSeconds()).padStart(2,"0")}`;
       const referenceNo = `2FA${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
 
       const fullPayload = {
-        accessmode: "Fingerprint",
-        adhaarnumber: aadhaarNumber,
+        accessmodetype: "site",
+        adhaarnumber: aadhaarNumber || "",
         mobilenumber: user.phone,
         latitude: latitude || "0.0",
         longitude: longitude || "0.0",
-        refid: referenceNo,
-        merchantcode: merchantCode2faAuth,
-        piddata: aepsService.encryptPidForPaySprint(biometricData),
+        referenceno: referenceNo,
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
+        data: biometricData,
         ipaddress: ((req as any).ip || "127.0.0.1").replace("::ffff:", ""),
         timestamp,
-        is_iris: "0",
+        is_iris: "No",
       };
-      console.log(`[AEPS 2FA AUTH] merchantcode=${fullPayload.merchantcode} refid=${fullPayload.refid} dataLen=${biometricData?.length || 0}`);
 
       const result = await aepsService.twoFactorAuthentication(fullPayload);
       if (result.status) {
@@ -1741,12 +1397,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.setAepsDailyAuth((req as any).userId, today);
       }
       res.json({ success: result.status, message: result.message, data: result.data });
-    } catch (error: any) {
+    } catch (error) {
       console.error("AEPS 2FA auth error:", error);
-      const msg: string = error?.message || "";
-      if (msg.startsWith("[AEPS]")) {
-        return res.status(400).json({ error: msg.replace("[AEPS] ", "") });
-      }
       res.status(500).json({ error: "2FA authentication failed" });
     }
   });
@@ -1777,13 +1429,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!fingerprintData) {
         return res.status(400).json({ error: "Biometric data is required for AEPS transactions." });
       }
-      if (!aadhaarNumber) {
-        return res.status(400).json({ error: "Aadhaar number is required for AEPS transactions." });
-      }
-      const aepsMerchantCode = (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, "");
-      if (!aepsMerchantCode) {
-        return res.status(400).json({ error: "Merchant code not found — complete merchant onboarding first" });
-      }
 
       const referenceNo = `AEPS${Date.now()}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
       const maskedAadhaar = "XXXX-XXXX-" + aadhaarNumber.slice(-4);
@@ -1806,20 +1451,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude,
         longitude,
         mobilenumber: user.phone,
-        refid: referenceNo,
+        referenceno: referenceNo,
         ipaddress: (req.ip || "127.0.0.1").replace("::ffff:", ""),
         adhaarnumber: aadhaarNumber,
-        accessmode: "Fingerprint",
+        accessmodetype: "site",
         nationalbankidentification: bankIin,
         requestremarks: `${type} via RupyaSetu`,
-        piddata: aepsService.encryptPidForPaySprint(fingerprintData),
+        data: fingerprintData,
         pipe: pipe || "bank2",
         timestamp,
         transactiontype: type === "CASH_WITHDRAWAL" ? "CW" : type === "BALANCE_ENQUIRY" ? "BE" : type === "MINI_STATEMENT" ? "MS" : type === "AADHAAR_PAY" ? "AP" : "CD",
-        merchantcode: aepsMerchantCode,
-        is_iris: "0",
+        submerchantid: (merchant.merchantCode || PAYSPRINT_PARTNER_ID).replace(/[^a-zA-Z0-9]/g, ""),
+        is_iris: "No",
       };
-      console.log(`[AEPS TXN] type=${type} merchantcode=${commonParams.merchantcode} refid=${commonParams.refid} dataLen=${fingerprintData?.length || 0}`);
 
       let result;
       switch (type) {
@@ -1915,12 +1559,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         commissionEarned: commissionCredited,
         serviceCharge: serviceChargeDeducted || undefined,
       });
-    } catch (error: any) {
+    } catch (error) {
       console.error("AEPS transaction error:", error);
-      const msg: string = error?.message || "";
-      if (msg.startsWith("[AEPS]")) {
-        return res.status(400).json({ error: msg.replace("[AEPS] ", "") });
-      }
       res.status(500).json({ error: "AEPS transaction failed" });
     }
   });
@@ -2055,11 +1695,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const phone = user?.phone || merchant.phone;
       if (!phone) return res.status(400).json({ error: "Merchant has no phone number on record" });
 
-      // Admin can supply a PaySprint-side merchant code to override the stored one.
-      // Strip any non-alphanumeric characters — PaySprint only accepts alphanumeric submerchantid.
-      const overrideCode = (req.body.merchantCode || "").trim().replace(/[^a-zA-Z0-9]/g, "");
-      const sanitizedStoredCode = (merchant.merchantCode || "").replace(/[^a-zA-Z0-9]/g, "") || merchant.merchantCode;
-      const codeToUse = overrideCode || sanitizedStoredCode;
+      // Admin can supply a PaySprint-side merchant code to override the stored one
+      const overrideCode = (req.body.merchantCode || "").trim();
+      const codeToUse = overrideCode || merchant.merchantCode;
 
       console.log(`[Admin] Regenerating KYC URL — stored code: ${merchant.merchantCode}, using code: ${codeToUse}, phone: ${phone}`);
 
@@ -2084,14 +1722,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Attempt 2: is_new=1 with the code we'll use (if attempt 1 failed)
       if (!freshUrl) freshUrl = await tryOnboard(codeToUse, true);
 
-      // Attempt 3: if an override was given, also try the sanitized stored code with is_new=0
-      if (!freshUrl && overrideCode && overrideCode !== sanitizedStoredCode) {
-        freshUrl = await tryOnboard(sanitizedStoredCode, false);
+      // Attempt 3: if an override was given, also try the stored code with is_new=0
+      if (!freshUrl && overrideCode && overrideCode !== merchant.merchantCode) {
+        freshUrl = await tryOnboard(merchant.merchantCode, false);
       }
 
-      // Attempt 4: if override given, try sanitized stored code with is_new=1
-      if (!freshUrl && overrideCode && overrideCode !== sanitizedStoredCode) {
-        freshUrl = await tryOnboard(sanitizedStoredCode, true);
+      // Attempt 4: if override given, try stored code with is_new=1
+      if (!freshUrl && overrideCode && overrideCode !== merchant.merchantCode) {
+        freshUrl = await tryOnboard(merchant.merchantCode, true);
       }
 
       console.log(`[Admin] Regen attempts summary:\n  ${attempts.join("\n  ")}`);
@@ -2104,14 +1742,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Save the fresh URL (and update merchant code if admin provided an override or stored code had special chars)
+      // Save the fresh URL (and update merchant code if admin provided an override)
       const updatePayload: any = { kycStatus: "PENDING", kycRedirectUrl: freshUrl };
-      if (overrideCode && overrideCode !== sanitizedStoredCode) {
+      if (overrideCode && overrideCode !== merchant.merchantCode) {
         updatePayload.merchantCode = overrideCode;
         console.log(`[Admin] Updating stored merchant code: ${merchant.merchantCode} → ${overrideCode}`);
-      } else if (sanitizedStoredCode !== merchant.merchantCode) {
-        updatePayload.merchantCode = sanitizedStoredCode;
-        console.log(`[Admin] Normalizing stored merchant code: ${merchant.merchantCode} → ${sanitizedStoredCode}`);
       }
       await storage.updateAepsMerchant(merchant.userId, updatePayload);
 
@@ -2312,33 +1947,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/admin/kyc-attempts", adminAuthMiddleware, async (req: Request, res: Response) => {
-    try {
-      const merchantCode = req.query.merchantCode as string | undefined;
-      const userId = req.query.userId as string | undefined;
-      const summary = req.query.summary === "true";
-      const rawLimit = parseInt(req.query.limit as string || "100");
-      const limit = Math.min(Math.max(isNaN(rawLimit) ? 100 : rawLimit, 1), 500);
-
-      if (merchantCode) {
-        if (summary) {
-          const hist = await aepsReport.getKycAttemptHistory(merchantCode);
-          return res.json(hist);
-        }
-        const attempts = await storage.getAllMerchantKycAttempts(merchantCode, limit);
-        return res.json({ attempts });
-      } else if (userId) {
-        const attempts = await storage.getKycAttempts(userId, limit);
-        return res.json({ attempts });
-      } else {
-        return res.status(400).json({ error: "merchantCode or userId query param is required" });
-      }
-    } catch (error) {
-      console.error("Failed to fetch KYC attempts:", error);
-      res.status(500).json({ error: "Failed to fetch KYC attempts" });
-    }
-  });
-
   app.get("/api/admin/server-info", adminAuthMiddleware, async (_req: Request, res: Response) => {
     try {
       const ipRes = await fetch("https://api.ipify.org?format=json");
@@ -2372,7 +1980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/admin/aeps-report", adminAuthMiddleware, async (_req: Request, res: Response) => {
     try {
-      const pdfBuffer = await aepsReport.generateAepsReport();
+      const pdfBuffer = await generateAepsReport();
       const filename = `RupyaSetu_AEPS_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

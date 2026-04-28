@@ -1051,7 +1051,7 @@ async function updateMerchantStatus(id, status) {
 async function forceCompleteOnboarding(merchantCode) {
   if (!confirm('Force-complete onboarding for merchant ' + merchantCode + '?\n\nThis will mark their KYC as COMPLETED so they can proceed to eKYC step.')) return;
   try {
-    const res = await fetch('/api/admin/merchants/force-complete', {
+    const res = await fetch('/api/admin/aeps/force-complete/' + merchantCode, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken },
       body: JSON.stringify({ merchantCode }),

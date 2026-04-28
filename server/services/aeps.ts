@@ -377,7 +377,8 @@ export async function getAepsBankList(): Promise<AepsResponse> {
 
 /**
  * Check merchant onboarding STAGES status directly from PaySprint.
- * Returns { stages: "Completed" | "Pending" | "" } so callers can check
+ * Tries two endpoints in sequence; falls back gracefully if neither works.
+ * Returns { stages: "Completed" | "Pending" | "" } — callers check
  * stages.toLowerCase() === "completed" without relying on redirecturl logic.
  */
 export async function getMerchantOnboardingStatus(merchantCode: string): Promise<AepsResponse & { stages?: string }> {
@@ -387,21 +388,42 @@ export async function getMerchantOnboardingStatus(merchantCode: string): Promise
     return { status: true, response_code: 1, message: "Simulation", stages: "Completed" };
   }
 
-  // Try the primary PaySprint merchant KYC status endpoint
-  const result = await makeAepsRequest("/service/onboard/onboard/getmerchantkyc", {
+  function extractStages(result: any): string {
+    // PaySprint may return the STAGES field at top-level, inside data, or
+    // inside a nested merchant/detail object with various casings.
+    return (
+      result.stages ||
+      result.STAGES ||
+      result.data?.stages ||
+      result.data?.STAGES ||
+      result.data?.merchant?.stages ||
+      result.data?.details?.stages ||
+      ""
+    );
+  }
+
+  // Attempt 1: primary endpoint
+  const primary = await makeAepsRequest("/service/onboard/onboard/getmerchantkyc", {
     merchantcode: merchantCode,
   }) as AepsResponse & { stages?: string; data?: any };
 
-  // PaySprint may return stages at top-level OR inside data
-  const stages: string =
-    result.stages ||
-    result.data?.stages ||
-    result.data?.STAGES ||
-    "";
+  const primaryStages = extractStages(primary);
+  console.log(`[Stages-Check] PRIMARY endpoint merchant=${merchantCode} response_code=${primary.response_code} stages="${primaryStages}" msg="${primary.message}" full_response=${JSON.stringify(primary).substring(0, 400)}`);
 
-  console.log(`[Stages-Check] merchant=${merchantCode} response_code=${result.response_code} stages="${stages}" msg="${result.message}"`);
+  if (primaryStages) {
+    return { ...primary, stages: primaryStages };
+  }
 
-  return { ...result, stages };
+  // Attempt 2: fallback endpoint (used by some PaySprint partners / API versions)
+  const fallback = await makeAepsRequest("/service/onboard/merchant/getonboardstatus", {
+    merchantcode: merchantCode,
+  }) as AepsResponse & { stages?: string; data?: any };
+
+  const fallbackStages = extractStages(fallback);
+  console.log(`[Stages-Check] FALLBACK endpoint merchant=${merchantCode} response_code=${fallback.response_code} stages="${fallbackStages}" msg="${fallback.message}" full_response=${JSON.stringify(fallback).substring(0, 400)}`);
+
+  // Return whichever attempt gave us a stages value; empty string if neither did
+  return { ...fallback, stages: fallbackStages };
 }
 
 export async function getOnboardingUrl(params: {

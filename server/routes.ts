@@ -1916,9 +1916,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin: Force-complete onboarding by merchantCode (immediate override)
-  app.post("/api/admin/merchants/force-complete", adminAuthMiddleware, async (req: Request, res: Response) => {
+  // Accepts both /:merchantCode path param AND { merchantCode } body for flexibility
+  app.post("/api/admin/aeps/force-complete/:merchantCode", adminAuthMiddleware, async (req: Request, res: Response) => {
     try {
-      const { merchantCode } = req.body;
+      const merchantCode = req.params.merchantCode || req.body.merchantCode;
       if (!merchantCode) return res.status(400).json({ error: "merchantCode is required" });
 
       const merchant = await storage.getAepsMerchantByCode(merchantCode);

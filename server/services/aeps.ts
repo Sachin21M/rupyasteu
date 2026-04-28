@@ -580,17 +580,17 @@ export async function ekycComplete(params: {
     : "SIMULATED_ENCRYPTED_PID_FOR_TESTING_ONLY";
 
   const merchantcode = params.merchantCode.replace(/-/g, "");
-  const referenceid = `EKYC${Date.now()}`;
+  const referenceno = `EKYC${Date.now()}`;
 
   console.log(`[eKYC] Complete — merchant=${merchantcode} pidLen=${params.pidXml.length} encryptedLen=${encryptedPid.length}`);
-  console.log(`[eKYC] Payload: merchantcode=${merchantcode} mobile=${params.mobile} referenceid=${referenceid} accessmode=BIO pipe=bank2 aadharno=[REDACTED] piddata=[REDACTED]`);
+  console.log(`[eKYC] Payload: merchantcode=${merchantcode} mobile=${params.mobile} referenceno=${referenceno} accessmode=SITE pipe=bank2 adhaarnumber=[REDACTED] piddata=[REDACTED]`);
 
   return makeAepsRequest("/service/aeps/kyc/V3/kyc", {
     merchantcode,
     mobile: params.mobile,
-    referenceid,
-    aadharno: params.aadhaar,
-    accessmode: "BIO",
+    referenceno,
+    adhaarnumber: params.aadhaar,
+    accessmode: "SITE",
     pipe: "bank2",
     piddata: encryptedPid,
   });

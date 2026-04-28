@@ -147,12 +147,10 @@ export default function KycWebViewScreen() {
       if (!isOnKycDomain && state.url.startsWith("http")) {
         const isCallbackUrl = state.url.includes("aeps-callback");
         console.log(`[KYC WebView] Left KYC domain → url=${state.url} isCallback=${isCallbackUrl}`);
-        if (isCallbackUrl) {
-          markKycCompleted("CALLBACK_URL_REDIRECT");
-        } else {
-          completedRef.current = true;
-          router.back();
-        }
+        // Any navigation away from merchantkyc.com means the user finished
+        // (either our callback URL, or PaySprint's own "Onboarding Completed" redirect).
+        // Always call markKycCompleted — never just router.back().
+        markKycCompleted(isCallbackUrl ? "CALLBACK_URL_REDIRECT" : "DOMAIN_EXIT");
       }
     } catch {
       // URL parsing error — ignore

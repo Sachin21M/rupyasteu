@@ -578,8 +578,12 @@ export async function ekycComplete(params: {
   const encryptedPid = jwtTokenEnv
     ? extractAndEncryptPid(params.pidXml)
     : "SIMULATED_ENCRYPTED_PID_FOR_TESTING_ONLY";
-  const refid = `EKYC${Date.now()}${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-  console.log(`[eKYC] Complete for merchant ${params.merchantCode}, refid=${refid}, pidLen=${params.pidXml.length}, encryptedLen=${encryptedPid.length}`);
+  console.log(`[eKYC] Complete for merchant ${params.merchantCode}, pidLen=${params.pidXml.length}, encryptedLen=${encryptedPid.length}`);
+
+  if (!jwtTokenEnv) {
+    console.log("[AEPS SIMULATION] No JWT token — simulating eKYC complete");
+    return { status: true, response_code: 1, message: "eKYC completed (simulated)" };
+  }
 
   // /V3/kyc requires encrypted body format — different from other AEPS endpoints
   const innerPayload: Record<string, unknown> = {
@@ -594,11 +598,6 @@ export async function ekycComplete(params: {
 
   const encryptedBody = encryptAesBody(innerPayload);
   const requestBody = JSON.stringify({ body: encryptedBody });
-
-  if (!jwtTokenEnv) {
-    console.log("[AEPS SIMULATION] No JWT token — simulating eKYC complete");
-    return { status: true, response_code: 1, message: "eKYC completed (simulated)" };
-  }
 
   const endpoint = "/service/aeps/kyc/V3/kyc";
   const fullUrl = `${PAYSPRINT_BASE_URL}${endpoint}`;

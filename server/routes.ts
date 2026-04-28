@@ -1472,6 +1472,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: true, message: "eKYC already completed", alreadyDone: true });
       }
 
+      if (!user?.phone) {
+        return res.status(400).json({ error: "User phone number not found. Please update your profile." });
+      }
+
       const { aadhaar, pidXml } = req.body;
       if (!aadhaar || !pidXml) {
         return res.status(400).json({ error: "Aadhaar number and biometric PID are required" });
@@ -1481,7 +1485,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         merchantCode: merchant.merchantCode,
         aadhaar,
         pidXml,
-        mobile: user?.phone || "",
+        mobile: user.phone,
       });
 
       if (result.status || result.response_code === 1) {

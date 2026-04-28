@@ -76,25 +76,15 @@ export default function KycWebViewScreen() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [webviewLoading, setWebviewLoading] = useState(true);
   const [webviewError, setWebviewError] = useState<string | null>(null);
-  const [showManualBtn, setShowManualBtn] = useState(false);
   const [completing, setCompleting] = useState(false);
   const completedRef = useRef(false);
-  const manualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     requestLocation();
-    return () => {
-      if (manualTimerRef.current) clearTimeout(manualTimerRef.current);
-    };
   }, []);
 
-  // Show manual fallback button 25 seconds after WebView finishes loading
   function onWebViewLoadEnd() {
     setWebviewLoading(false);
-    if (manualTimerRef.current) clearTimeout(manualTimerRef.current);
-    manualTimerRef.current = setTimeout(() => {
-      if (!completedRef.current) setShowManualBtn(true);
-    }, 25000);
   }
 
   async function requestLocation() {
@@ -119,12 +109,10 @@ export default function KycWebViewScreen() {
     }
   }
 
-  // Called from both JS detection and manual button
   async function markKycCompleted(source: string) {
     if (completedRef.current || completing) return;
     completedRef.current = true;
     setCompleting(true);
-    setShowManualBtn(false);
     console.log(`[KYC WebView] Completion triggered via: ${source}`);
     try {
       await aepsOnboardComplete({ status: "CALLBACK", fromCallback: true });
@@ -336,22 +324,6 @@ export default function KycWebViewScreen() {
           testID="kyc-webview"
         />
 
-        {/* Manual fallback button — shown 25s after load if not already completed */}
-        {showManualBtn && !completing && (
-          <View style={[styles.manualBtnContainer, { bottom: insets.bottom + 16 }]}>
-            <Text style={styles.manualBtnHint}>
-              PaySprint ka "Onboarding Completed" screen dikh raha hai?
-            </Text>
-            <Pressable
-              style={styles.manualBtn}
-              onPress={() => markKycCompleted("MANUAL_BUTTON")}
-              testID="kyc-manual-complete"
-            >
-              <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.manualBtnText}>Maine KYC Complete Kar Li</Text>
-            </Pressable>
-          </View>
-        )}
       </View>
     </View>
   );
@@ -464,41 +436,5 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
-  },
-  manualBtnContainer: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    alignItems: "center",
-    gap: 8,
-    zIndex: 15,
-  },
-  manualBtnHint: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    textAlign: "center",
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  manualBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.primary,
-    borderRadius: 14,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  manualBtnText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700",
   },
 });

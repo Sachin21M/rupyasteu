@@ -347,8 +347,8 @@ function simulateAepsResponse(endpoint: string, payload: Record<string, unknown>
       data: { ackno: `AEPS${Date.now()}` },
     };
   }
-  if (endpoint.includes("getmerchantkyc") || endpoint.includes("getonboardstatus")) {
-    return { status: true, response_code: 1, message: "Merchant KYC status", stages: "Completed" } as any;
+  if (endpoint.includes("dmt-casa")) {
+    return { status: true, response_code: 1, message: "Merchant found", is_casa: "1" } as any;
   }
   if (endpoint.includes("onboard")) {
     return {
@@ -376,54 +376,37 @@ export async function getAepsBankList(): Promise<AepsResponse> {
 }
 
 /**
- * Check merchant onboarding STAGES status directly from PaySprint.
- * Tries two endpoints in sequence; falls back gracefully if neither works.
- * Returns { stages: "Completed" | "Pending" | "" } — callers check
- * stages.toLowerCase() === "completed" without relying on redirecturl logic.
+ * Check merchant CASA/AEPS activation status via PaySprint's CASA endpoint.
+ * This is the CORRECT endpoint for detecting whether a merchant has completed
+ * onboarding. The old STAGES endpoints both returned HTTP 404.
+ *
+ * PaySprint /service/dmt-casa/merchant/index returns:
+ *   is_casa: "1" → fully activated ✅
+ *   is_casa: "2" → pending bank activation
+ *   is_casa: "0" → KYC not completed
  */
-export async function getMerchantOnboardingStatus(merchantCode: string): Promise<AepsResponse & { stages?: string }> {
+export async function checkMerchantCasaStatus(merchantCode: string): Promise<{ isCasaActive: boolean; is_casa: string; raw: any }> {
   const jwtTokenEnv = process.env.PAYSPRINT_JWT_TOKEN || "";
   if (!jwtTokenEnv) {
-    console.log("[AEPS SIMULATION] getMerchantOnboardingStatus: returning stages=Completed (simulation)");
-    return { status: true, response_code: 1, message: "Simulation", stages: "Completed" };
+    console.log("[AEPS SIMULATION] checkMerchantCasaStatus: returning is_casa=1 (simulation)");
+    return { isCasaActive: true, is_casa: "1", raw: { status: true, response_code: 1, message: "Simulation", is_casa: "1" } };
   }
 
-  function extractStages(result: any): string {
-    // PaySprint may return the STAGES field at top-level, inside data, or
-    // inside a nested merchant/detail object with various casings.
-    return (
-      result.stages ||
-      result.STAGES ||
-      result.data?.stages ||
-      result.data?.STAGES ||
-      result.data?.merchant?.stages ||
-      result.data?.details?.stages ||
-      ""
-    );
-  }
-
-  // Attempt 1: primary endpoint
-  const primary = await makeAepsRequest("/service/onboard/onboard/getmerchantkyc", {
+  const result = await makeAepsRequest("/service/dmt-casa/merchant/index", {
     merchantcode: merchantCode,
-  }) as AepsResponse & { stages?: string; data?: any };
+  }) as AepsResponse & { is_casa?: string; data?: any };
 
-  const primaryStages = extractStages(primary);
-  console.log(`[Stages-Check] PRIMARY endpoint merchant=${merchantCode} response_code=${primary.response_code} stages="${primaryStages}" msg="${primary.message}" full_response=${JSON.stringify(primary).substring(0, 800)}`);
+  // is_casa may appear at top-level or inside data
+  const isCasaRaw: string =
+    result.is_casa ||
+    result.data?.is_casa ||
+    "";
 
-  if (primaryStages) {
-    return { ...primary, stages: primaryStages };
-  }
+  const isCasaActive = isCasaRaw === "1";
 
-  // Attempt 2: fallback endpoint (used by some PaySprint partners / API versions)
-  const fallback = await makeAepsRequest("/service/onboard/merchant/getonboardstatus", {
-    merchantcode: merchantCode,
-  }) as AepsResponse & { stages?: string; data?: any };
+  console.log(`[CASA-Check] merchant=${merchantCode} response_code=${result.response_code} is_casa="${isCasaRaw}" casaActive=${isCasaActive} msg="${result.message}" full_response=${JSON.stringify(result).substring(0, 800)}`);
 
-  const fallbackStages = extractStages(fallback);
-  console.log(`[Stages-Check] FALLBACK endpoint merchant=${merchantCode} response_code=${fallback.response_code} stages="${fallbackStages}" msg="${fallback.message}" full_response=${JSON.stringify(fallback).substring(0, 800)}`);
-
-  // Return whichever attempt gave us a stages value; empty string if neither did
-  return { ...fallback, stages: fallbackStages };
+  return { isCasaActive, is_casa: isCasaRaw, raw: result };
 }
 
 export async function getOnboardingUrl(params: {

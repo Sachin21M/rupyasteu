@@ -1181,34 +1181,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser((req as any).userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      // Run both checks in parallel: URL-based check + STAGES-based check
-      const [verifyResult, stagesResult] = await Promise.all([
+      // Run both checks in parallel: URL-based check + CASA activation check
+      const [verifyResult, casaResult] = await Promise.all([
         aepsService.getOnboardingUrl({
           merchantCode: merchant.merchantCode,
           mobile: user.phone,
           isNew: false,
         }),
-        aepsService.getMerchantOnboardingStatus(merchant.merchantCode),
+        aepsService.checkMerchantCasaStatus(merchant.merchantCode),
       ]);
 
       const msg = (verifyResult.message || "").toLowerCase();
       const hasUrl = !!(verifyResult.redirecturl || verifyResult.data?.redirecturl);
 
-      // STAGES check: PaySprint dashboard shows STAGES=Completed when merchant has
-      // finished all onboarding form steps. This is the most reliable signal.
-      const stagesCompleted = (stagesResult.stages || "").toLowerCase() === "completed";
-
-      // response_code 2 = "already registered/completed" on PaySprint's side
-      // response_code 1 with no redirecturl = also completed (some PaySprint versions)
-      // response_code 0 + "already registered" + no URL = form done, eKYC activation pending
-      // stagesCompleted = STAGES field from PaySprint merchant details = "Completed"
+      // CASA check is the PRIMARY and most reliable signal:
+      // is_casa="1" means PaySprint has fully activated this merchant for AEPS.
+      // URL-based checks are kept as fallback for edge cases.
       const psCompleted =
-        stagesCompleted ||
+        casaResult.isCasaActive ||
         verifyResult.response_code === 2 ||
         (verifyResult.response_code === 1 && !hasUrl) ||
         (verifyResult.response_code === 0 && (msg.includes("already registered") || msg.includes("already exist")) && !hasUrl);
 
-      console.log(`[KYC-Status] merchant=${merchant.merchantCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" stages="${stagesResult.stages}" hasUrl=${hasUrl} psCompleted=${psCompleted}`);
+      console.log(`[KYC-Status] merchant=${merchant.merchantCode} ps_code=${verifyResult.response_code} msg="${verifyResult.message}" is_casa="${casaResult.is_casa}" casaActive=${casaResult.isCasaActive} hasUrl=${hasUrl} psCompleted=${psCompleted}`);
 
       // Only upgrade PENDING→COMPLETED, never downgrade COMPLETED→PENDING
       if (psCompleted && merchant.kycStatus !== "COMPLETED") {
@@ -1227,7 +1222,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dailyAuthenticated: dailyAuth?.authenticated || false,
         redirectUrl: freshUrl || undefined,
         sessionExpired: !psCompleted && !freshUrl,
-        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message, stages: stagesResult.stages },
+        paySprint: { response_code: verifyResult.response_code, message: verifyResult.message, is_casa: casaResult.is_casa },
       });
     } catch (error) {
       console.error("KYC status check error:", error);
@@ -1307,22 +1302,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) return res.status(404).json({ error: "User not found" });
       const mCode = merchantCode || existing.merchantCode;
 
-      // Run both checks in parallel
-      const [verifyResult, stagesResult] = await Promise.all([
+      // Run both checks in parallel: URL-based check + CASA activation check
+      const [verifyResult, casaResult] = await Promise.all([
         aepsService.getOnboardingUrl({ merchantCode: mCode, mobile: user.phone }),
-        aepsService.getMerchantOnboardingStatus(mCode),
+        aepsService.checkMerchantCasaStatus(mCode),
       ]);
 
-      const stagesCompleted = (stagesResult.stages || "").toLowerCase() === "completed";
-      // response_code 2 = already registered on PaySprint (COMPLETED)
-      // response_code 1 with no redirecturl = also completed on some PaySprint versions
-      // stagesCompleted = STAGES field = "Completed" from merchant details API
+      // CASA check is the PRIMARY signal — is_casa="1" means fully activated
       const psCompleted =
-        stagesCompleted ||
+        casaResult.isCasaActive ||
         verifyResult.response_code === 2 ||
         (verifyResult.response_code === 1 && !(verifyResult.redirecturl || verifyResult.data?.redirecturl));
 
-      console.log(`[Onboard-Complete] merchant=${mCode} ps_code=${verifyResult.response_code} stages="${stagesResult.stages}" psCompleted=${psCompleted}`);
+      console.log(`[Onboard-Complete] merchant=${mCode} ps_code=${verifyResult.response_code} is_casa="${casaResult.is_casa}" casaActive=${casaResult.isCasaActive} psCompleted=${psCompleted}`);
 
       if (psCompleted) {
         const updates: Record<string, string> = { kycStatus: "COMPLETED" };
